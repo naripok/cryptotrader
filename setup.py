@@ -1,5 +1,5 @@
 try:
-	from setuptools import setup
+	from setuptools import setup, find_packages
 except ImportError:
 	from distutils.core import setup
 
@@ -9,9 +9,9 @@ config = {
 	'url': "www.github.com/naripok",
 	'download_url': "www.github.com/naripok",
 	'author_email': "fernando.canteruccio@gmail.com, jose.mendes13@hotmail.com",
-	'version': "0.1",
+	'version': "0.1.0a1",
 	'install_requires': [
-                         'pytest,'
+                         'pytest',
                          'hypothesis',
                          'numpy',
                          'pandas',
@@ -19,13 +19,14 @@ config = {
                          'matplotlib',
                          'bokeh',
                          'chainer',
-                         'chainerrl'
-                         'tensorflow'
+                         'chainerrl',
+                         'tensorflow',
                          'keras',
-                         'kerasrl',
-                         'empyrical'
+                         'keras-rl',
+                         'empyrical',
+                         'bitstampclient'
                          ],
-	'packages': ['cryptotrader'],
+	'packages': find_packages(),
 	'scripts': [],
 	'name': "cryptotrader"
 	}
