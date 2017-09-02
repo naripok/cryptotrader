@@ -87,7 +87,8 @@ fabric.properties
 ehthumbs.db
 Thumbs.db
 
-notebooks
+/notebooks/*
 .ipynb_checkpoints
 .idea/
 .ipynb_checkpoints/
+/historical_data/*
