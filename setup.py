@@ -9,7 +9,7 @@ config = {
 	'url': "www.github.com/naripok",
 	'download_url': "www.github.com/naripok",
 	'author_email': "fernando.canteruccio@gmail.com, jose.mendes13@hotmail.com",
-	'version': "0.1.0a1",
+	'version': "0.1.0a4",
 	'install_requires': [
                          'pytest',
                          'hypothesis',

@@ -1,5 +1,6 @@
 from __future__ import division
 import numpy as np
+from .utils import array_normalize
 np.random.seed(42)
 
 
@@ -39,6 +40,7 @@ class GaussianWhiteNoiseProcess(AnnealedGaussianProcess):
         self.n_steps += 1
         return sample
 
+
 # Based on http://math.stackexchange.com/questions/1287634/implementing-ornstein-uhlenbeck-in-matlab
 class OrnsteinUhlenbeckProcess(AnnealedGaussianProcess):
     def __init__(self, theta, mu=0., sigma=1., dt=1e-2, x0=None, size=1, sigma_min=None, n_steps_annealing=1000):
@@ -68,7 +70,7 @@ class ConstrainedOrnsteinUhlenbeckProcess(OrnsteinUhlenbeckProcess):
                  a_min=-np.inf, a_max=np.inf, max_norm=None):
         self.constrains = (a_min, a_max)
         self.max_norm = max_norm
-        super().__init__(theta, mu=0., sigma=1., dt=1e-2, x0=None, size=1, sigma_min=None, n_steps_annealing=1000)
+        super().__init__(theta, mu=0., sigma=1., dt=1e-2, x0=None, size=size, sigma_min=None, n_steps_annealing=1000)
 
     def sample(self, observation=None):
         x = self.x_prev + self.theta * (self.mu - self.x_prev) * self.dt + self.current_sigma * np.sqrt(

@@ -101,6 +101,86 @@ class APrioriAgent(Agent):
                                                                                                       ))
 
 
+class DummyTrader(APrioriAgent):
+    """
+    Dummytrader that sample actions from a random process
+    """
+    def __init__(self, env, random_process=None, activation='softmax'):
+        """
+        Initialization method
+        :param env: Apocalipse driver instance
+        :param random_process: Random process used to sample actions from
+        :param activation: Portifolio activation function
+        """
+        super().__init__(env)
+
+        self.random_process = random_process
+        self.activation = activation
+        self.n_pairs = env.action_space.low.shape[0]
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        if self.random_process:
+            if self.activation == 'softmax':
+                return array_softmax(self.random_process.sample())
+            else:
+                return np.array(self.random_process.sample())
+        else:
+            if self.activation == 'softmax':
+                return array_softmax(self.env.action_space.sample())
+            else:
+                return self.env.action_space.sample()
+
+    def test(self, obs_steps=5, nb_steps=None, verbose=False, render=False):
+        """
+        Test agent on environment
+        """
+        try:
+            self.env.set_online(False)
+            self.env._reset_status()
+            obs = self.env.reset()
+            t0 = 0
+            step = 0
+            episode_reward = 0
+            while True:
+                try:
+                    t0 += time()
+                    action = self.act(obs)
+                    obs, reward, _, status = self.env.step(action)
+                    episode_reward += pd.to_numeric(reward)
+                    step += 1
+                    if render:
+                        self.env.render()
+
+                    if verbose:
+                        print(">> step {0}/{1}, {2} % done, ETC: {3}  ".format(
+                            step,
+                            self.env.df.shape[0] - obs_steps,
+                            int(100 * step / (self.env.df.shape[0] - obs_steps)),
+                            str(pd.to_timedelta(t0 * ((self.env.df.shape[0] - obs_steps) - step) / step))
+                        ), end="\r", flush=True)
+
+                    if status['OOD'] or step == nb_steps:
+                        return episode_reward
+                        break
+                    if status['Error']:
+                        e = status['Error']
+                        print("Env error:",
+                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        break
+                except Exception as e:
+                    print("Model Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    break
+        except KeyboardInterrupt:
+            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
+                                                                                                     nb_steps,
+                                                                                                     int(
+                                                                                                         100 * step / nb_steps)))
+
+
 class MomentumTrader(APrioriAgent):
     def __init__(self, env, ma_span=[7, 100], rsi_span=[14], rsi_threshold=[20, 80]):
         super().__init__(env)
@@ -244,137 +324,3 @@ class MomentumTrader(APrioriAgent):
         self.ma_span = [hp['ma1'],hp['ma2']]
         self.rsi_span = [hp['rsis']]
         self.rsi_threshold = [hp['rsit1'], hp['rsit2']]
-
-
-class DummyTrader(APrioriAgent):
-    def __init__(self, env, random_process=None, activation='softmax'):
-        super().__init__(env)
-
-        self.random_process = random_process
-        self.activation = activation
-
-    def act(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        if self.random_process:
-            if self.activation == 'softmax':
-                return array_softmax(self.random_process.sample())
-            else:
-                return self.random_process.sample()
-        else:
-            return self.env.action_space.sample()
-
-    def test(self, obs_steps=5, nb_steps=None, verbose=False, render=False):
-        """
-        Test agent on environment
-        """
-        try:
-            self.env.set_online(False)
-            self.env._reset_status()
-            obs = self.env.reset()
-            t0 = 0
-            step = 0
-            episode_reward = 0
-            while True:
-                try:
-                    t0 += time()
-                    action = self.act(obs)
-                    obs, reward, _, status = self.env.step(action)
-                    episode_reward += pd.to_numeric(reward)
-                    step += 1
-                    if render:
-                        self.env.render()
-
-                    if verbose:
-                        print(">> step {0}/{1}, {2} % done, ETC: {3}  ".format(
-                            step,
-                            self.env.df.shape[0] - obs_steps,
-                            int(100 * step / (self.env.df.shape[0] - obs_steps)),
-                            str(pd.to_timedelta(t0 * ((self.env.df.shape[0] - obs_steps) - step) / step))
-                        ), end="\r", flush=True)
-
-                    if status['OOD'] or step == nb_steps:
-                        return episode_reward
-                        break
-                    if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                        break
-                except Exception as e:
-                    print("Model Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
-        except KeyboardInterrupt:
-            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
-                                                                                                     nb_steps,
-                                                                                                     int(
-                                                                                                         100 * step / nb_steps)))
-
-
-#
-# class RandomTrader(ConstrainedOrnsteinUhlenbeckProcess):
-#     """
-#     Agent that sample portifolios from a Constrained Ornstein Uhlenbeck random process
-#     """
-#     def __init__(self, size, env=None, theta=.5, mu=0., sigma=1., dt=1e-2, x0=None, sigma_min=None,
-#                  n_steps_annealing=1000, a_min=-np.inf, a_max=np.inf, max_norm=None):
-#         super().__init__(theta=theta, mu=mu, sigma=sigma, dt=dt, x0=None, size=size-1, sigma_min=sigma_min,
-#                          n_steps_annealing=n_steps_annealing, a_min=a_min, a_max=a_max, max_norm=max_norm)
-#
-#         self.env = env
-#
-#     def sample(self, observation=None):
-#         return array_softmax(np.concatenate((super().sample(), np.ones(1))))
-#
-#     def predict(self, observation=None):
-#         return self.sample(observation)
-#
-#     def test(self, obs_steps=5, nb_steps=None, verbose=False, render=False):
-#         """
-#         Test agent on environment
-#         """
-#         try:
-#             self.env.set_online(False)
-#             self.env._reset_status()
-#             obs = self.env.reset()
-#             t0 = 0
-#             step = 0
-#             episode_reward = 0
-#             while True:
-#                 try:
-#                     t0 += time()
-#                     action = self.predict(obs)
-#                     obs, reward, _, status = self.env.step(action)
-#                     episode_reward += pd.to_numeric(reward)
-#                     step += 1
-#                     if render:
-#                         self.env.render()
-#
-#                     if verbose:
-#                         print(">> step {0}/{1}, {2} % done, ETC: {3}  ".format(
-#                             step,
-#                             self.env.df.shape[0] - obs_steps,
-#                             int(100 * step / (self.env.df.shape[0] - obs_steps)),
-#                             str(pd.to_timedelta(t0 * ((self.env.df.shape[0] - obs_steps) - step) / step))
-#                         ), end="\r", flush=True)
-#
-#                     if status['OOD'] or step == nb_steps:
-#                         return episode_reward
-#
-#                     if status['Error']:
-#                         e = status['Error']
-#                         print("Env error:",
-#                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-#                         break
-#                 except Exception as e:
-#                     print("Model Error:",
-#                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-#                     break
-#         except KeyboardInterrupt:
-#             print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
-#                                                                                                      nb_steps,
-#                                                                                                      int(
-#                                                                                                          100 * step / nb_steps)))
-
