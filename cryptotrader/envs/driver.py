@@ -10,7 +10,7 @@ import os
 import numpy as np
 import pandas as pd
 import empyrical as ec
-from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP
+from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP, Decimal
 from ..utils import convert_to, Logger, get_historical
 import pymongo as pm
 from bitstamp.client import Trading, BitstampError

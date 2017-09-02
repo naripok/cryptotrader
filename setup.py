@@ -23,6 +23,7 @@ config = {
                          'tensorflow',
                          'keras',
                          'keras-rl',
+                         'ta-lib',
                          'empyrical',
                          'bitstampclient'
                          ],

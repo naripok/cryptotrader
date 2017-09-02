@@ -6,7 +6,7 @@ from time import time
 import numpy as np
 
 
-class ArenaAPrioriAgent(Agent):
+class APrioriAgent(Agent):
     """
     Cryptocurrency trading abstract agent
     Use this class with the Arena environment to deploy models directly into the market
@@ -101,7 +101,7 @@ class ArenaAPrioriAgent(Agent):
                                                                                                       ))
 
 
-class MomentumTrader(ArenaAPrioriAgent):
+class MomentumTrader(APrioriAgent):
     def __init__(self, env, ma_span=[7, 100], rsi_span=[14], rsi_threshold=[20, 80]):
         super().__init__(env)
         self.ma_span = ma_span
@@ -246,7 +246,7 @@ class MomentumTrader(ArenaAPrioriAgent):
         self.rsi_threshold = [hp['rsit1'], hp['rsit2']]
 
 
-class DummyTrader(ArenaAPrioriAgent):
+class DummyTrader(APrioriAgent):
     def __init__(self, env, random_process=None, activation='softmax'):
         super().__init__(env)
 
