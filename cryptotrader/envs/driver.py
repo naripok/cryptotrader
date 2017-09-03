@@ -7,25 +7,23 @@ date: 17/07/2017
 
 # import gc
 import os
-import numpy as np
-import pandas as pd
-import empyrical as ec
+import smtplib
+from datetime import datetime, timedelta
 from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP, Decimal
-from ..utils import convert_to, Logger, get_historical
+from time import time, sleep
+
+import empyrical as ec
+import pandas as pd
 import pymongo as pm
-from bitstamp.client import Trading, BitstampError
-
-from gym import spaces
-from gym.utils import seeding
-
-from bokeh.plotting import figure, show
+from bitstamp.client import Trading
 from bokeh.layouts import column
 from bokeh.palettes import inferno
+from bokeh.plotting import figure, show
 
-from datetime import datetime, timedelta
-from time import time, sleep
-import smtplib
-
+from .. import error
+from .. import seeding
+from ..spaces import *
+from ..utils import convert_to, Logger, get_historical
 
 # Decimal precision
 getcontext().prec = 26
@@ -247,7 +245,7 @@ class Apocalipse(object):
                                                          self.name + " timed out order canceled: %s" % (
                                                          str(response)))
 
-                            except BitstampError as e:
+                            except error.BitstampError as e:
                                 sleep(2)
                                 if self._order_done(response):
                                     executed = True
@@ -589,7 +587,7 @@ class Apocalipse(object):
 
     def set_action_space(self):
         # Action space
-        self.action_space = spaces.Box(0., 1., len(self._get_df_symbols()))
+        self.action_space = Box(0., 1., len(self._get_df_symbols()))
         self.logger.info(Apocalipse.set_action_space, "Setting environment with %d symbols." % (len(self._get_df_symbols())))
 
     def set_observation_space(self):
@@ -597,13 +595,13 @@ class Apocalipse(object):
         obs_space = []
         # OPEN, HIGH, LOW, CLOSE
         for _ in range(4):
-            obs_space.append(spaces.Box(0.0, 1e9, 1))
+            obs_space.append(Box(0.0, 1e9, 1))
         # VOLUME
-        obs_space.append(spaces.Box(0.0, 1e12, 1))
+        obs_space.append(Box(0.0, 1e12, 1))
         # POSITION
-        obs_space.append(spaces.Box(0.0, 1.0, 1))
+        obs_space.append(Box(0.0, 1.0, 1))
 
-        self.observation_space = spaces.Tuple(obs_space)
+        self.observation_space = Tuple(obs_space)
 
     def set_obs_steps(self, steps):
         assert isinstance(steps, int) and steps >= 3
@@ -2113,7 +2111,7 @@ class Apocalipse(object):
         """
 
 
-        self.results = self.df.iloc[self.offset + 1:-window].copy()
+        self.results = self.df.iloc[self.offset + 1:-window - self.offset].copy()
 
         self.results['portval'] = convert_to.decimal(np.nan)
         self.results['benchmark'] = convert_to.decimal(np.nan)
