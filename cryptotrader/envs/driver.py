@@ -284,30 +284,28 @@ class Apocalipse(object):
 
     # TODO: \/ ################ REWORKING NOW ###################### \/
 
-    def _take_online_step(self, action, timestamp, timeout):
-
-
-
-        order = self._parse_order(action, symbol)
-
-        if order and isinstance(order, tuple):
-            # Send order to exchange
-            response = self._place_order(*order, timeout)
-
-            # Update variables with new exchange state
-            self._set_online_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
-            self._set_online_fiat(self._get_exchange_fiat(symbol),  timestamp)
-        else:
-
-            response = False
-            self._set_online_crypto(self._get_online_crypto(symbol), symbol, timestamp)
-            self._set_online_fiat(self._get_online_fiat(symbol), timestamp)
-
-        # TODO: VALIDATE
-        # Update online position
-        self._set_online_posit(self._get_online_posit(symbol), symbol, timestamp)
-
-        return response
+    # def _rebalance_online_portifolio(self, action, timestamp, timeout):
+    #
+    #     order = self._parse_order(action, symbol)
+    #
+    #     if order and isinstance(order, tuple):
+    #         # Send order to exchange
+    #         response = self._place_order(*order, timeout)
+    #
+    #         # Update variables with new exchange state
+    #         self._set_online_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
+    #         self._set_online_fiat(self._get_exchange_fiat(symbol),  timestamp)
+    #     else:
+    #
+    #         response = False
+    #         self._set_online_crypto(self._get_online_crypto(symbol), symbol, timestamp)
+    #         self._set_online_fiat(self._get_online_fiat(symbol), timestamp)
+    #
+    #     # TODO: VALIDATE
+    #     # Update online position
+    #     self._set_online_posit(self._get_online_posit(symbol), symbol, timestamp)
+    #
+    #     return response
 
 
     ## TODO: \/ ############### REWORKED, VALIDATE ##################\/
@@ -1587,7 +1585,7 @@ class Apocalipse(object):
             ## ONLINE STEP
             if self.online:
                 # Parse order for exchange action
-                done = self._take_online_step(action, timestamp, timeout)
+                done = self._rebalance_online_portifolio(action, timestamp, timeout)
                 self.step_idx = self.df.shape[0] - 1
                 new_obs = self.get_obs_all()
             else:
