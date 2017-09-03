@@ -22,6 +22,7 @@ from bokeh.plotting import figure, show
 
 from .. import error
 from .. import seeding
+from ..core import Env
 from ..spaces import *
 from ..utils import convert_to, Logger, get_historical
 
@@ -31,7 +32,7 @@ getcontext().prec = 26
 # Debug flag
 debug = True
 
-class Apocalipse(object):
+class Apocalipse(Env):
     '''
     The end and the beginning, the revelation of a new life
     '''
