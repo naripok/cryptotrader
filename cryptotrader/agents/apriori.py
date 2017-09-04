@@ -1,6 +1,7 @@
 from time import time
 
 import optunity as ot
+import pandas as pd
 import talib as tl
 
 from ..core import Agent

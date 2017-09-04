@@ -1,3 +1,5 @@
+import gc
+
 import numpy as np
 import pandas as pd
 
@@ -23,35 +25,35 @@ class SinusoidalProcess(object):
 
 
 def generate_signal(period=1000):
-    price = [np.ones(1) * 3000]
+    price = [np.ones(1) * 5000]
     volume = [np.zeros(1) + .1]
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=1.5,
                                                                 mu=1.,
                                                                 sigma=50.0,
-                                                                n_steps_annealing=30000,
+                                                                n_steps_annealing=70000,
                                                                 sigma_min=40.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=5.5,
                                                                 mu=1.3,
                                                                 sigma=70.0,
-                                                                n_steps_annealing=10000,
+                                                                n_steps_annealing=100000,
                                                                 sigma_min=20.1,
                                                                 )
     volume_process = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                          theta=0.,
                                                          mu=.0,
                                                          sigma=.1,
-                                                         n_steps_annealing=10000,
+                                                         n_steps_annealing=100000,
                                                          sigma_min=0.1,
                                                          a_min=0.1,
                                                          )
 
     price_process = SinusoidalProcess(period, 1, 100)
 
-    for i in range(19999):
+    for i in range(49999):
         price.append(price[-1] + price_process.sample() * 2  + price_noise_process_1.sample() * 2 + \
                      price_noise_process_2.sample() * 2)
         volume.append(volume[-1] + volume_process.sample() / volume[-1])
@@ -60,7 +62,7 @@ def generate_signal(period=1000):
     return price.reshape([-1, 1]), volume.reshape([-1, 1])
 
 
-def make_toy_dfs(n_assets):
+def make_toy_dfs(n_assets, freq=30):
     prices = []
     volumes = []
     for i in range(n_assets):
@@ -69,10 +71,10 @@ def make_toy_dfs(n_assets):
         volumes.append(data[1])
 
     dfs = []
-    index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-20000:]
+    index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-50000:]
     for i in range(n_assets):
         data = np.hstack([prices[i].reshape([-1, 1]), volumes[i].reshape([-1, 1])])
-        dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=30))
+        dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     for df in dfs:
         df.plot(figsize=(18, 3))
@@ -132,7 +134,7 @@ def make_env(test, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypt
     # Get data
     gc.collect()
 
-    dfs = make_toy_dfs(3)
+    dfs = make_toy_dfs(3, freq)
 
     ## ENVIRONMENT INITIALIZATION
     env = Apocalipse(name='toy_env')

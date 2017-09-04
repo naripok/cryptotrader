@@ -71,30 +71,30 @@ def array_softmax(x, SAFETY=2.0):
 
 
 def array_normalize(x, SAFETY=2.0):
-    # out = convert_to.decimal(x)
-    # print(out)
-    # if out.sum() == convert_to.decimal('0.0'):
-    #     out = out / (out.sum() + convert_to.decimal('1e-12'))
-    # else:
-    #     out = out / out.sum()
-    #
-    # if out.sum() > convert_to.decimal('1.0'):
-    #     out[-1] += convert_to.decimal('1.0') - out.sum()
-    # if out.sum() < convert_to.decimal('1.0'):
-    #     out[-1] += convert_to.decimal('1.0') - out.sum()
-    # print(out)
-    # return np.float32(out)
+    out = convert_to.decimal(x)
 
-    x = np.array(x, dtype=np.float64)
-    mrn = np.finfo(x.dtype).max  # largest representable number
-    thr = np.log(mrn / x.size) - SAFETY
-    amx = x.max()
-    if (amx > thr):
-        b = x - (amx - thr)
-        return b / (b.sum() + 1e-12)
+    if out.sum() == convert_to.decimal('0.0'):
+        out = out / (out.sum() + convert_to.decimal('1e-12'))
     else:
-        b = x
-        return b / (b.sum() + 1e-12)
+        out = out / out.sum()
+
+    if out.sum() > convert_to.decimal('1.0'):
+        out[-1] += convert_to.decimal('1.0') - out.sum()
+    if out.sum() < convert_to.decimal('1.0'):
+        out[-1] += convert_to.decimal('1.0') - out.sum()
+
+    return np.float32(out)
+    #
+    # x = np.array(x, dtype=np.float64)
+    # mrn = np.finfo(x.dtype).max  # largest representable number
+    # thr = np.log(mrn / x.size) - SAFETY
+    # amx = x.max()
+    # if (amx > thr):
+    #     b = x - (amx - thr)
+    #     return b / (b.sum() + 1e-12)
+    # else:
+    #     b = x
+    #     return b / (b.sum() + 1e-12)
 
 
 # Helper functions and classes
