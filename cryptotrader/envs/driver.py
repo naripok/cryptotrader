@@ -2150,7 +2150,7 @@ class Apocalipse(Env):
         """
 
 
-        self.results = self.df.iloc[self.offset + 1:-window - self.offset].copy()
+        self.results = self.df.iloc[self.offset + 1:-window].copy()
 
         self.results['portval'] = convert_to.decimal(np.nan)
         self.results['benchmark'] = convert_to.decimal(np.nan)

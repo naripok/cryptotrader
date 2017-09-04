@@ -28,6 +28,65 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
+             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
+        """
+        Test agent on environment
+        """
+        try:
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            env.set_online(False)
+            env._reset_status()
+            obs = env.reset(reset_funds=True, reset_results=True)
+            t0 = 0
+            step = 0
+            episode_reward = 0
+
+            while True:
+                try:
+                    t0 += time()
+
+                    action = self.act(obs)
+                    obs, reward, _, status = env.step(action)
+                    episode_reward += np.float32(reward)
+
+                    step += 1
+
+                    if visualize:
+                        env.render()
+
+                    if verbose:
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
+                            step,
+                            nb_max_episode_steps - env.obs_steps,
+                            int(100 * step / (nb_max_episode_steps - env.obs_steps)),
+                            episode_reward,
+                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - step) / step))
+                        ), end="\r", flush=True)
+
+                    if status['OOD'] or step == nb_max_episode_steps:
+                        return episode_reward
+
+                    if status['Error']:
+                        e = status['Error']
+                        print("Env error:",
+                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        break
+                except Exception as e:
+                    print("Model Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    break
+
+        except TypeError:
+            print("You must fit the model or provide indicator parameters in order to test.")
+
+        except KeyboardInterrupt:
+            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
+                                                                             nb_max_episode_steps,
+                                                                             int(100 * step / nb_max_episode_steps)))
+
+
     def trade(self, env, freq, obs_steps, timeout, verbose=False, render=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
@@ -122,53 +181,6 @@ class DummyTrader(APrioriAgent):
             else:
                 return np.random.random(obs.columns.levels[0].shape[0])
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
-             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
-        """
-        Test agent on environment
-        """
-        try:
-            env.set_online(False)
-            env._reset_status()
-            obs = env.reset()
-            t0 = 0
-            step = 0
-            episode_reward = 0
-            while True:
-                try:
-                    t0 += time()
-                    action = self.act(obs)
-                    obs, reward, _, status = env.step(action)
-                    episode_reward += np.float32(reward)
-                    step += 1
-                    if visualize:
-                        env.render()
-
-                    if verbose:
-                        print(">> step {0}/{1}, {2} % done, ETC: {3}  ".format(
-                            step,
-                            env.df.shape[0] - env.obs_steps,
-                            int(100 * step / (env.df.shape[0] - env.obs_steps)),
-                            str(pd.to_timedelta(t0 * ((env.df.shape[0] - env.obs_steps) - step) / step))
-                        ), end="\r", flush=True)
-
-                    if status['OOD'] or step == nb_max_episode_steps:
-                        return episode_reward
-
-                    if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                        break
-                except Exception as e:
-                    print("Model Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
-        except KeyboardInterrupt:
-            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
-                                                                             nb_max_episode_steps,
-                                                                             int(100 * step / nb_max_episode_steps)))
-
 
 class MomentumTrader(APrioriAgent):
     def __init__(self):
@@ -182,33 +194,33 @@ class MomentumTrader(APrioriAgent):
         """
         Performs a single step on the environment
         """
-        # try:
-        position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-            df = obs[symbol].astype(np.float64).copy()
-            df = self.get_ma(df, span=self.ma_span, kama=True)
-            df['%d_rsi' % self.rsi_span[0]] = tl.RSI(df.close.values, timeperiod=self.rsi_span[0])
+        try:
+            position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
+                df = obs[symbol].astype(np.float64).copy()
+                df = self.get_ma(df, span=self.ma_span, kama=True)
+                # df['%d_rsi' % self.rsi_span[0]] = tl.RSI(df.close.values, timeperiod=self.rsi_span[0])
 
-            # Get action
-            if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1]:# \
-                    # and df['%d_rsi' % self.rsi_span[0]].iat[-1] > self.rsi_threshold[0]:
-                action = np.zeros(1)
+                # Get action
+                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1]:# \
+                        # and df['%d_rsi' % self.rsi_span[0]].iat[-1] > self.rsi_threshold[0]:
+                    action = np.zeros(1)
 
-            elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1]:# \
-                    # and df['%d_rsi' % self.rsi_span[0]].iat[-1] < self.rsi_threshold[1]:
-                action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
+                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1]:# \
+                        # and df['%d_rsi' % self.rsi_span[0]].iat[-1] < self.rsi_threshold[1]:
+                    action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
 
-            else:
-                action = np.float64(df['position'].iat[-1])
+                else:
+                    action = np.float64(df['position'].iat[-1])
 
-            position[key] = action
+                position[key] = action
 
-        position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
 
-        return array_normalize(position)
+            return array_normalize(position)
 
-        # except TypeError:
-        #     print("You must fit the model or provide indicator parameters in order for the model to act.")
+        except TypeError:
+            print("You must fit the model or provide indicator parameters in order for the model to act.")
 
     def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -251,7 +263,7 @@ class MomentumTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
                                               ma1=[3, int(env.obs_steps / 2)],
-                                              ma2=[int(env.obs_steps / 2), env.obs_steps],
+                                              ma2=[int(env.obs_steps / 10), env.obs_steps],
                                               rsis=[3, env.obs_steps],
                                               rsit1=[3, 50],
                                               rsit2=[50, 97]
@@ -266,64 +278,6 @@ class MomentumTrader(APrioriAgent):
 
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user.")
-
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
-             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
-        """
-        Test agent on environment
-        """
-        try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
-            env.set_online(False)
-            env._reset_status()
-            obs = env.reset(reset_funds=True, reset_results=True)
-            t0 = 0
-            step = 0
-            episode_reward = 0
-
-            while True:
-                try:
-                    t0 += time()
-
-                    action = self.act(obs)
-                    obs, reward, _, status = env.step(action)
-                    episode_reward += np.float32(reward)
-
-                    step += 1
-
-                    if visualize:
-                        env.render()
-
-                    if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
-                            step,
-                            nb_max_episode_steps - env.obs_steps,
-                            int(100 * step / (nb_max_episode_steps - env.obs_steps)),
-                            episode_reward,
-                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - step) / step))
-                        ), end="\r", flush=True)
-
-                    if status['OOD'] or step == nb_max_episode_steps:
-                        return episode_reward
-
-                    if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                        break
-                except Exception as e:
-                    print("Model Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
-
-        except TypeError:
-            print("You must fit the model or provide indicator parameters in order to test.")
-
-        except KeyboardInterrupt:
-            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
-                                                                             nb_max_episode_steps,
-                                                                             int(100 * step / nb_max_episode_steps)))
 
     # GET INDICATORS FUNCTIONS
     @staticmethod

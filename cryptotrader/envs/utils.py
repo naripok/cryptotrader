@@ -29,33 +29,61 @@ def generate_signal(period=1000):
     volume = [np.zeros(1) + .1]
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
-                                                                theta=1.0,
-                                                                mu=.5,
-                                                                sigma=30.0,
-                                                                n_steps_annealing=70000,
-                                                                sigma_min=10.0,
+                                                                theta=15.0,
+                                                                mu=2,
+                                                                sigma=100.0,
+                                                                n_steps_annealing=5 * 80000,
+                                                                sigma_min=50.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
-                                                                theta=5.5,
-                                                                mu=-0.1,
-                                                                sigma=10.0,
-                                                                n_steps_annealing=100000,
+                                                                theta=10.0,
+                                                                mu=-1.0,
+                                                                sigma=70.0,
+                                                                n_steps_annealing=4 * 80000,
+                                                                sigma_min=30.0,
+                                                                )
+    price_noise_process_3 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
+                                                                theta=5.0,
+                                                                mu=0.1,
+                                                                sigma=20.0,
+                                                                n_steps_annealing=3 * 80000,
                                                                 sigma_min=10.0,
                                                                 )
+    price_noise_process_4 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
+                                                                theta=1.0,
+                                                                mu=-0.1,
+                                                                sigma=10.0,
+                                                                n_steps_annealing=80000,
+                                                                sigma_min=10.0,
+                                                                )
+    price_noise_process_5 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
+                                                                theta=0.5,
+                                                                mu=0.0,
+                                                                sigma=3.0,
+                                                                n_steps_annealing=80000,
+                                                                sigma_min=3.0,
+                                                                )
+
     volume_process = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
-                                                         theta=0.3,
-                                                         mu=0.001,
+                                                         theta=0.5,
+                                                         mu=0.0001,
                                                          sigma=1.,
                                                          n_steps_annealing=100000,
                                                          sigma_min=0.1,
-                                                         a_min=0.0001,
+                                                         a_min=0.000001,
                                                          )
 
     price_process = SinusoidalProcess(period, 1, 100)
 
     for i in range(79999):
-        price.append(price[-1] + price_process.sample() * 1  + price_noise_process_1.sample() * 2 + \
-                     price_noise_process_2.sample() * 1)
+        weights = np.random.random(6)
+        price.append(price[-1] + \
+                     price_process.sample() * weights[0]  +\
+                     price_noise_process_1.sample() * weights[1] + \
+                     price_noise_process_2.sample() * weights[2] + \
+                     price_noise_process_3.sample() * weights[3] + \
+                     price_noise_process_4.sample() * weights[4] + \
+                     price_noise_process_5.sample() * weights[5])
         volume.append(volume[-1] + volume_process.sample() / volume[-1])
     price = np.clip(np.array(price).reshape([-1, 1]), a_min=0.0, a_max=np.inf) + 1
     volume = np.array(volume)
@@ -66,7 +94,7 @@ def make_toy_dfs(n_assets, freq=30):
     prices = []
     volumes = []
     for i in range(n_assets):
-        data = generate_signal(800 + 133 * i)
+        data = generate_signal(1500 + 133 * i)
         prices.append(data[0])
         volumes.append(data[1])
 
