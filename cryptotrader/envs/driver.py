@@ -882,7 +882,7 @@ class Apocalipse(Env):
 
     def _get_crypto(self, symbol):
         assert self.crypto[symbol] >= Decimal('0.0')
-        assert symbol in self._get_df_symbols(no_fiat=True)
+        # assert symbol in self._get_df_symbols(no_fiat=True) # Took out for sp
         return self.crypto[symbol]
 
     def _get_init_fiat(self):

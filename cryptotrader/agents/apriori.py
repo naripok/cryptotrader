@@ -17,8 +17,7 @@ class APrioriAgent(Agent):
     model: a instance of a sklearn/keras like model, with train and test methods
     """
 
-    def __init__(self, env):
-        self.env = env
+    def __init__(self):
         super().__init__()
 
     def act(self, obs):
@@ -33,7 +32,7 @@ class APrioriAgent(Agent):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
-        self.env._reset_status()
+        env._reset_status()
 
         # Get initial obs
         obs = env._get_obs(obs_steps, freq)
@@ -56,7 +55,7 @@ class APrioriAgent(Agent):
                         actions += 1
 
                     if render:
-                        self.env.render()
+                        env.render()
 
                     if verbose:
                         print(
@@ -96,18 +95,17 @@ class DummyTrader(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
     """
-    def __init__(self, env, random_process=None, activation='softmax'):
+    def __init__(self, random_process=None, activation='softmax'):
         """
         Initialization method
         :param env: Apocalipse driver instance
         :param random_process: Random process used to sample actions from
         :param activation: Portifolio activation function
         """
-        super().__init__(env)
+        super().__init__()
 
         self.random_process = random_process
         self.activation = activation
-        self.n_pairs = env.action_space.low.shape[0]
 
     def act(self, obs):
         """
@@ -120,9 +118,9 @@ class DummyTrader(APrioriAgent):
                 return np.array(self.random_process.sample())
         else:
             if self.activation == 'softmax':
-                return array_softmax(self.env.action_space.sample())
+                return array_softmax(np.random.random(obs.columns.levels[0].shape[0]))
             else:
-                return self.env.action_space.sample()
+                return np.random.random(obs.columns.levels[0].shape[0])
 
     def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
@@ -130,9 +128,9 @@ class DummyTrader(APrioriAgent):
         Test agent on environment
         """
         try:
-            self.env.set_online(False)
-            self.env._reset_status()
-            obs = self.env.reset()
+            env.set_online(False)
+            env._reset_status()
+            obs = env.reset()
             t0 = 0
             step = 0
             episode_reward = 0
@@ -140,18 +138,18 @@ class DummyTrader(APrioriAgent):
                 try:
                     t0 += time()
                     action = self.act(obs)
-                    obs, reward, _, status = self.env.step(action)
+                    obs, reward, _, status = env.step(action)
                     episode_reward += np.float32(reward)
                     step += 1
-                    if render:
-                        self.env.render()
+                    if visualize:
+                        env.render()
 
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, ETC: {3}  ".format(
                             step,
-                            self.env.df.shape[0] - env.obs_steps,
-                            int(100 * step / (self.env.df.shape[0] - env.obs_steps)),
-                            str(pd.to_timedelta(t0 * ((self.env.df.shape[0] - env.obs_steps) - step) / step))
+                            env.df.shape[0] - env.obs_steps,
+                            int(100 * step / (env.df.shape[0] - env.obs_steps)),
+                            str(pd.to_timedelta(t0 * ((env.df.shape[0] - env.obs_steps) - step) / step))
                         ), end="\r", flush=True)
 
                     if status['OOD'] or step == nb_max_episode_steps:
@@ -173,8 +171,8 @@ class DummyTrader(APrioriAgent):
 
 
 class MomentumTrader(APrioriAgent):
-    def __init__(self, env):
-        super().__init__(env)
+    def __init__(self):
+        super().__init__()
         self.ma_span = None
         self.rsi_span = None
         self.rsi_threshold = None
@@ -185,8 +183,8 @@ class MomentumTrader(APrioriAgent):
         Performs a single step on the environment
         """
         # try:
-        position = np.empty(self.env.action_space.low.shape[0], dtype=np.float32)
-        for key, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
+        position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
             df = obs[symbol].astype(np.float64).copy()
             df = self.get_ma(df, span=self.ma_span, kama=True)
             df['%d_rsi' % self.rsi_span[0]] = tl.RSI(df.close.values, timeperiod=self.rsi_span[0])
@@ -220,8 +218,9 @@ class MomentumTrader(APrioriAgent):
                 nb_max_episode_steps = env.df.shape[0] - env.obs_steps
             i = 0
             t0 = time()
-            self.env._reset_status()
-            self.env.set_training_stage(True)
+            env._reset_status()
+            env.set_training_stage(True)
+            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0
@@ -241,8 +240,9 @@ class MomentumTrader(APrioriAgent):
                 i += 1
                 if verbose:
                     t0 += time()
-                    print("Optimization step {0}/{1}, ETC: {2} ".format(i,
+                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                         nb_steps,
+                                                                        r,
                                                                         str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
                           end="\r")
 
@@ -254,14 +254,14 @@ class MomentumTrader(APrioriAgent):
                                               ma2=[int(env.obs_steps / 2), env.obs_steps],
                                               rsis=[3, env.obs_steps],
                                               rsit1=[3, 50],
-                                              rsit2=[50, 97],
+                                              rsit2=[50, 97]
                                               )
 
             for key, value in opt_params.items():
                 opt_params[key] = round(value)
 
             self.set_hp(**opt_params)
-            self.env.set_training_stage(False)
+            env.set_training_stage(False)
             return opt_params, info
 
         except KeyboardInterrupt:
@@ -275,9 +275,9 @@ class MomentumTrader(APrioriAgent):
         try:
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.df.shape[0] - env.obs_steps
-            self.env.set_online(False)
-            self.env._reset_status()
-            obs = self.env.reset(reset_results=True)
+            env.set_online(False)
+            env._reset_status()
+            obs = env.reset(reset_funds=True, reset_results=True)
             t0 = 0
             step = 0
             episode_reward = 0
@@ -287,13 +287,13 @@ class MomentumTrader(APrioriAgent):
                     t0 += time()
 
                     action = self.act(obs)
-                    obs, reward, _, status = self.env.step(action)
+                    obs, reward, _, status = env.step(action)
                     episode_reward += np.float32(reward)
 
                     step += 1
 
                     if visualize:
-                        self.env.render()
+                        env.render()
 
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(

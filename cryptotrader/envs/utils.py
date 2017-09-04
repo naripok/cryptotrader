@@ -3,7 +3,7 @@ import gc
 import numpy as np
 import pandas as pd
 
-from .driver import Apocalipse
+from .driver import Apocalipse, get_historical
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
 from ..utils import convert_to
 
@@ -29,33 +29,33 @@ def generate_signal(period=1000):
     volume = [np.zeros(1) + .1]
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
-                                                                theta=1.5,
-                                                                mu=1.,
-                                                                sigma=50.0,
+                                                                theta=1.0,
+                                                                mu=.5,
+                                                                sigma=30.0,
                                                                 n_steps_annealing=70000,
-                                                                sigma_min=40.0,
+                                                                sigma_min=10.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=5.5,
-                                                                mu=1.3,
-                                                                sigma=70.0,
+                                                                mu=-0.1,
+                                                                sigma=10.0,
                                                                 n_steps_annealing=100000,
-                                                                sigma_min=20.1,
+                                                                sigma_min=10.0,
                                                                 )
     volume_process = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
-                                                         theta=0.,
-                                                         mu=.0,
-                                                         sigma=.1,
+                                                         theta=0.3,
+                                                         mu=0.001,
+                                                         sigma=1.,
                                                          n_steps_annealing=100000,
                                                          sigma_min=0.1,
-                                                         a_min=0.1,
+                                                         a_min=0.0001,
                                                          )
 
     price_process = SinusoidalProcess(period, 1, 100)
 
-    for i in range(49999):
-        price.append(price[-1] + price_process.sample() * 2  + price_noise_process_1.sample() * 2 + \
-                     price_noise_process_2.sample() * 2)
+    for i in range(79999):
+        price.append(price[-1] + price_process.sample() * 1  + price_noise_process_1.sample() * 2 + \
+                     price_noise_process_2.sample() * 1)
         volume.append(volume[-1] + volume_process.sample() / volume[-1])
     price = np.clip(np.array(price).reshape([-1, 1]), a_min=0.0, a_max=np.inf) + 1
     volume = np.array(volume)
@@ -71,7 +71,7 @@ def make_toy_dfs(n_assets, freq=30):
         volumes.append(data[1])
 
     dfs = []
-    index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-50000:]
+    index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-80000:]
     for i in range(n_assets):
         data = np.hstack([prices[i].reshape([-1, 1]), volumes[i].reshape([-1, 1])])
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
