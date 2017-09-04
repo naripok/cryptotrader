@@ -127,14 +127,14 @@ def sample_trades(df, freq):
         return out
 
 
-def make_env(test, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0):
+def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0):
     """
     Make environment function to be called by each agent thread
     """
     # Get data
     gc.collect()
 
-    dfs = make_toy_dfs(3, freq)
+    dfs = make_toy_dfs(n_assets, freq)
 
     ## ENVIRONMENT INITIALIZATION
     env = Apocalipse(name='toy_env')
@@ -142,17 +142,16 @@ def make_env(test, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypt
     env.set_freq(freq)
     env.set_obs_steps(obs_steps)
 
-    keys = ['btcusd', 'ltcusd', 'xrpusd']#, 'ethusd']
+    keys = ['btcusd', 'ltcusd', 'xrpusd', 'ethusd', 'etcusd', 'xmrusd', 'zecusd', 'iotusd', 'bchusd', 'dshusd', 'stcusd']
 
     # Add backtest data
-    for i, key in enumerate(keys):
-        env.add_df(df=dfs[i], symbol=key)
+    for i in range(n_assets):
+        env.add_df(df=dfs[i], symbol=keys[i])
+        env.add_symbol(keys[i])
+        env.set_init_crypto(init_crypto, keys[i])
+        env.set_tax(tax, keys[i])
     del dfs
 
-    for symbol in keys:
-        env.add_symbol(symbol)
-        env.set_init_crypto(init_crypto, symbol)
-        env.set_tax(tax, symbol)
     env.set_init_fiat(init_fiat)
 
     # Clean pools
