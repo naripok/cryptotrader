@@ -23,6 +23,7 @@ config = {
                          'tensorflow',
                          'keras',
                          'keras-rl',
+                         'optunity',
                          'ta-lib',
                          'empyrical',
                          'bitstampclient'
