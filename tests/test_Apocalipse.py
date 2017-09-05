@@ -197,8 +197,8 @@ class Test_env_step(object):
         for i in range(len(dfs())):
             cls.env.add_df(df=dfs()[i], symbol=keys()[i])
             cls.env.add_symbol(symbol=keys()[i])
-            cls.env.set_init_crypto(np.random.random() * 1e12 + 1e-12, keys()[i])
-            cls.env.set_tax(np.random.random(), keys()[i])
+            cls.env.set_init_crypto(0.0, keys()[i])
+            cls.env.set_tax(0.0, keys()[i])
         cls.env.set_init_fiat(np.random.random() * 1e12 + 1e-12)
 
         cls.env._reset_status()
@@ -245,13 +245,13 @@ class Test_env_step(object):
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
     @settings(max_examples=10)
     def test__simulate_trade(self, action):
+        action = array_softmax(action)
         timestamp = self.env.df.index[self.env.step_idx]
         obs = self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
-        print(self.env.crypto, array_softmax(action))
-        print(obs)
-        self.env._simulate_trade(array_softmax(action), timestamp)
-
-
+        self.env._simulate_trade(action, timestamp)
+        for i, symbol in enumerate(self.env.df.columns.levels[0]):
+            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i]), \
+                (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i])
 
 
 if __name__ == '__main__':
