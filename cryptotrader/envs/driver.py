@@ -701,7 +701,6 @@ class Apocalipse(Env):
     def _save_df_to_db(self, name):
         self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
 
-
     # Getters
     def _get_df_symbols(self, no_fiat=False):
         if no_fiat:
@@ -1441,7 +1440,7 @@ class Apocalipse(Env):
 
         # Sell assets first
         for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0.0'):
+            if change < convert_to.decimal('0E-12'):
 
                 crypto_pool = portval * action[i] / self._get_step_obs(self._get_df_symbols()[i], step_price=True)
 
@@ -1461,16 +1460,16 @@ class Apocalipse(Env):
 
         # Then buy some goods
         for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0.0'):
+            if change > convert_to.decimal('0E-12'):
 
                 fiat_pool -= portval * change.copy_abs()
 
                 # if fiat_pool is negative, deduce it from portval and clip
                 try:
-                    assert fiat_pool >= convert_to.decimal('0.0')
+                    assert fiat_pool >= convert_to.decimal('0E-12')
                 except AssertionError:
                     portval += fiat_pool
-                    fiat_pool = convert_to.decimal('0.0')
+                    fiat_pool = convert_to.decimal('0E-12')
                     # if debug:
                     #     self.status['ValueError'] += 1
                     #     self.logger.error(Apocalipse._simulate_trade,
