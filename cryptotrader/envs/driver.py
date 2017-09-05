@@ -875,11 +875,11 @@ class Apocalipse(Env):
             return False
 
     def _get_fiat(self):
-        assert self.fiat >= convert_to.decimal('0.0')
+        assert self.fiat >= convert_to.decimal('0E-12'), self.fiat
         return self.fiat
 
     def _get_crypto(self, symbol):
-        assert self.crypto[symbol] >= Decimal('0.0')
+        assert self.crypto[symbol] >= Decimal('0E-12'), self.crypto[symbol]
         # assert symbol in self._get_df_symbols(no_fiat=True) # Took out for sp
         return self.crypto[symbol]
 
@@ -918,16 +918,15 @@ class Apocalipse(Env):
     def _get_portval(self):
         portval = convert_to.decimal('0.0')
 
-        if self.online:
-            for symbol in self._get_df_symbols(no_fiat=True):
-
-                portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
-            portval += self._get_fiat()
-
-        else:
-            for symbol in self._get_df_symbols(no_fiat=True):
-                portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
-            portval += self._get_fiat()
+        # if self.online: # TODO FIX THIS
+        #     for symbol in self._get_df_symbols(no_fiat=True):
+        #         portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
+        #     portval += self._get_fiat()
+        #
+        # else:
+        for symbol in self._get_df_symbols(no_fiat=True):
+            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
+        portval += self._get_fiat()
 
         return portval
 

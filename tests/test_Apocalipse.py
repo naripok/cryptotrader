@@ -6,12 +6,13 @@ import shutil
 import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
-from hypothesis.extra.numpy import arrays
+from hypothesis.extra.numpy import arrays, array_shapes
 
 from cryptotrader.envs.driver import Apocalipse
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
-from cryptotrader.utils import convert_to
+from cryptotrader.utils import convert_to, array_normalize, array_softmax
 from cryptotrader.spaces import Box, Tuple
+import numpy as np
 import pandas as pd
 from decimal import Decimal
 
@@ -30,7 +31,7 @@ def dfs(n_assets=4, freq=5):
     dfs = []
     index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-1000:]
     for i in range(n_assets):
-        data = data_process.sample_block()
+        data = data_process.sample_block() + 2
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     return dfs
@@ -186,8 +187,41 @@ class Test_env_setup(object):
                 assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
                            amount.values.all() == convert_to.decimal(init_crypto)
 
+@pytest.mark.incremental
+class Test_env_step(object):
+    @classmethod
+    def setup_class(cls):
+        cls.env = Apocalipse(name='test_env_setup')
+        cls.env.set_freq(5)
+        cls.env.set_obs_steps(5)
+        for i in range(len(dfs())):
+            cls.env.add_df(df=dfs()[i], symbol=keys()[i])
+            cls.env.add_symbol(symbol=keys()[i])
+            cls.env.set_init_crypto(np.random.random() * 1e12 + 1e-12, keys()[i])
+            cls.env.set_tax(np.random.random(), keys()[i])
+        cls.env.set_init_fiat(np.random.random() * 1e12 + 1e-12)
 
+        cls.env._reset_status()
+        cls.env.clear_dfs()
+        cls.env.set_training_stage(True)
+        cls.env.set_observation_space()
+        cls.env.set_action_space()
+        cls.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
 
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
+
+    @given(arrays(dtype=np.float32,
+                  shape=(5,),
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
+    @settings(max_examples=10)
+    def test__simulate_trade(self, action):
+        timestamp = self.env.df.index[self.env.step_idx]
+        obs = self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+        print(self.env.crypto,array_softmax(action))
+        print(obs)
+        self.env._simulate_trade(array_softmax(action), timestamp)
 
 if __name__ == '__main__':
     pytest.main()
