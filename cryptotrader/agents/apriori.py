@@ -35,7 +35,7 @@ class APrioriAgent(Agent):
         """
         try:
             if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+                nb_max_episode_steps = env.df.shape[0]
             env.set_online(False)
             env._reset_status()
             obs = env.reset(reset_funds=True, reset_results=True)

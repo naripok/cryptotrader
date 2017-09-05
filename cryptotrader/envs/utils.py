@@ -30,17 +30,17 @@ def generate_signal(period=1000):
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=15.0,
-                                                                mu=2,
+                                                                mu=5.0,
                                                                 sigma=100.0,
                                                                 n_steps_annealing=5 * 80000,
                                                                 sigma_min=50.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=10.0,
-                                                                mu=-1.0,
+                                                                mu=3.0,
                                                                 sigma=70.0,
                                                                 n_steps_annealing=4 * 80000,
-                                                                sigma_min=30.0,
+                                                                sigma_min=50.0,
                                                                 )
     price_noise_process_3 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=5.0,
@@ -51,14 +51,14 @@ def generate_signal(period=1000):
                                                                 )
     price_noise_process_4 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=1.0,
-                                                                mu=-0.1,
+                                                                mu=0.1,
                                                                 sigma=10.0,
                                                                 n_steps_annealing=80000,
                                                                 sigma_min=10.0,
                                                                 )
     price_noise_process_5 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=0.5,
-                                                                mu=0.0,
+                                                                mu=0.1,
                                                                 sigma=3.0,
                                                                 n_steps_annealing=80000,
                                                                 sigma_min=3.0,
@@ -85,7 +85,7 @@ def generate_signal(period=1000):
                      price_noise_process_4.sample() * weights[4] + \
                      price_noise_process_5.sample() * weights[5])
         volume.append(volume[-1] + volume_process.sample() / volume[-1])
-    price = np.clip(np.array(price).reshape([-1, 1]), a_min=0.0, a_max=np.inf) + 1
+    price = np.clip(np.array(price).reshape([-1, 1]), a_min=1.0, a_max=np.inf) + 1
     volume = np.array(volume)
     return price.reshape([-1, 1]), volume.reshape([-1, 1])
 
@@ -155,17 +155,18 @@ def sample_trades(df, freq):
         return out
 
 
-def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0):
+def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42):
     """
     Make environment function to be called by each agent thread
     """
     # Get data
     gc.collect()
+    np.random.seed(seed)
 
     dfs = make_toy_dfs(n_assets, freq)
 
     ## ENVIRONMENT INITIALIZATION
-    env = Apocalipse(name='toy_env')
+    env = Apocalipse(name='toy_env', seed=seed)
     # Set environment options
     env.set_freq(freq)
     env.set_obs_steps(obs_steps)

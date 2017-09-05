@@ -352,7 +352,7 @@ class Apocalipse(Env):
     ## TODO: \/ ############### REWORKED, VALIDATE ##################\/
 
 
-    def __init__(self, db=None, name=None):
+    def __init__(self, db=None, name=None, seed=42):
 
         try:
             assert isinstance(name, str)
@@ -361,7 +361,7 @@ class Apocalipse(Env):
             print("Must enter environment name")
             raise ValueError
 
-        self._seed(42)
+        self._seed(seed)
 
         # Environment variables
         self.online = False
