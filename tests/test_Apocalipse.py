@@ -5,12 +5,12 @@ import os
 import shutil
 import pytest
 import mock
-from hypothesis import given, example, strategies as st
+from hypothesis import given, example, settings, strategies as st
 
 from cryptotrader.envs.driver import Apocalipse
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
 from cryptotrader.utils import convert_to
-import numpy as np
+from cryptotrader.spaces import Box, Tuple
 import pandas as pd
 from decimal import Decimal
 
@@ -64,6 +64,13 @@ def test_set_training_stage(fresh_env):
     fresh_env.set_training_stage(False)
     assert fresh_env._is_training == False
 
+def test_set_observation_space(fresh_env):
+    fresh_env.set_observation_space()
+    assert isinstance(fresh_env.observation_space, Tuple)
+    assert isinstance(fresh_env.observation_space.spaces, list)
+    for space in fresh_env.observation_space.spaces:
+        assert isinstance(space, Box)
+
 
 @pytest.mark.incremental
 class Test_env_setup(object):
@@ -71,7 +78,7 @@ class Test_env_setup(object):
     def setup_class(cls):
         cls.env = Apocalipse(name='test_env_setup')
         cls.env.set_freq(5)
-        cls.env.set_obs_steps(10)
+        cls.env.set_obs_steps(5)
 
     @classmethod
     def teardown_class(cls):
@@ -129,6 +136,56 @@ class Test_env_setup(object):
     def test_clear_dfs(self):
         self.env.clear_dfs()
         assert self.env.dfs == {}
+
+    def test_set_action_space(self):
+        self.env.set_action_space()
+        assert isinstance(self.env.action_space, Box)
+        assert self.env.action_space.low.shape[0] == len(self.env.symbols)
+
+
+    @given(init_fiat=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
+           init_crypto=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
+           )
+    @settings(max_examples=10)
+    def test_reset(self, init_fiat, init_crypto):
+        # It training
+        for symbol in self.env.df.columns.levels[0]:
+            if symbol is not 'fiat':
+                self.env.set_init_crypto(init_crypto, symbol)
+        self.env.set_init_fiat(init_fiat)
+        self.env.set_training_stage(False)
+
+        obs = self.env.reset(reset_funds=True, reset_global_step=True, reset_results=True)
+
+        assert isinstance(obs, pd.DataFrame)
+        assert obs.shape[0] == self.env.obs_steps
+        assert self.env.global_step == 0
+        assert self.env.step_idx == self.env.offset
+
+        assert self.env.df.iloc[:self.env.step_idx].fiat.amount.values.all() == convert_to.decimal(init_fiat)
+        for symbol in self.env.df.columns.levels[0]:
+            if symbol is not 'fiat':
+                assert symbol in self.env.symbols
+                assert self.env.df[symbol].iloc[:self.env.step_idx].amount.values.all() == convert_to.decimal(init_crypto)
+
+        # If not training
+        self.env.set_training_stage(True)
+
+        obs = self.env.reset(reset_funds=True, reset_global_step=True, reset_results=True)
+
+        assert isinstance(obs, pd.DataFrame)
+        assert obs.shape[0] == self.env.obs_steps
+        assert self.env.global_step == 0
+        assert self.env.offset <= self.env.step_idx <= self.env.df.shape[0]
+
+        assert self.env.df.iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].fiat.amount.values.all() == \
+               convert_to.decimal(init_fiat)
+        for symbol in self.env.df.columns.levels[0]:
+            if symbol is not 'fiat':
+                assert symbol in self.env.symbols
+                assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
+                           amount.values.all() == convert_to.decimal(init_crypto)
+
 
 
 
