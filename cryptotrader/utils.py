@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from functools import partialmethod
 
 import numpy as np
 from bson import Decimal128
+import math
 
 
 class Logger(object):
@@ -109,15 +110,23 @@ class convert_to(object):
 
     @staticmethod
     def decimal(data):
-        if isinstance(data, np.float32) or isinstance(data,float):
-            data = np.float64(data)
-            return Decimal.from_float(data).quantize(Decimal('1e-12'))
-        if isinstance(data, np.ndarray):
-            output = []
-            shape = data.shape
-            for item in data.flatten():
-                item = np.float64(item)
-                output.append(Decimal(item).quantize(Decimal('1e-12')))
-            return np.array(output).reshape(shape)
-        else:
-            return Decimal(data).quantize(Decimal('1e-12'))
+        try:
+            if isinstance(data, np.float32) or isinstance(data, float):
+                data = np.float64(data)
+                return Decimal.from_float(data).quantize(Decimal('1e-12'))
+            if isinstance(data, np.ndarray):
+                output = []
+                shape = data.shape
+                for item in data.flatten():
+                    item = np.float64(item)
+                    output.append(Decimal(item).quantize(Decimal('1e-12')))
+                return np.array(output).reshape(shape)
+            else:
+                return Decimal(data).quantize(Decimal('1e-12'))
+        except InvalidOperation:
+            if abs(data) > Decimal('1e15'):
+                print("Numeric overflow in convert_to.decimal:", data)
+                raise InvalidOperation
+            elif data == np.nan or math.nan:
+                print("NaN encountered in convert_to.decimal:", data)
+                raise InvalidOperation

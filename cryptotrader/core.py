@@ -295,7 +295,8 @@ class Env(object):
         Environments will automatically close() themselves when
         garbage collected or when the program exits.
         """
-        raise NotImplementedError()
+        #raise NotImplementedError()
+        pass
 
     def seed(self, seed=None):
         """Sets the seed for this env's random number generator(s).

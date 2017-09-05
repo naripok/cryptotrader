@@ -9,19 +9,33 @@ from ..utils import convert_to
 
 
 class SinusoidalProcess(object):
-    def __init__(self, period, size, blocksize, x0=0):
+    def __init__(self, period, size, blocksize, x0=None):
         self.period = period
         self.size = size
         self.blocksize = blocksize
-        self.x0 = x0
+        if x0 == None:
+            self.x0 = 2 * np.pi / self.period
+        else:
+            self.x0 = x0
         self.x = self.x0 + 2 * np.pi / self.period
 
     def sample(self, observation=None):
         out = []
         for i in range(self.size):
-            out.append(np.sin(self.x + i * 10))
+            out.append(np.sin(self.x + i))
         self.x += 2 * np.pi / self.period
         return np.hstack(out)
+
+    def sample_block(self, observation=None):
+        block = []
+        for _ in range(self.blocksize):
+            out = []
+            for i in range(self.size):
+                out.append(np.sin(self.x + i))
+            self.x += 2 * np.pi / self.period
+            out = np.hstack(out)
+            block.append(out)
+        return np.vstack(block)
 
 
 def generate_signal(period=1000):

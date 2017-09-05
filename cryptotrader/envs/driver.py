@@ -27,7 +27,7 @@ from ..spaces import *
 from ..utils import convert_to, Logger
 
 # Decimal precision
-getcontext().prec = 26
+getcontext().prec = 32
 
 # Debug flag
 debug = True
@@ -505,9 +505,7 @@ class Apocalipse(Env):
 
     def add_symbol(self, symbol):
         assert isinstance(symbol, str)
-        # assert symbol in self._get_df_symbols()
         self.symbols.append(symbol)
-        # if symbol not in self._get_df_symbols():
         if symbol not in [k for k in self.dfs.keys()]:
             self.add_df(symbol=symbol, steps=int(self.obs_steps * 5))
         self.make_df()
@@ -649,7 +647,7 @@ class Apocalipse(Env):
         self.offset = steps
 
     def set_freq(self, freq):
-        assert isinstance(freq, int) and freq >= 1
+        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
         self.freq = freq
 
     def set_tax(self, tax, symbol):
