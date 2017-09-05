@@ -27,7 +27,7 @@ from ..spaces import *
 from ..utils import convert_to, Logger
 
 # Decimal precision
-getcontext().prec = 32
+getcontext().prec = 36
 
 # Debug flag
 debug = True
@@ -612,7 +612,7 @@ class Apocalipse(Env):
 
     def _save_prev_portval(self):
         try:
-            portval = self._get_portval()
+            portval = self._calc_step_total_portval()
             assert portval >= 0.0
             self.prev_val = portval
         except Exception as e:
@@ -830,7 +830,7 @@ class Apocalipse(Env):
     def get_step_obs(self, symbol):
         return self._get_step_obs(symbol=symbol, steps=self.obs_steps, float=True)
 
-    def _get_step_obs(self, symbol, steps=1, last_price=False, float=False):
+    def _get_step_obs(self, symbol, steps=1, step_price=False, float=False):
         """
         Observe the environment. Is usually used after the step is taken
         """
@@ -839,7 +839,7 @@ class Apocalipse(Env):
             # assert symbol in self._get_df_symbols() #taken out for speed
             # assert steps >= 1 and isinstance(last_price, bool) #taken out for speed
 
-            if last_price:
+            if step_price:
                 return self.df.get_value(self.df.index[self.step_idx], (symbol, 'close'))
 
             else:
@@ -915,7 +915,16 @@ class Apocalipse(Env):
         else:
             return np.array(portifolio)
 
-    def _get_portval(self):
+    def _calc_step_posit(self, symbol):
+        if symbol is not 'fiat':
+            return self._get_crypto(symbol) / self._calc_step_total_portval()
+        else:
+            return self._get_fiat() / self._calc_step_total_portval()
+
+    def _calc_step_portval(self, symbol):
+        return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
+
+    def _calc_step_total_portval(self):
         portval = convert_to.decimal('0.0')
 
         # if self.online: # TODO FIX THIS
@@ -925,7 +934,7 @@ class Apocalipse(Env):
         #
         # else:
         for symbol in self._get_df_symbols(no_fiat=True):
-            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
+            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
         portval += self._get_fiat()
 
         return portval
@@ -985,7 +994,6 @@ class Apocalipse(Env):
 
     def _get_timestamp_now(self):
         return pd.to_datetime(datetime.now() + timedelta(hours=3))  # timezone
-
 
     ## Online Methods
     # Setters
@@ -1323,7 +1331,7 @@ class Apocalipse(Env):
             if self.online:
                 return self._get_online_portval() - self._get_prev_online_portval()
             else:
-                return self._get_portval() - self._get_prev_portval()
+                return self._calc_step_total_portval() - self._get_prev_portval()
 
         elif type == 'percent change':
             if self.online:
@@ -1335,9 +1343,9 @@ class Apocalipse(Env):
             else:
                 prev_portval = self._get_prev_portval()
                 if prev_portval > convert_to.decimal('0.0'):
-                    return (self._get_portval() - self._get_prev_portval()) / prev_portval
+                    return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
                 else:
-                    return (self._get_portval() - self._get_prev_portval())
+                    return (self._calc_step_total_portval() - self._get_prev_portval())
 
         elif type == 'sharpe ratio':
             # TODO: IMPLEMENT SHARPE REWARD
@@ -1345,7 +1353,7 @@ class Apocalipse(Env):
             if self.online:
                 return self._get_online_portval() - self._get_prev_online_portval()
             else:
-                return self._get_portval() - self._get_prev_portval()
+                return self._calc_step_total_portval() - self._get_prev_portval()
 
         else:
             raise NotImplementedError
@@ -1429,13 +1437,13 @@ class Apocalipse(Env):
 
         # Get fiat_pool
         fiat_pool = self._get_fiat()
-        portval = self._get_portval()
+        portval = self._calc_step_total_portval()
 
         # Sell assets first
         for i, change in enumerate(posit_change):
             if change < convert_to.decimal('0.0'):
 
-                crypto_pool = portval * action[i] / self._get_step_obs(self._get_df_symbols()[i], last_price=True)
+                crypto_pool = portval * action[i] / self._get_step_obs(self._get_df_symbols()[i], step_price=True)
 
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
@@ -1449,7 +1457,7 @@ class Apocalipse(Env):
         self._set_fiat(fiat_pool, timestamp)
 
         # Uodate prev portval with deduced taxes
-        portval = self._get_portval()
+        portval = self._calc_step_total_portval()
 
         # Then buy some goods
         for i, change in enumerate(posit_change):
@@ -1473,7 +1481,7 @@ class Apocalipse(Env):
 
                     fee = self._get_tax(self._get_df_symbols()[i]) * portval * change
 
-                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(self._get_df_symbols()[i], last_price=True)
+                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(self._get_df_symbols()[i], step_price=True)
 
                 self._set_crypto(crypto_pool, self._get_df_symbols()[i], timestamp)
 
@@ -1488,9 +1496,9 @@ class Apocalipse(Env):
 
         ## Update your position on the exit
         for i, symbol in enumerate(self._get_df_symbols(no_fiat=True)):
-            self._set_posit(self._get_step_obs(symbol, last_price=True) * self._get_crypto(symbol) /
-                            self._get_portval(), symbol, timestamp)
-        self._set_posit(self._get_fiat() / self._get_portval(), 'fiat', timestamp)
+            self._set_posit(self._get_step_obs(symbol, step_price=True) * self._get_crypto(symbol) /
+                            self._calc_step_total_portval(), symbol, timestamp)
+        self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
 
     def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
         """
@@ -1520,19 +1528,17 @@ class Apocalipse(Env):
             timestamp = self.df.index[self.step_idx]
 
             for symbol in self._get_df_symbols():
+                # Set crypto and fiat amounts
                 if symbol in self._get_df_symbols(no_fiat=True):
                     self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
                 else:
                     self._set_fiat(self._get_fiat(), timestamp)
 
-                portval = self._get_portval()
+                portval = self._calc_step_total_portval()
 
+                # Calculate positions
                 if portval > convert_to.decimal('0.0'):
-                    if symbol in self._get_df_symbols(no_fiat=True):
-                        posit = self._get_crypto(symbol) / portval
-                    else:
-                        posit = self._get_fiat() / portval
-
+                    posit = self._calc_step_posit(symbol)
                     self._set_prev_posit(posit, symbol, timestamp)
                     self._set_posit(posit, symbol, timestamp)
                 else:
@@ -2211,12 +2217,12 @@ class Apocalipse(Env):
                      \n   Previous position: {4}, \
                      \n   New position (Action): {5}, \
                      \n   Portifolio dolar value: {6}""".format(self.step_idx,
-                                   self.df.index[self.step_idx],
-                                   self._get_obs(last_price=True),
-                                   str(self._get_fiat()),
-                                   str(self._get_prev_portifolio_posit()),
-                                   str(self._get_portifolio_posit()),
-                                   str(self._get_portval())))
+                                                                self.df.index[self.step_idx],
+                                                                self._get_obs(last_price=True),
+                                                                str(self._get_fiat()),
+                                                                str(self._get_prev_portifolio_posit()),
+                                                                str(self._get_portifolio_posit()),
+                                                                str(self._calc_step_total_portval())))
         if mode == 'print':
             pass
 

@@ -31,7 +31,7 @@ def dfs(n_assets=4, freq=5):
     dfs = []
     index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-1000:]
     for i in range(n_assets):
-        data = data_process.sample_block() + 2
+        data = np.clip(data_process.sample_block(), a_min=1e-12, a_max=np.inf)
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     return dfs
@@ -197,8 +197,8 @@ class Test_env_step(object):
         for i in range(len(dfs())):
             cls.env.add_df(df=dfs()[i], symbol=keys()[i])
             cls.env.add_symbol(symbol=keys()[i])
-            cls.env.set_init_crypto(0.0, keys()[i])
-            cls.env.set_tax(0.0, keys()[i])
+            cls.env.set_init_crypto(np.random.random() * 1e12 + 1e-12, keys()[i])
+            cls.env.set_tax(np.random.random(), keys()[i])
         cls.env.set_init_fiat(np.random.random() * 1e12 + 1e-12)
 
         cls.env._reset_status()
@@ -240,18 +240,26 @@ class Test_env_step(object):
             with pytest.raises(AssertionError):
                 set_prev_posit(posit)
 
+    def test__calc_step_portval(self):
+        for symbol in self.env.df.columns.levels[0]:
+            if symbol is not 'fiat':
+                val = self.env.df.get_value(self.env.df.index[self.env.step_idx], (symbol, 'close')) * self.env.crypto[symbol]
+                assert self.env._calc_step_portval(symbol) == val
+
     @given(arrays(dtype=np.float32,
                   shape=(5,),
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
-    @settings(max_examples=10)
+    @settings(max_examples=20)
     def test__simulate_trade(self, action):
         action = array_softmax(action)
         timestamp = self.env.df.index[self.env.step_idx]
-        obs = self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+        self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
         self.env._simulate_trade(action, timestamp)
+        print(self.env.posit)
         for i, symbol in enumerate(self.env.df.columns.levels[0]):
-            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i]), \
-                (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i])
+            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=1e-2), \
+                (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
+
 
 
 if __name__ == '__main__':
