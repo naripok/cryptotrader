@@ -393,8 +393,8 @@ class Apocalipse(Env):
         self.epsilon = 1e-12
         self.step_idx = None
         self.global_step = 0
-        self.obs_steps = 0 # TODO: FIX THIS
-        self.offset = 0 # TODO FIX THIS
+        self.obs_steps = 0
+        self.offset = 0
         self.session_begin_time = None
         self.last_reward = 0.0
         self.last_action = np.zeros(0)
