@@ -148,7 +148,7 @@ class Test_env_setup(object):
            )
     @settings(max_examples=10)
     def test_reset(self, init_fiat, init_crypto):
-        # It training
+        # It not training
         for symbol in self.env.df.columns.levels[0]:
             if symbol is not 'fiat':
                 self.env.set_init_crypto(init_crypto, symbol)
@@ -168,7 +168,7 @@ class Test_env_setup(object):
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[:self.env.step_idx].amount.values.all() == convert_to.decimal(init_crypto)
 
-        # If not training
+        # If training
         self.env.set_training_stage(True)
 
         obs = self.env.reset(reset_funds=True, reset_global_step=True, reset_results=True)
