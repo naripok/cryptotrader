@@ -65,13 +65,13 @@ def array_softmax(x, SAFETY=2.0):
     amx = x.max()
     if(amx > thr):
         b = np.exp(x - (amx-thr))
-        return b / b.sum()
+        return b / (b.sum() + 1e-12)
     else:
         b = np.exp(x)
-        return b / b.sum()
+        return b / (b.sum() + 1e-12)
 
 
-def array_normalize(x, SAFETY=2.0):
+def array_normalize(x):
     out = convert_to.decimal(x)
 
     if out.sum() == convert_to.decimal('0.0'):
@@ -85,18 +85,6 @@ def array_normalize(x, SAFETY=2.0):
         out[-1] += convert_to.decimal('1.0') - out.sum()
 
     return np.float32(out)
-    #
-    # x = np.array(x, dtype=np.float64)
-    # mrn = np.finfo(x.dtype).max  # largest representable number
-    # thr = np.log(mrn / x.size) - SAFETY
-    # amx = x.max()
-    # if (amx > thr):
-    #     b = x - (amx - thr)
-    #     return b / (b.sum() + 1e-12)
-    # else:
-    #     b = x
-    #     return b / (b.sum() + 1e-12)
-
 
 # Helper functions and classes
 class convert_to(object):

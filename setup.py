@@ -13,6 +13,7 @@ config = {
 	'install_requires': [
                          'pytest',
                          'hypothesis',
+                         'hypothesis-numpy',
                          'numpy',
                          'pandas',
                          'pymongo',

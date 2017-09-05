@@ -6,6 +6,7 @@ import shutil
 import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
+from hypothesis.extra.numpy import arrays
 
 from cryptotrader.envs.driver import Apocalipse
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
@@ -34,7 +35,7 @@ def dfs(n_assets=4, freq=5):
 
     return dfs
 
-
+# Tests
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
 
@@ -70,7 +71,6 @@ def test_set_observation_space(fresh_env):
     assert isinstance(fresh_env.observation_space.spaces, list)
     for space in fresh_env.observation_space.spaces:
         assert isinstance(space, Box)
-
 
 @pytest.mark.incremental
 class Test_env_setup(object):
