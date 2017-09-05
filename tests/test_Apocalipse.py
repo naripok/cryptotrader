@@ -212,6 +212,34 @@ class Test_env_step(object):
     def teardown_class(cls):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
+    @given(st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12))
+    def test__set_posit(self, posit):
+        def set_posit(posit):
+            for symbol in self.env.df.columns.levels[0]:
+                timestamp = self.env.df.index[self.env.step_idx]
+                self.env._set_posit(posit, symbol, timestamp)
+                assert self.env.posit[symbol] == convert_to.decimal(posit)
+                assert self.env.df[symbol].loc[timestamp, 'position'] == convert_to.decimal(posit)
+        if 0.0 <= posit <= 1.0:
+            set_posit(posit)
+        else:
+            with pytest.raises(AssertionError):
+                set_posit(posit)
+
+    @given(st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12))
+    def test__set_prev_posit(self, posit):
+        def set_prev_posit(posit):
+            for symbol in self.env.df.columns.levels[0]:
+                timestamp = self.env.df.index[self.env.step_idx]
+                self.env._set_prev_posit(posit, symbol, timestamp)
+                assert self.env.prev_posit[symbol] == convert_to.decimal(posit)
+                assert self.env.df[symbol].loc[timestamp, 'prev_position'] == convert_to.decimal(posit)
+        if 0.0 <= posit <= 1.0:
+            set_prev_posit(posit)
+        else:
+            with pytest.raises(AssertionError):
+                set_prev_posit(posit)
+
     @given(arrays(dtype=np.float32,
                   shape=(5,),
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
@@ -219,9 +247,12 @@ class Test_env_step(object):
     def test__simulate_trade(self, action):
         timestamp = self.env.df.index[self.env.step_idx]
         obs = self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
-        print(self.env.crypto,array_softmax(action))
+        print(self.env.crypto, array_softmax(action))
         print(obs)
         self.env._simulate_trade(array_softmax(action), timestamp)
+
+
+
 
 if __name__ == '__main__':
     pytest.main()
