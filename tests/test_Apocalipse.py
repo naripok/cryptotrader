@@ -262,7 +262,7 @@ class Test_env_step(object):
         print(action)
         print(self.env.posit)
         for i, symbol in enumerate(self.env.df.columns.levels[0]):
-            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=5e-2), \
+            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=5e-4), \
                 (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
         # TODO PASS THIS TETS
 
