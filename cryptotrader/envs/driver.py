@@ -1432,7 +1432,7 @@ class Apocalipse(Env):
         action = self._assert_action(action)
         # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
         #     self.observation_space.contains(observation[symbol])
-        assert isinstance(timestamp, pd.Timestamp)
+        # assert isinstance(timestamp, pd.Timestamp)
 
         # Calculate position change given action
         posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
@@ -1445,16 +1445,18 @@ class Apocalipse(Env):
         for i, change in enumerate(posit_change):
             if change < convert_to.decimal('0E-12'):
 
-                crypto_pool = portval * action[i] / self._get_step_obs(self._get_df_symbols()[i], step_price=True)
+                symbol = self._get_df_symbols()[i]
+
+                crypto_pool = portval * action[i] / self._get_step_obs(symbol, step_price=True)
 
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
 
-                    fee = portval * change.copy_abs() * self._get_tax(self._get_df_symbols()[i])
+                    fee = portval * change.copy_abs() * self._get_tax(symbol)
 
                 fiat_pool += portval.fma(change.copy_abs(), -fee)
 
-                self._set_crypto(crypto_pool, self._get_df_symbols()[i], timestamp)
+                self._set_crypto(crypto_pool, symbol, timestamp)
 
         self._set_fiat(fiat_pool, timestamp)
 
@@ -1464,6 +1466,8 @@ class Apocalipse(Env):
         # Then buy some goods
         for i, change in enumerate(posit_change):
             if change > convert_to.decimal('0E-12'):
+
+                symbol = self._get_df_symbols()[i]
 
                 fiat_pool -= portval * change.copy_abs()
 
@@ -1481,11 +1485,11 @@ class Apocalipse(Env):
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
 
-                    fee = self._get_tax(self._get_df_symbols()[i]) * portval * change
+                    fee = self._get_tax(symbol) * portval * change
 
-                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(self._get_df_symbols()[i], step_price=True)
+                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(symbol, step_price=True)
 
-                self._set_crypto(crypto_pool, self._get_df_symbols()[i], timestamp)
+                self._set_crypto(crypto_pool, symbol, timestamp)
 
         # And don't forget to take your change!
         self._set_fiat(fiat_pool, timestamp)
@@ -1494,8 +1498,10 @@ class Apocalipse(Env):
         for i, change in enumerate(posit_change):
             if change == convert_to.decimal('0.0'):
                 # No order to execute, just save the variables and exit
-                # TODO OPTIMIZE _GET_SYMBOL CALL HERE
-                self._set_crypto(self._get_crypto(self._get_df_symbols()[i]), self._get_df_symbols()[i], timestamp)
+
+                symbol = self._get_df_symbols()[i]
+
+                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
 
         ## Update your position on the exit
         for i, symbol in enumerate(self._get_df_symbols(no_fiat=True)):
