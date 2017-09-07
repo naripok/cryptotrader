@@ -1494,6 +1494,7 @@ class Apocalipse(Env):
         for i, change in enumerate(posit_change):
             if change == convert_to.decimal('0.0'):
                 # No order to execute, just save the variables and exit
+                # TODO OPTIMIZE _GET_SYMBOL CALL HERE
                 self._set_crypto(self._get_crypto(self._get_df_symbols()[i]), self._get_df_symbols()[i], timestamp)
 
         ## Update your position on the exit
