@@ -31,7 +31,7 @@ def dfs(n_assets=4, freq=5):
     dfs = []
     index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-1000:]
     for i in range(n_assets):
-        data = np.clip(data_process.sample_block(), a_min=1e-12, a_max=np.inf)
+        data = np.clip(data_process.sample_block() + 1, a_min=1e-12, a_max=np.inf)
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     return dfs
@@ -124,7 +124,7 @@ class Test_env_setup(object):
         for symbol in symbols:
             if 0.0 <= tax <= 1.0:
                 self.env.set_tax(tax, symbol)
-                assert self.env.optax[symbol] == convert_to.decimal(tax)
+                assert self.env.tax[symbol] == convert_to.decimal(tax)
             else:
                 with pytest.raises(AssertionError):
                     self.env.set_tax(tax, symbol)

@@ -382,7 +382,7 @@ class Apocalipse(Env):
         self.prev_online_val = np.nan
         self.init_crypto = {}
         self.init_fiat = None
-        self.optax = {}
+        self.tax = {}
         self.symbols = ['fiat']
 
         self.order_type = None
@@ -653,7 +653,7 @@ class Apocalipse(Env):
     def set_tax(self, tax, symbol):
         assert 0.0 <= tax <= 1.0
         assert symbol in self._get_df_symbols()
-        self.optax[symbol] = convert_to.decimal(tax)
+        self.tax[symbol] = convert_to.decimal(tax)
 
     def set_training_stage(self, train):
         assert isinstance(train, bool)
@@ -916,9 +916,16 @@ class Apocalipse(Env):
 
     def _calc_step_posit(self, symbol):
         if symbol is not 'fiat':
-            return self._get_crypto(symbol) / self._calc_step_total_portval()
+            return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True) /\
+                   self._calc_step_total_portval()
         else:
             return self._get_fiat() / self._calc_step_total_portval()
+
+    def _calc_step_potifolio_posit(self):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._calc_step_posit(symbol))
+        return np.array(portifolio)
 
     def _calc_step_portval(self, symbol):
         return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
@@ -943,8 +950,8 @@ class Apocalipse(Env):
         return self.prev_val
 
     def _get_tax(self, symbol):
-        assert symbol in [s for s in self.optax.keys()]
-        return self.optax[symbol]
+        assert symbol in [s for s in self.tax.keys()]
+        return self.tax[symbol]
 
     def _get_historical_data(self, symbol=None, start=None, end=None, freq=1, file=None):
         """
@@ -1361,17 +1368,13 @@ class Apocalipse(Env):
         try:
             for posit in action:
                 if not isinstance(posit, Decimal):
-                    if isinstance(action, np.ndarray):
-                        action = action.astype(np.float64)
-                    else:
-                        action = np.float64(action)
-
-                    action = convert_to.decimal(action)
+                    action = convert_to.decimal(np.float64(action))
 
             try:
                 assert self.action_space.contains(action)
 
             except AssertionError:
+                # normalize
                 if action.sum() != convert_to.decimal('1.0'):
                     action /= action.sum()
                     try:
@@ -1432,7 +1435,7 @@ class Apocalipse(Env):
         assert isinstance(timestamp, pd.Timestamp)
 
         # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self._get_prev_portifolio_posit())[:-1]
+        posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
 
         # Get fiat_pool
         fiat_pool = self._get_fiat()
@@ -1499,6 +1502,9 @@ class Apocalipse(Env):
                             self._calc_step_total_portval(), symbol, timestamp)
         self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
 
+    def _rebalance_online_portifolio(self):
+        pass
+
     def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
         """
         Resets environment and returns a initial observation
@@ -1533,28 +1539,28 @@ class Apocalipse(Env):
                 else:
                     self._set_fiat(self._get_fiat(), timestamp)
 
-                portval = self._calc_step_total_portval()
+                # portval = self._calc_step_total_portval()
 
                 # Calculate positions
-                if portval > convert_to.decimal('0.0'):
-                    posit = self._calc_step_posit(symbol)
-                    self._set_prev_posit(posit, symbol, timestamp)
-                    self._set_posit(posit, symbol, timestamp)
-                else:
-                    self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
-                    self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
+                # if portval > convert_to.decimal('0.0'):
+                posit = self._calc_step_posit(symbol)
+                self._set_prev_posit(posit, symbol, timestamp)
+                self._set_posit(posit, symbol, timestamp)
+                # else:
+                #     self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
+                #     self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
 
             self.step_idx += 1
 
-        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.optax) is not None
+        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.tax) is not None
 
         return self.get_step_obs_all()
 
     def _reset(self, symbol, timestamp, reset_results=False, reset_funds=False):
         # TODO: VALIDATE
-
+        # Assert conditions
         assert symbol in self._get_df_symbols()
-        assert (self._is_training, self.obs_steps, self.optax) is not None
+        assert (self._is_training, self.obs_steps, self.tax) is not None
         assert isinstance(self.obs_steps, int) and self.obs_steps > 0
 
         try:
@@ -1563,8 +1569,10 @@ class Apocalipse(Env):
             self.logger.error(Apocalipse._reset, "Calling reset with steps <= obs_steps")
             raise ValueError
 
+        # set offset
         self.offset = self.obs_steps
 
+        # Reset results columns
         if reset_results:
             self.df[symbol, 'amount'] = convert_to.decimal(np.nan)
             self.df[symbol, 'position'] = convert_to.decimal(np.nan)
@@ -1602,13 +1610,12 @@ class Apocalipse(Env):
         # TODO: VALIDATE
         try:
             # Assert observation is valid
-            assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
-                   observation.shape[0] >= 3
+            # assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
+            #        observation.shape[0] >= 3
 
             # for symbol in self._get_df_symbols(no_fiat=True):
             #     assert self.observation_space.contains(observation[symbol])
 
-            assert isinstance(timeout, float) or isinstance(timeout, int)
             # Assert action is valid
             action = self._assert_action(action)
             self.last_action = action
@@ -1627,6 +1634,7 @@ class Apocalipse(Env):
 
             ## ONLINE STEP
             if self.online:
+                assert isinstance(timeout, float) or isinstance(timeout, int)
                 # Parse order for exchange action
                 done = self._rebalance_online_portifolio(action, timestamp, timeout)
                 self.step_idx = self.df.shape[0] - 1
@@ -1635,7 +1643,7 @@ class Apocalipse(Env):
                 self._simulate_trade(action, timestamp)
 
                 # Update step counter and environment observation
-                if self.step_idx < self.df.shape[0] - self.obs_steps - 1:
+                if self.step_idx < self.df.shape[0] - 1:
                     self.step_idx += 1
                     done = False
                 else:
