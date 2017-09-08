@@ -169,7 +169,7 @@ class Test_env_setup(object):
                 assert self.env.df[symbol].iloc[:self.env.step_idx].amount.values.all() == convert_to.decimal(init_crypto)
                 for step in range(self.env.obs_steps):
                     assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
-                           self.env._calc_step_posit(symbol) <= Decimal('1e-2')
+                           self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
         # If training
         self.env.set_training_stage(True)
@@ -190,7 +190,7 @@ class Test_env_setup(object):
                            amount.values.all() == convert_to.decimal(init_crypto)
                 for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
                     assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
-                           self.env._calc_step_posit(symbol) <= Decimal('1e-2')
+                           self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
 
 @pytest.mark.incremental
@@ -269,7 +269,7 @@ class Test_env_step(object):
         for i, symbol in enumerate(self.env.df.columns.levels[0]):
             assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=5e-4), \
                 (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
-        # TODO PASS THIS TETS
+
 
 
 if __name__ == '__main__':

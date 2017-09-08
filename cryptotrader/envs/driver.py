@@ -950,7 +950,7 @@ class Apocalipse(Env):
         return self.prev_val
 
     def _get_tax(self, symbol):
-        assert symbol in [s for s in self.tax.keys()]
+        # assert symbol in [s for s in self.tax.keys()]
         return self.tax[symbol]
 
     def _get_historical_data(self, symbol=None, start=None, end=None, freq=1, file=None):
@@ -2197,8 +2197,8 @@ class Apocalipse(Env):
         # Calculate benchmark portifolio, just equaly distribute money over all the assets
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
-                                        self._get_init_fiat() / (self.df.at[self.results.index[self.offset],
-                                        (symbol, 'close')] * self.action_space.low.shape[0] - 1)
+                                        self._get_init_fiat() / (self.df.at[self.results.index[0],
+                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
 
         self.results['benchmark'] = convert_to.decimal('0e-12')
         for symbol in self._get_df_symbols(no_fiat=True):

@@ -187,8 +187,8 @@ class EqualyDistributedTrader(APrioriAgent):
         super().__init__()
 
     def act(self, obs):
-        n_pairs = len(obs.columns.levels[0]) - 1
-        action = np.ones(n_pairs) / n_pairs
+        n_pairs = obs.columns.levels[0].shape[0] - 1
+        action = np.ones(n_pairs + 1) / n_pairs
         action[-1] = 0
         return action
 
