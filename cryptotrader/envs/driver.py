@@ -2195,17 +2195,14 @@ class Apocalipse(Env):
         #                             self.results.index[self.offset], ('btcusd', 'close')]
 
         # Calculate benchmark portifolio, just equaly distribute money over all the assets
-        benchmark = '0'
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
                                         self._get_init_fiat() / (self.df.at[self.results.index[self.offset],
                                         (symbol, 'close')] * self.action_space.low.shape[0] - 1)
 
-        self.results['benchmark'] = 0
+        self.results['benchmark'] = convert_to.decimal('0e-12')
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
-
-        self.results['benchmark'] = self.results.eval(benchmark)
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-12)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-12)
