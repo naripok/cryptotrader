@@ -36,8 +36,14 @@ debug = True
 def get_historical(file, freq, start=None, end=None):
     """
     Gets historical data from csv file
-    return sampled ohlc pandas dataframe
+
+    :param file: path to csv file
+    :param freq: sample frequency
+    :param start: start date
+    :param end: end date
+    :return: sampled pandas DataFrame
     """
+
     assert freq >= 1
     freq = "%dmin" % (freq)
 
@@ -887,8 +893,8 @@ class Apocalipse(Env):
         return self.init_fiat
 
     def _get_init_crypto(self, symbol):
-        assert symbol in [s for s in self.init_crypto.keys()]
-        assert 0.0 <= self.init_crypto[symbol]
+        assert symbol in [s for s in self.init_crypto.keys()], (symbol, self.init_crypto.keys())
+        assert 0.0 <= self.init_crypto[symbol], self.init_crypto[symbol]
         return self.init_crypto[symbol]
 
     def _get_posit(self, symbol):
@@ -2160,14 +2166,14 @@ class Apocalipse(Env):
 
         return results
 
-    def _get_results(self, window=100):
+    def _get_results(self, window=30):
         """
         Calculate arbiter desired actions statistics
         :return:
         """
 
 
-        self.results = self.df.iloc[self.offset + 1:-window].copy()
+        self.results = self.df.iloc[self.offset + 1:-2].copy()
 
         self.results['portval'] = convert_to.decimal(np.nan)
         self.results['benchmark'] = convert_to.decimal(np.nan)
@@ -2216,7 +2222,7 @@ class Apocalipse(Env):
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=window)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=3)
         self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=window, risk_free=0.001)
 
         return self.results

@@ -133,13 +133,13 @@ def make_dfs(process_idx, files, demo=False, freq=30):
             dfs.append(get_historical(start='2017-05-01 00:00:00', end='2017-05-30 00:00:00', freq=freq, file=file))
         else:
             if process_idx == 0:
-                dfs.append(get_historical(start='2017-01-01 00:00:00', end='2017-01-30 00:00:00', freq=freq, file=file))
-            elif process_idx == 1:
-                dfs.append(get_historical(start='2017-02-01 00:00:00', end='2017-02-27 00:00:00', freq=freq, file=file))
-            elif process_idx == 2:
-                dfs.append(get_historical(start='2017-03-01 00:00:00', end='2017-03-30 00:00:00', freq=freq, file=file))
-            elif process_idx == 3:
                 dfs.append(get_historical(start='2017-04-01 00:00:00', end='2017-04-30 00:00:00', freq=freq, file=file))
+            elif process_idx == 1:
+                dfs.append(get_historical(start='2017-03-01 00:00:00', end='2017-03-30 00:00:00', freq=freq, file=file))
+            elif process_idx == 2:
+                dfs.append(get_historical(start='2017-02-01 00:00:00', end='2017-02-27 00:00:00', freq=freq, file=file))
+            elif process_idx == 3:
+                dfs.append(get_historical(start='2017-01-01 00:00:00', end='2017-01-30 00:00:00', freq=freq, file=file))
             elif process_idx == 4:
                 dfs.append(get_historical(start='2016-12-01 00:00:00', end='2016-12-30 00:00:00', freq=freq, file=file))
             elif process_idx == 5:
@@ -169,15 +169,29 @@ def sample_trades(df, freq):
         return out
 
 
-def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42):
+def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42, toy=True, files=None):
     """
     Make environment function to be called by each agent thread
+    :param test:
+    :param n_assets:
+    :param obs_steps:
+    :param freq:
+    :param tax:
+    :param init_fiat:
+    :param init_crypto:
+    :param seed:
+    :param toy:
+    :param files:
+    :return:
     """
     # Get data
     gc.collect()
     np.random.seed(seed)
 
-    dfs = make_toy_dfs(n_assets, freq)
+    if toy:
+        dfs = make_toy_dfs(n_assets, freq)
+    else:
+        dfs = make_dfs(0, files, demo=True, freq=freq)
 
     ## ENVIRONMENT INITIALIZATION
     env = Apocalipse(name='toy_env', seed=seed)
