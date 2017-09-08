@@ -44,14 +44,14 @@ def generate_signal(period=1000):
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=15.0,
-                                                                mu=5.0,
+                                                                mu=1.0,
                                                                 sigma=100.0,
                                                                 n_steps_annealing=5 * 80000,
                                                                 sigma_min=50.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=10.0,
-                                                                mu=3.0,
+                                                                mu=0.5,
                                                                 sigma=70.0,
                                                                 n_steps_annealing=4 * 80000,
                                                                 sigma_min=50.0,

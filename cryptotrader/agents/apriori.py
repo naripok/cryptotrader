@@ -28,7 +28,7 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
         """
         Test agent on environment
@@ -182,12 +182,23 @@ class DummyTrader(APrioriAgent):
                 return np.random.random(obs.columns.levels[0].shape[0])
 
 
+class EqualyDistributedTrader(APrioriAgent):
+    def __init__(self):
+        super().__init__()
+
+    def act(self, obs):
+        n_pairs = len(obs.columns.levels[0] - 1)
+        action = np.ones(n_pairs) / n_pairs
+        action[-1] = 0
+        return action
+
+
 class MomentumTrader(APrioriAgent):
     def __init__(self):
         super().__init__()
         self.ma_span = None
-        self.rsi_span = None
-        self.rsi_threshold = None
+        # self.rsi_span = None
+        # self.rsi_threshold = None
         self.opt_params = None
 
     def act(self, obs):
@@ -264,9 +275,9 @@ class MomentumTrader(APrioriAgent):
                                               num_evals=nb_steps,
                                               ma1=[3, int(env.obs_steps / 2)],
                                               ma2=[int(env.obs_steps / 10), env.obs_steps],
-                                              rsis=[3, env.obs_steps],
-                                              rsit1=[3, 50],
-                                              rsit2=[50, 97]
+                                              # rsis=[3, env.obs_steps],
+                                              # rsit1=[3, 50],
+                                              # rsit2=[50, 97]
                                               )
 
             for key, value in opt_params.items():
@@ -295,5 +306,5 @@ class MomentumTrader(APrioriAgent):
 
     def set_hp(self, **kwargs):
         self.ma_span = [kwargs['ma1'],kwargs['ma2']]
-        self.rsi_span = [kwargs['rsis']]
-        self.rsi_threshold = [kwargs['rsit1'], kwargs['rsit2']]
+        # self.rsi_span = [kwargs['rsis']]
+        # self.rsi_threshold = [kwargs['rsit1'], kwargs['rsit2']]

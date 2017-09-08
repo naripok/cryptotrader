@@ -27,7 +27,7 @@ from ..spaces import *
 from ..utils import convert_to, Logger
 
 # Decimal precision
-getcontext().prec = 36
+getcontext().prec = 32
 
 # Debug flag
 debug = True
@@ -1510,7 +1510,7 @@ class Apocalipse(Env):
         self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
 
     def _rebalance_online_portifolio(self):
-        pass
+        pass # TODO _REBALANCE_ONLINE_PORTIFOLIO
 
     def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
         """
@@ -2194,9 +2194,18 @@ class Apocalipse(Env):
         #                             self._get_tax('btcusd') * self._get_init_fiat() / self.results.at[
         #                             self.results.index[self.offset], ('btcusd', 'close')]
 
-        self.results['benchmark'] = (1 - self._get_tax('btcusd')) * self.results['btcusd', 'close'] * \
-                                    self._get_init_fiat() / self.df.at[self.results.index[self.offset],
-                                                                       ('btcusd', 'close')]
+        # Calculate benchmark portifolio, just equaly distribute money over all the assets
+        benchmark = '0'
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
+                                        self._get_init_fiat() / (self.df.at[self.results.index[self.offset],
+                                        (symbol, 'close')] * self.action_space.low.shape[0] - 1)
+
+        self.results['benchmark'] = 0
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+
+        self.results['benchmark'] = self.results.eval(benchmark)
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-12)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-12)

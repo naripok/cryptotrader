@@ -143,7 +143,7 @@ class Test_env_setup(object):
         assert isinstance(self.env.action_space, Box)
         assert self.env.action_space.low.shape[0] == len(self.env.symbols)
 
-    @given(init_fiat=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
+    @given(init_fiat=st.floats(max_value=1e18, min_value=0.1, allow_infinity=False, allow_nan=False),
            init_crypto=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
            )
     @settings(max_examples=10)
@@ -167,6 +167,9 @@ class Test_env_setup(object):
             if symbol is not 'fiat':
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[:self.env.step_idx].amount.values.all() == convert_to.decimal(init_crypto)
+                for step in range(self.env.obs_steps):
+                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                           self.env._calc_step_posit(symbol) <= Decimal('1e-2')
 
         # If training
         self.env.set_training_stage(True)
@@ -185,7 +188,9 @@ class Test_env_setup(object):
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
                            amount.values.all() == convert_to.decimal(init_crypto)
-        # TODO ASSERT POSITIONS
+                for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
+                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                           self.env._calc_step_posit(symbol) <= Decimal('1e-2')
 
 
 @pytest.mark.incremental
