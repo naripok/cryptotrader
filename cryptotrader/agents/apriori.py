@@ -28,8 +28,8 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=True,
-             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=1):
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
+             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
         """
         Test agent on environment
         """
@@ -182,12 +182,23 @@ class DummyTrader(APrioriAgent):
                 return np.random.random(obs.columns.levels[0].shape[0])
 
 
+class EqualyDistributedTrader(APrioriAgent):
+    def __init__(self):
+        super().__init__()
+
+    def act(self, obs):
+        n_pairs = obs.columns.levels[0].shape[0] - 1
+        action = np.ones(n_pairs + 1) / n_pairs
+        action[-1] = 0
+        return action
+
+
 class MomentumTrader(APrioriAgent):
     def __init__(self):
         super().__init__()
         self.ma_span = None
-        self.rsi_span = None
-        self.rsi_threshold = None
+        # self.rsi_span = None
+        # self.rsi_threshold = None
         self.opt_params = None
 
     def act(self, obs):
@@ -199,15 +210,12 @@ class MomentumTrader(APrioriAgent):
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
                 df = obs[symbol].astype(np.float64).copy()
                 df = self.get_ma(df, span=self.ma_span, kama=True)
-                # df['%d_rsi' % self.rsi_span[0]] = tl.RSI(df.close.values, timeperiod=self.rsi_span[0])
 
                 # Get action
-                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1]:# \
-                        # and df['%d_rsi' % self.rsi_span[0]].iat[-1] > self.rsi_threshold[0]:
+                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1]:
                     action = np.zeros(1)
 
-                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1]:# \
-                        # and df['%d_rsi' % self.rsi_span[0]].iat[-1] < self.rsi_threshold[1]:
+                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1]:
                     action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
 
                 else:
@@ -235,10 +243,11 @@ class MomentumTrader(APrioriAgent):
             env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
                 self.set_hp(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
+                # run test on the main process
                 r = self.test(env,
                                 nb_episodes=1,
                                 action_repetition=action_repetition,
@@ -262,11 +271,8 @@ class MomentumTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              ma1=[3, int(env.obs_steps / 2)],
+                                              ma1=[2, int(env.obs_steps / 2)],
                                               ma2=[int(env.obs_steps / 10), env.obs_steps],
-                                              rsis=[3, env.obs_steps],
-                                              rsit1=[3, 50],
-                                              rsit2=[50, 97]
                                               )
 
             for key, value in opt_params.items():
@@ -295,5 +301,3 @@ class MomentumTrader(APrioriAgent):
 
     def set_hp(self, **kwargs):
         self.ma_span = [kwargs['ma1'],kwargs['ma2']]
-        self.rsi_span = [kwargs['rsis']]
-        self.rsi_threshold = [kwargs['rsit1'], kwargs['rsit2']]

@@ -44,14 +44,14 @@ def generate_signal(period=1000):
 
     price_noise_process_1 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=15.0,
-                                                                mu=5.0,
+                                                                mu=1.0,
                                                                 sigma=100.0,
                                                                 n_steps_annealing=5 * 80000,
                                                                 sigma_min=50.0,
                                                                 )
     price_noise_process_2 = ConstrainedOrnsteinUhlenbeckProcess(size=(1,),
                                                                 theta=10.0,
-                                                                mu=3.0,
+                                                                mu=0.5,
                                                                 sigma=70.0,
                                                                 n_steps_annealing=4 * 80000,
                                                                 sigma_min=50.0,
@@ -133,13 +133,13 @@ def make_dfs(process_idx, files, demo=False, freq=30):
             dfs.append(get_historical(start='2017-05-01 00:00:00', end='2017-05-30 00:00:00', freq=freq, file=file))
         else:
             if process_idx == 0:
-                dfs.append(get_historical(start='2017-01-01 00:00:00', end='2017-01-30 00:00:00', freq=freq, file=file))
-            elif process_idx == 1:
-                dfs.append(get_historical(start='2017-02-01 00:00:00', end='2017-02-27 00:00:00', freq=freq, file=file))
-            elif process_idx == 2:
-                dfs.append(get_historical(start='2017-03-01 00:00:00', end='2017-03-30 00:00:00', freq=freq, file=file))
-            elif process_idx == 3:
                 dfs.append(get_historical(start='2017-04-01 00:00:00', end='2017-04-30 00:00:00', freq=freq, file=file))
+            elif process_idx == 1:
+                dfs.append(get_historical(start='2017-03-01 00:00:00', end='2017-03-30 00:00:00', freq=freq, file=file))
+            elif process_idx == 2:
+                dfs.append(get_historical(start='2017-02-01 00:00:00', end='2017-02-27 00:00:00', freq=freq, file=file))
+            elif process_idx == 3:
+                dfs.append(get_historical(start='2017-01-01 00:00:00', end='2017-01-30 00:00:00', freq=freq, file=file))
             elif process_idx == 4:
                 dfs.append(get_historical(start='2016-12-01 00:00:00', end='2016-12-30 00:00:00', freq=freq, file=file))
             elif process_idx == 5:
@@ -169,15 +169,29 @@ def sample_trades(df, freq):
         return out
 
 
-def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42):
+def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42, toy=True, files=None):
     """
     Make environment function to be called by each agent thread
+    :param test:
+    :param n_assets:
+    :param obs_steps:
+    :param freq:
+    :param tax:
+    :param init_fiat:
+    :param init_crypto:
+    :param seed:
+    :param toy:
+    :param files:
+    :return:
     """
     # Get data
     gc.collect()
     np.random.seed(seed)
 
-    dfs = make_toy_dfs(n_assets, freq)
+    if toy:
+        dfs = make_toy_dfs(n_assets, freq)
+    else:
+        dfs = make_dfs(0, files, demo=True, freq=freq)
 
     ## ENVIRONMENT INITIALIZATION
     env = Apocalipse(name='toy_env', seed=seed)
@@ -210,3 +224,40 @@ def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, 
     env.reset(reset_funds=True, reset_results=True)
 
     return env
+
+
+def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
+    assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
+    assert isinstance(exchange, str), 'exchnage must be a string'
+    symbols = []
+    for item in conn.collection_names():
+        if exchange in item:
+            item = item.split('_')
+            symbols.append(item[1])
+
+    dfs = []
+    for symbol in symbols:
+        if start and end is not None:
+            filt = {'date': {'$gt': start, '$lt': end}}
+        elif start is not None:
+            filt = {'date': {'$gt': start}}
+        else:
+            filt = None
+
+        df = pd.DataFrame.from_records(conn['poloniex_' + symbol + '_trades'].find(filt))
+
+        df['rate'] = df['rate'].apply(convert_to.decimal).ffill()
+        df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-12'))
+        df.index = df.date.apply(pd.to_datetime)
+
+        index = df.resample(freq).first().index
+        out = pd.DataFrame(index=index)
+
+        out['open'] = df['rate'].resample(freq).first()
+        out['high'] = df['rate'].resample(freq).max()
+        out['low'] = df['rate'].resample(freq).min()
+        out['close'] = df['rate'].resample(freq).last()
+        out['volume'] = df['amount'].resample(freq).sum()
+        dfs.append(out)
+
+    return symbols, dfs

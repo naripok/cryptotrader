@@ -36,8 +36,14 @@ debug = True
 def get_historical(file, freq, start=None, end=None):
     """
     Gets historical data from csv file
-    return sampled ohlc pandas dataframe
+
+    :param file: path to csv file
+    :param freq: sample frequency
+    :param start: start date
+    :param end: end date
+    :return: sampled pandas DataFrame
     """
+
     assert freq >= 1
     freq = "%dmin" % (freq)
 
@@ -382,7 +388,7 @@ class Apocalipse(Env):
         self.prev_online_val = np.nan
         self.init_crypto = {}
         self.init_fiat = None
-        self.optax = {}
+        self.tax = {}
         self.symbols = ['fiat']
 
         self.order_type = None
@@ -612,7 +618,7 @@ class Apocalipse(Env):
 
     def _save_prev_portval(self):
         try:
-            portval = self._get_portval()
+            portval = self._calc_step_total_portval()
             assert portval >= 0.0
             self.prev_val = portval
         except Exception as e:
@@ -653,7 +659,7 @@ class Apocalipse(Env):
     def set_tax(self, tax, symbol):
         assert 0.0 <= tax <= 1.0
         assert symbol in self._get_df_symbols()
-        self.optax[symbol] = convert_to.decimal(tax)
+        self.tax[symbol] = convert_to.decimal(tax)
 
     def set_training_stage(self, train):
         assert isinstance(train, bool)
@@ -700,7 +706,6 @@ class Apocalipse(Env):
 
     def _save_df_to_db(self, name):
         self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
-
 
     # Getters
     def _get_df_symbols(self, no_fiat=False):
@@ -830,7 +835,7 @@ class Apocalipse(Env):
     def get_step_obs(self, symbol):
         return self._get_step_obs(symbol=symbol, steps=self.obs_steps, float=True)
 
-    def _get_step_obs(self, symbol, steps=1, last_price=False, float=False):
+    def _get_step_obs(self, symbol, steps=1, step_price=False, float=False):
         """
         Observe the environment. Is usually used after the step is taken
         """
@@ -839,7 +844,7 @@ class Apocalipse(Env):
             # assert symbol in self._get_df_symbols() #taken out for speed
             # assert steps >= 1 and isinstance(last_price, bool) #taken out for speed
 
-            if last_price:
+            if step_price:
                 return self.df.get_value(self.df.index[self.step_idx], (symbol, 'close'))
 
             else:
@@ -888,8 +893,8 @@ class Apocalipse(Env):
         return self.init_fiat
 
     def _get_init_crypto(self, symbol):
-        assert symbol in [s for s in self.init_crypto.keys()]
-        assert 0.0 <= self.init_crypto[symbol]
+        assert symbol in [s for s in self.init_crypto.keys()], (symbol, self.init_crypto.keys())
+        assert 0.0 <= self.init_crypto[symbol], self.init_crypto[symbol]
         return self.init_crypto[symbol]
 
     def _get_posit(self, symbol):
@@ -915,7 +920,23 @@ class Apocalipse(Env):
         else:
             return np.array(portifolio)
 
-    def _get_portval(self):
+    def _calc_step_posit(self, symbol):
+        if symbol is not 'fiat':
+            return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True) /\
+                   self._calc_step_total_portval()
+        else:
+            return self._get_fiat() / self._calc_step_total_portval()
+
+    def _calc_step_potifolio_posit(self):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._calc_step_posit(symbol))
+        return np.array(portifolio)
+
+    def _calc_step_portval(self, symbol):
+        return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
+
+    def _calc_step_total_portval(self):
         portval = convert_to.decimal('0.0')
 
         # if self.online: # TODO FIX THIS
@@ -925,7 +946,7 @@ class Apocalipse(Env):
         #
         # else:
         for symbol in self._get_df_symbols(no_fiat=True):
-            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
+            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
         portval += self._get_fiat()
 
         return portval
@@ -935,8 +956,8 @@ class Apocalipse(Env):
         return self.prev_val
 
     def _get_tax(self, symbol):
-        assert symbol in [s for s in self.optax.keys()]
-        return self.optax[symbol]
+        # assert symbol in [s for s in self.tax.keys()]
+        return self.tax[symbol]
 
     def _get_historical_data(self, symbol=None, start=None, end=None, freq=1, file=None):
         """
@@ -985,7 +1006,6 @@ class Apocalipse(Env):
 
     def _get_timestamp_now(self):
         return pd.to_datetime(datetime.now() + timedelta(hours=3))  # timezone
-
 
     ## Online Methods
     # Setters
@@ -1323,7 +1343,7 @@ class Apocalipse(Env):
             if self.online:
                 return self._get_online_portval() - self._get_prev_online_portval()
             else:
-                return self._get_portval() - self._get_prev_portval()
+                return self._calc_step_total_portval() - self._get_prev_portval()
 
         elif type == 'percent change':
             if self.online:
@@ -1335,9 +1355,9 @@ class Apocalipse(Env):
             else:
                 prev_portval = self._get_prev_portval()
                 if prev_portval > convert_to.decimal('0.0'):
-                    return (self._get_portval() - self._get_prev_portval()) / prev_portval
+                    return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
                 else:
-                    return (self._get_portval() - self._get_prev_portval())
+                    return (self._calc_step_total_portval() - self._get_prev_portval())
 
         elif type == 'sharpe ratio':
             # TODO: IMPLEMENT SHARPE REWARD
@@ -1345,7 +1365,7 @@ class Apocalipse(Env):
             if self.online:
                 return self._get_online_portval() - self._get_prev_online_portval()
             else:
-                return self._get_portval() - self._get_prev_portval()
+                return self._calc_step_total_portval() - self._get_prev_portval()
 
         else:
             raise NotImplementedError
@@ -1354,17 +1374,13 @@ class Apocalipse(Env):
         try:
             for posit in action:
                 if not isinstance(posit, Decimal):
-                    if isinstance(action, np.ndarray):
-                        action = action.astype(np.float64)
-                    else:
-                        action = np.float64(action)
-
-                    action = convert_to.decimal(action)
+                    action = convert_to.decimal(np.float64(action))
 
             try:
                 assert self.action_space.contains(action)
 
             except AssertionError:
+                # normalize
                 if action.sum() != convert_to.decimal('1.0'):
                     action /= action.sum()
                     try:
@@ -1422,47 +1438,51 @@ class Apocalipse(Env):
         action = self._assert_action(action)
         # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
         #     self.observation_space.contains(observation[symbol])
-        assert isinstance(timestamp, pd.Timestamp)
+        # assert isinstance(timestamp, pd.Timestamp)
 
         # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self._get_prev_portifolio_posit())[:-1]
+        posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
 
         # Get fiat_pool
         fiat_pool = self._get_fiat()
-        portval = self._get_portval()
+        portval = self._calc_step_total_portval()
 
         # Sell assets first
         for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0.0'):
+            if change < convert_to.decimal('0E-12'):
 
-                crypto_pool = portval * action[i] / self._get_step_obs(self._get_df_symbols()[i], last_price=True)
+                symbol = self._get_df_symbols()[i]
+
+                crypto_pool = portval * action[i] / self._get_step_obs(symbol, step_price=True)
 
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
 
-                    fee = portval * change.copy_abs() * self._get_tax(self._get_df_symbols()[i])
+                    fee = portval * change.copy_abs() * self._get_tax(symbol)
 
                 fiat_pool += portval.fma(change.copy_abs(), -fee)
 
-                self._set_crypto(crypto_pool, self._get_df_symbols()[i], timestamp)
+                self._set_crypto(crypto_pool, symbol, timestamp)
 
         self._set_fiat(fiat_pool, timestamp)
 
         # Uodate prev portval with deduced taxes
-        portval = self._get_portval()
+        portval = self._calc_step_total_portval()
 
         # Then buy some goods
         for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0.0'):
+            if change > convert_to.decimal('0E-12'):
+
+                symbol = self._get_df_symbols()[i]
 
                 fiat_pool -= portval * change.copy_abs()
 
                 # if fiat_pool is negative, deduce it from portval and clip
                 try:
-                    assert fiat_pool >= convert_to.decimal('0.0')
+                    assert fiat_pool >= convert_to.decimal('0E-12')
                 except AssertionError:
                     portval += fiat_pool
-                    fiat_pool = convert_to.decimal('0.0')
+                    fiat_pool = convert_to.decimal('0E-12')
                     # if debug:
                     #     self.status['ValueError'] += 1
                     #     self.logger.error(Apocalipse._simulate_trade,
@@ -1471,11 +1491,11 @@ class Apocalipse(Env):
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
 
-                    fee = self._get_tax(self._get_df_symbols()[i]) * portval * change
+                    fee = self._get_tax(symbol) * portval * change
 
-                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(self._get_df_symbols()[i], last_price=True)
+                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(symbol, step_price=True)
 
-                self._set_crypto(crypto_pool, self._get_df_symbols()[i], timestamp)
+                self._set_crypto(crypto_pool, symbol, timestamp)
 
         # And don't forget to take your change!
         self._set_fiat(fiat_pool, timestamp)
@@ -1484,13 +1504,19 @@ class Apocalipse(Env):
         for i, change in enumerate(posit_change):
             if change == convert_to.decimal('0.0'):
                 # No order to execute, just save the variables and exit
-                self._set_crypto(self._get_crypto(self._get_df_symbols()[i]), self._get_df_symbols()[i], timestamp)
+
+                symbol = self._get_df_symbols()[i]
+
+                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
 
         ## Update your position on the exit
         for i, symbol in enumerate(self._get_df_symbols(no_fiat=True)):
-            self._set_posit(self._get_step_obs(symbol, last_price=True) * self._get_crypto(symbol) /
-                            self._get_portval(), symbol, timestamp)
-        self._set_posit(self._get_fiat() / self._get_portval(), 'fiat', timestamp)
+            self._set_posit(self._get_step_obs(symbol, step_price=True) * self._get_crypto(symbol) /
+                            self._calc_step_total_portval(), symbol, timestamp)
+        self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
+
+    def _rebalance_online_portifolio(self):
+        pass # TODO _REBALANCE_ONLINE_PORTIFOLIO
 
     def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
         """
@@ -1520,36 +1546,34 @@ class Apocalipse(Env):
             timestamp = self.df.index[self.step_idx]
 
             for symbol in self._get_df_symbols():
+                # Set crypto and fiat amounts
                 if symbol in self._get_df_symbols(no_fiat=True):
                     self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
                 else:
                     self._set_fiat(self._get_fiat(), timestamp)
 
-                portval = self._get_portval()
+                # portval = self._calc_step_total_portval()
 
-                if portval > convert_to.decimal('0.0'):
-                    if symbol in self._get_df_symbols(no_fiat=True):
-                        posit = self._get_crypto(symbol) / portval
-                    else:
-                        posit = self._get_fiat() / portval
-
-                    self._set_prev_posit(posit, symbol, timestamp)
-                    self._set_posit(posit, symbol, timestamp)
-                else:
-                    self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
-                    self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
+                # Calculate positions
+                # if portval > convert_to.decimal('0.0'):
+                posit = self._calc_step_posit(symbol)
+                self._set_prev_posit(posit, symbol, timestamp)
+                self._set_posit(posit, symbol, timestamp)
+                # else:
+                #     self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
+                #     self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
 
             self.step_idx += 1
 
-        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.optax) is not None
+        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.tax) is not None
 
         return self.get_step_obs_all()
 
     def _reset(self, symbol, timestamp, reset_results=False, reset_funds=False):
         # TODO: VALIDATE
-
+        # Assert conditions
         assert symbol in self._get_df_symbols()
-        assert (self._is_training, self.obs_steps, self.optax) is not None
+        assert (self._is_training, self.obs_steps, self.tax) is not None
         assert isinstance(self.obs_steps, int) and self.obs_steps > 0
 
         try:
@@ -1558,8 +1582,10 @@ class Apocalipse(Env):
             self.logger.error(Apocalipse._reset, "Calling reset with steps <= obs_steps")
             raise ValueError
 
+        # set offset
         self.offset = self.obs_steps
 
+        # Reset results columns
         if reset_results:
             self.df[symbol, 'amount'] = convert_to.decimal(np.nan)
             self.df[symbol, 'position'] = convert_to.decimal(np.nan)
@@ -1597,13 +1623,12 @@ class Apocalipse(Env):
         # TODO: VALIDATE
         try:
             # Assert observation is valid
-            assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
-                   observation.shape[0] >= 3
+            # assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
+            #        observation.shape[0] >= 3
 
             # for symbol in self._get_df_symbols(no_fiat=True):
             #     assert self.observation_space.contains(observation[symbol])
 
-            assert isinstance(timeout, float) or isinstance(timeout, int)
             # Assert action is valid
             action = self._assert_action(action)
             self.last_action = action
@@ -1622,6 +1647,7 @@ class Apocalipse(Env):
 
             ## ONLINE STEP
             if self.online:
+                assert isinstance(timeout, float) or isinstance(timeout, int)
                 # Parse order for exchange action
                 done = self._rebalance_online_portifolio(action, timestamp, timeout)
                 self.step_idx = self.df.shape[0] - 1
@@ -1630,7 +1656,7 @@ class Apocalipse(Env):
                 self._simulate_trade(action, timestamp)
 
                 # Update step counter and environment observation
-                if self.step_idx < self.df.shape[0] - self.obs_steps - 1:
+                if self.step_idx < self.df.shape[0] - 1:
                     self.step_idx += 1
                     done = False
                 else:
@@ -2140,14 +2166,14 @@ class Apocalipse(Env):
 
         return results
 
-    def _get_results(self, window=100):
+    def _get_results(self, window=30):
         """
         Calculate arbiter desired actions statistics
         :return:
         """
 
 
-        self.results = self.df.iloc[self.offset + 1:-window].copy()
+        self.results = self.df.iloc[self.offset + 1:-2].copy()
 
         self.results['portval'] = convert_to.decimal(np.nan)
         self.results['benchmark'] = convert_to.decimal(np.nan)
@@ -2174,9 +2200,15 @@ class Apocalipse(Env):
         #                             self._get_tax('btcusd') * self._get_init_fiat() / self.results.at[
         #                             self.results.index[self.offset], ('btcusd', 'close')]
 
-        self.results['benchmark'] = (1 - self._get_tax('btcusd')) * self.results['btcusd', 'close'] * \
-                                    self._get_init_fiat() / self.df.at[self.results.index[self.offset],
-                                                                       ('btcusd', 'close')]
+        # Calculate benchmark portifolio, just equaly distribute money over all the assets
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
+                                        self._get_init_fiat() / (self.df.at[self.results.index[0],
+                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
+
+        self.results['benchmark'] = convert_to.decimal('0e-12')
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-12)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-12)
@@ -2190,7 +2222,7 @@ class Apocalipse(Env):
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=window)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=3)
         self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=window, risk_free=0.001)
 
         return self.results
@@ -2211,12 +2243,12 @@ class Apocalipse(Env):
                      \n   Previous position: {4}, \
                      \n   New position (Action): {5}, \
                      \n   Portifolio dolar value: {6}""".format(self.step_idx,
-                                   self.df.index[self.step_idx],
-                                   self._get_obs(last_price=True),
-                                   str(self._get_fiat()),
-                                   str(self._get_prev_portifolio_posit()),
-                                   str(self._get_portifolio_posit()),
-                                   str(self._get_portval())))
+                                                                self.df.index[self.step_idx],
+                                                                self._get_obs(last_price=True),
+                                                                str(self._get_fiat()),
+                                                                str(self._get_prev_portifolio_posit()),
+                                                                str(self._get_portifolio_posit()),
+                                                                str(self._calc_step_total_portval())))
         if mode == 'print':
             pass
 

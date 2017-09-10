@@ -15,7 +15,7 @@ from decimal import Decimal, InvalidOperation
 
 @given(st.one_of(st.floats(allow_nan=False, allow_infinity=False), st.integers()))
 def test_convert_to(data):
-    if abs(data) < Decimal('1e17'):
+    if abs(data) < Decimal('1e20'):
         number = convert_to.decimal(data)
         assert number == Decimal.from_float(data).quantize(Decimal('1e-12'))
     else:

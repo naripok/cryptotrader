@@ -31,7 +31,7 @@ def dfs(n_assets=4, freq=5):
     dfs = []
     index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-1000:]
     for i in range(n_assets):
-        data = data_process.sample_block() + 2
+        data = np.clip(data_process.sample_block() + 1, a_min=1e-12, a_max=np.inf)
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     return dfs
@@ -124,7 +124,7 @@ class Test_env_setup(object):
         for symbol in symbols:
             if 0.0 <= tax <= 1.0:
                 self.env.set_tax(tax, symbol)
-                assert self.env.optax[symbol] == convert_to.decimal(tax)
+                assert self.env.tax[symbol] == convert_to.decimal(tax)
             else:
                 with pytest.raises(AssertionError):
                     self.env.set_tax(tax, symbol)
@@ -143,8 +143,7 @@ class Test_env_setup(object):
         assert isinstance(self.env.action_space, Box)
         assert self.env.action_space.low.shape[0] == len(self.env.symbols)
 
-
-    @given(init_fiat=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
+    @given(init_fiat=st.floats(max_value=1e18, min_value=0.1, allow_infinity=False, allow_nan=False),
            init_crypto=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
            )
     @settings(max_examples=10)
@@ -168,6 +167,9 @@ class Test_env_setup(object):
             if symbol is not 'fiat':
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[:self.env.step_idx].amount.values.all() == convert_to.decimal(init_crypto)
+                for step in range(self.env.obs_steps):
+                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                           self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
         # If training
         self.env.set_training_stage(True)
@@ -186,6 +188,10 @@ class Test_env_setup(object):
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
                            amount.values.all() == convert_to.decimal(init_crypto)
+                for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
+                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                           self.env._calc_step_posit(symbol) <= Decimal('3e-2')
+
 
 @pytest.mark.incremental
 class Test_env_step(object):
@@ -197,9 +203,9 @@ class Test_env_step(object):
         for i in range(len(dfs())):
             cls.env.add_df(df=dfs()[i], symbol=keys()[i])
             cls.env.add_symbol(symbol=keys()[i])
-            cls.env.set_init_crypto(0.0, keys()[i])
-            cls.env.set_tax(0.0, keys()[i])
-        cls.env.set_init_fiat(np.random.random() * 1e12 + 1e-12)
+            cls.env.set_init_crypto(1E12, keys()[i])
+            cls.env.set_tax(0.25, keys()[i])
+        cls.env.set_init_fiat(1E12)
 
         cls.env._reset_status()
         cls.env.clear_dfs()
@@ -240,18 +246,35 @@ class Test_env_step(object):
             with pytest.raises(AssertionError):
                 set_prev_posit(posit)
 
+    def test__calc_step_portval(self):
+        for symbol in self.env.df.columns.levels[0]:
+            if symbol is not 'fiat':
+                val = self.env.df.get_value(self.env.df.index[self.env.step_idx], (symbol, 'close')) * self.env.crypto[symbol]
+                assert self.env._calc_step_portval(symbol) == val
+
     @given(arrays(dtype=np.float32,
                   shape=(5,),
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
-    @settings(max_examples=10)
+    @settings(max_examples=20)
     def test__simulate_trade(self, action):
         action = array_softmax(action)
+        self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
         timestamp = self.env.df.index[self.env.step_idx]
-        obs = self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
         self.env._simulate_trade(action, timestamp)
-        for i, symbol in enumerate(self.env.df.columns.levels[0]):
-            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i]), \
-                (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i])
+        # Assert position
+        for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
+            assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=5e-2), \
+                (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
+
+        # Assert amount
+        # for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
+        #     assert self.env.df[symbol].get_value(timestamp, 'amount') - \
+        #             convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
+        #             self.env.df[symbol].get_value(timestamp, 'close') <= convert_to.decimal('1E-1'), \
+        #             (self.env.df[symbol].get_value(timestamp, 'amount'),
+        #              convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
+        #              self.env.df[symbol].get_value(timestamp, 'close'))
+
 
 
 if __name__ == '__main__':
