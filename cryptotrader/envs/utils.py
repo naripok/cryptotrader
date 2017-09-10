@@ -2,6 +2,7 @@ import gc
 
 import numpy as np
 import pandas as pd
+import pymongo as pm
 
 from .driver import Apocalipse, get_historical
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
@@ -227,6 +228,15 @@ def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, 
 
 
 def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
+    """
+    Get dataframes from database
+    :param conn: pymongo database instance
+    :param exchange: exchnage name string
+    :param start: start date string
+    :param end: end date string
+    :param freq: df's sampling frequency
+    :return: list, list: symbols, dfs
+    """
     assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
     assert isinstance(exchange, str), 'exchnage must be a string'
     symbols = []
