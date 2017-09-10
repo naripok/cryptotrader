@@ -35,7 +35,7 @@ class APrioriAgent(Agent):
         """
         try:
             if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0]
+                nb_max_episode_steps = env.df.shape[0] - 1
             env.set_online(False)
             env._reset_status()
             obs = env.reset(reset_funds=True, reset_results=True)
@@ -187,10 +187,10 @@ class EqualyDistributedTrader(APrioriAgent):
         super().__init__()
 
     def act(self, obs):
-        n_pairs = obs.columns.levels[0].shape[0] - 1
-        action = np.ones(n_pairs + 1) / n_pairs
+        n_pairs = obs.columns.levels[0].shape[0]
+        action = np.ones(n_pairs)
         action[-1] = 0
-        return action
+        return array_normalize(action)
 
 
 class MomentumTrader(APrioriAgent):

@@ -247,6 +247,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
 
     dfs = []
     for symbol in symbols:
+        print("Downloading {} df".format(symbol))
         if start and end is not None:
             filt = {'date': {'$gt': start, '$lt': end}}
         elif start is not None:
@@ -269,5 +270,5 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
         out['close'] = df['rate'].resample(freq).last()
         out['volume'] = df['amount'].resample(freq).sum()
         dfs.append(out)
-
+    print("Done!")
     return symbols, dfs
