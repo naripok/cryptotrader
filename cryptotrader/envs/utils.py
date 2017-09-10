@@ -254,7 +254,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
         else:
             filt = None
 
-        df = pd.DataFrame.from_records(conn['poloniex_' + symbol + '_trades'].find(filt))
+        df = pd.DataFrame.from_records(conn[exchange + '_' + symbol + '_trades'].find(filt))
 
         df['rate'] = df['rate'].apply(convert_to.decimal).ffill()
         df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-8'))
