@@ -224,3 +224,40 @@ def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, 
     env.reset(reset_funds=True, reset_results=True)
 
     return env
+
+
+def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
+    assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
+    assert isinstance(exchange, str), 'exchnage must be a string'
+    symbols = []
+    for item in conn.collection_names():
+        if exchange in item:
+            item = item.split('_')
+            symbols.append(item[1])
+
+    dfs = []
+    for symbol in symbols:
+        if start and end is not None:
+            filt = {'date': {'$gt': start, '$lt': end}}
+        elif start is not None:
+            filt = {'date': {'$gt': start}}
+        else:
+            filt = None
+
+        df = pd.DataFrame.from_records(conn['poloniex_' + symbol + '_trades'].find(filt))
+
+        df['rate'] = df['rate'].apply(convert_to.decimal).ffill()
+        df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-12'))
+        df.index = df.date.apply(pd.to_datetime)
+
+        index = df.resample(freq).first().index
+        out = pd.DataFrame(index=index)
+
+        out['open'] = df['rate'].resample(freq).first()
+        out['high'] = df['rate'].resample(freq).max()
+        out['low'] = df['rate'].resample(freq).min()
+        out['close'] = df['rate'].resample(freq).last()
+        out['volume'] = df['amount'].resample(freq).sum()
+        dfs.append(out)
+
+    return symbols, dfs
