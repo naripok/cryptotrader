@@ -1531,7 +1531,7 @@ class Apocalipse(Env):
             self.global_step = 0
 
         if self._is_training:
-            self.step_idx = self.offset + np.random.randint(high=self.df.shape[0] - self.obs_steps, low=0)
+            self.step_idx = self.offset + np.random.randint(high=self.df.shape[0] - self.offset - 1, low=0)
             timestamp = self.df.index[self.step_idx]
         else:
             self.step_idx = self.offset
@@ -1656,7 +1656,7 @@ class Apocalipse(Env):
                 self._simulate_trade(action, timestamp)
 
                 # Update step counter and environment observation
-                if self.step_idx < self.df.shape[0] - 1:
+                if self.step_idx < self.df.shape[0] - 2:
                     self.step_idx += 1
                     done = False
                 else:
