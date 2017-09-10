@@ -31,7 +31,7 @@ def dfs(n_assets=4, freq=5):
     dfs = []
     index = pd.DatetimeIndex(start='2017-01-01 00:00:00', end='2017-04-30 00:00:00', freq='1min')[-1000:]
     for i in range(n_assets):
-        data = np.clip(data_process.sample_block() + 1, a_min=1e-12, a_max=np.inf)
+        data = np.clip(data_process.sample_block() + 1, a_min=1e-8, a_max=np.inf)
         dfs.append(sample_trades(pd.DataFrame(data, columns=['trade_px', 'trade_volume'], index=index), freq=str(freq)+'min'))
 
     return dfs
@@ -203,9 +203,9 @@ class Test_env_step(object):
         for i in range(len(dfs())):
             cls.env.add_df(df=dfs()[i], symbol=keys()[i])
             cls.env.add_symbol(symbol=keys()[i])
-            cls.env.set_init_crypto(1E12, keys()[i])
+            cls.env.set_init_crypto(1E8, keys()[i])
             cls.env.set_tax(0.25, keys()[i])
-        cls.env.set_init_fiat(1E12)
+        cls.env.set_init_fiat(1E8)
 
         cls.env._reset_status()
         cls.env.clear_dfs()
@@ -254,7 +254,7 @@ class Test_env_step(object):
 
     @given(arrays(dtype=np.float32,
                   shape=(5,),
-                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e12, min_value=-1e12)))
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=-1e8)))
     @settings(max_examples=20)
     def test__simulate_trade(self, action):
         action = array_softmax(action)

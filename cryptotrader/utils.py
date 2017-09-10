@@ -8,6 +8,8 @@ import numpy as np
 from bson import Decimal128
 import math
 
+decimal_cases = 1E-8
+
 
 class Logger(object):
     logger = None
@@ -66,17 +68,17 @@ def array_softmax(x, SAFETY=2.0):
     amx = x.max()
     if(amx > thr):
         b = np.exp(x - (amx-thr))
-        return b / (b.sum() + 1e-12)
+        return b / (b.sum() + decimal_cases)
     else:
         b = np.exp(x)
-        return b / (b.sum() + 1e-12)
+        return b / (b.sum() + decimal_cases)
 
 
 def array_normalize(x):
     out = convert_to.decimal(x)
 
     if out.sum() == convert_to.decimal('0.0'):
-        out = out / (out.sum() + convert_to.decimal('1e-12'))
+        out = out / (out.sum() + convert_to.decimal('1e-8'))
     else:
         out = out / out.sum()
 
@@ -89,7 +91,7 @@ def array_normalize(x):
 
 # Helper functions and classes
 class convert_to(object):
-    _quantize = partialmethod(Decimal.quantize, Decimal('1e-12'))
+    _quantize = partialmethod(Decimal.quantize, Decimal('1e-8'))
 
     @staticmethod
     def decimal128(data):
@@ -102,16 +104,16 @@ class convert_to(object):
         try:
             if isinstance(data, np.float32) or isinstance(data, float):
                 data = np.float64(data)
-                return Decimal.from_float(data).quantize(Decimal('1e-12'))
+                return Decimal.from_float(data).quantize(Decimal('1e-8'))
             if isinstance(data, np.ndarray):
                 output = []
                 shape = data.shape
                 for item in data.flatten():
                     item = np.float64(item)
-                    output.append(Decimal(item).quantize(Decimal('1e-12')))
+                    output.append(Decimal(item).quantize(Decimal('1e-8')))
                 return np.array(output).reshape(shape)
             else:
-                return Decimal(data).quantize(Decimal('1e-12'))
+                return Decimal(data).quantize(Decimal('1e-8'))
         except InvalidOperation:
             if abs(data) > Decimal('1e15'):
                 print("Numeric overflow in convert_to.decimal:", data)
@@ -124,7 +126,7 @@ class convert_to(object):
 def sample_trades(df, freq):
 
     df['trade_px'] = df['trade_px'].ffill()
-    df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-12'))
+    df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
 
     # TODO FIND OUT WHAT TO DO WITH NANS
     index = df.resample(freq).first().index

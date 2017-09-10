@@ -65,7 +65,7 @@ def get_historical(file, freq, start=None, end=None):
     df.columns = ['open', 'high', 'low', 'close', 'volume']
 
     df.ffill(inplace=True)
-    df.fillna(1e-12, inplace=True)
+    df.fillna(1e-8, inplace=True)
 
     index = df.resample(freq).first().index
     out = pd.DataFrame(index=index)
@@ -396,7 +396,7 @@ class Apocalipse(Env):
         self.status = None
         self.np_random = None
         self._is_training = False
-        self.epsilon = 1e-12
+        self.epsilon = 1e-8
         self.step_idx = None
         self.global_step = 0
         self.obs_steps = 0
@@ -483,7 +483,7 @@ class Apocalipse(Env):
             if isinstance(df, pd.core.frame.DataFrame):
                 for col in df.columns:
                     assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount']
-                self.dfs[symbol] = df.ffill().fillna(1e-12).applymap(convert_to.decimal)
+                self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
             else:
                 assert symbol in [s for s in self.tables.keys()]
                 assert isinstance(self.tables[symbol], pm.collection.Collection)
@@ -501,7 +501,7 @@ class Apocalipse(Env):
             self.dfs[symbol]['position'] = np.nan
             self.dfs[symbol]['amount'] = np.nan
 
-            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-12).applymap(convert_to.decimal)
+            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-8).applymap(convert_to.decimal)
 
             assert self.dfs[symbol].columns.all() in ['open', 'high', 'low', 'close', 'volume', 'prev_position',
                                                       'position', 'amount']
@@ -807,7 +807,7 @@ class Apocalipse(Env):
 
                     obs = obs.astype(np.float64)
                     obs.ffill(inplace=True)
-                    obs.fillna(1e-12, inplace=True)
+                    obs.fillna(1e-8, inplace=True)
 
                     try:
                         assert obs.shape[0] == steps
@@ -1737,7 +1737,7 @@ class Apocalipse(Env):
     def sample_trades(df, freq):
 
         df['trade_px'] = df['trade_px'].ffill()
-        df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-12'))
+        df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
 
         # TODO FIND OUT WHAT TO DO WITH NANS
         index = df.resample(freq).first().index
@@ -1762,7 +1762,7 @@ class Apocalipse(Env):
         out['high'] = df['high'].resample(freq).max().ffill()
         out['low'] = df['low'].resample(freq).min().ffill()
         out['close'] = df['close'].resample(freq).last().ffill()
-        out['volume'] = df['volume'].resample(freq).sum().fillna(convert_to.decimal('1e-12'))
+        out['volume'] = df['volume'].resample(freq).sum().fillna(convert_to.decimal('1e-8'))
 
         return out
 
@@ -2210,8 +2210,8 @@ class Apocalipse(Env):
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
-        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-12)
-        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-12)
+        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
+        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
         self.results['alpha'] = ec.utils.roll(self.results.returns,
                                               self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
@@ -2273,8 +2273,8 @@ class Apocalipse(Env):
         self.online_results['portval'] = self.df.online_crypto * self.df.close + self.df.online_fiat
         self.online_results['benchmark'] = self.df.close * self._get_init_fiat() / self.df.loc[self.session_begin_time].close - \
                                     self._get_tax() * self._get_init_fiat() / self.df.loc[self.session_begin_time].close
-        self.online_results['returns'] = pd.to_numeric(self.online_results.portval).diff().fillna(1e-12)
-        self.online_results['benchmark_returns'] = pd.to_numeric(self.online_results.benchmark).diff().fillna(1e-12)
+        self.online_results['returns'] = pd.to_numeric(self.online_results.portval).diff().fillna(1e-8)
+        self.online_results['benchmark_returns'] = pd.to_numeric(self.online_results.benchmark).diff().fillna(1e-8)
         self.online_results['alpha'] = ec.utils.roll(self.online_results.returns,
                                               self.online_results.benchmark_returns,
                                               function=ec.alpha_aligned,

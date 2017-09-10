@@ -155,7 +155,7 @@ def make_dfs(process_idx, files, demo=False, freq=30):
 def sample_trades(df, freq):
 
         df['trade_px'] = df['trade_px'].ffill()
-        df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-12'))
+        df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
 
         # TODO FIND OUT WHAT TO DO WITH NANS
         index = df.resample(freq).first().index
@@ -237,7 +237,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
     :param freq: df's sampling frequency
     :return: list, list: symbols, dfs
     """
-    assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
+    # assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
     assert isinstance(exchange, str), 'exchnage must be a string'
     symbols = []
     for item in conn.collection_names():
@@ -257,7 +257,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
         df = pd.DataFrame.from_records(conn['poloniex_' + symbol + '_trades'].find(filt))
 
         df['rate'] = df['rate'].apply(convert_to.decimal).ffill()
-        df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-12'))
+        df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-8'))
         df.index = df.date.apply(pd.to_datetime)
 
         index = df.resample(freq).first().index
