@@ -99,3 +99,4 @@ cryptotrader/envs/__pycache__/
 dist/
 historical_data/
 notebooks/
+.cache/

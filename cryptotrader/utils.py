@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import partialmethod
+import pandas as pd
 
 import numpy as np
 from bson import Decimal128
@@ -118,3 +119,21 @@ class convert_to(object):
             elif data == np.nan or math.nan:
                 print("NaN encountered in convert_to.decimal:", data)
                 raise InvalidOperation
+
+
+def sample_trades(df, freq):
+
+    df['trade_px'] = df['trade_px'].ffill()
+    df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-12'))
+
+    # TODO FIND OUT WHAT TO DO WITH NANS
+    index = df.resample(freq).first().index
+    out = pd.DataFrame(index=index)
+
+    out['open'] = df['trade_px'].resample(freq).first()
+    out['high'] = df['trade_px'].resample(freq).max()
+    out['low'] = df['trade_px'].resample(freq).min()
+    out['close'] = df['trade_px'].resample(freq).last()
+    out['volume'] = df['trade_volume'].resample(freq).sum()
+
+    return out
