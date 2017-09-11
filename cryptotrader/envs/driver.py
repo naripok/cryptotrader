@@ -578,7 +578,7 @@ class Apocalipse(Env):
                 else:
                     raise AssertionError
             # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert 0.0 <= posit <= 1.0, posit
+            assert  convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
             self.posit[symbol] = posit
             self.df.loc[timestamp, (symbol, 'position')] = posit
 
@@ -605,7 +605,7 @@ class Apocalipse(Env):
             #     posit = np.clip(np.array([posit]), a_min=0.0, a_max=1.0)[0]
             #     self.status['ValueError'] += 1
             #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
-            assert 0.0 <= posit <= 1.0, posit
+            assert convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
             self.prev_posit[symbol] = posit
             self.df.loc[timestamp, (symbol, 'prev_position')] = posit
 
