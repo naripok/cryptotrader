@@ -542,7 +542,7 @@ class Apocalipse(Env):
     def _set_fiat(self, fiat, timestamp):
         try:
             # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert isinstance(fiat, Decimal)
+            assert isinstance(fiat, Decimal), 'fiat is not decimal'
 
             if fiat < 0.0:
                 self.status['ValueError'] += 1
@@ -866,8 +866,6 @@ class Apocalipse(Env):
 
                 assert obs.shape[0] == self.obs_steps
                 if float:
-                    # return obs.applymap(np.float64)
-                    # Better performance method
                     return obs.astype(np.float64)
                 else:
                     return obs
@@ -1669,14 +1667,13 @@ class Apocalipse(Env):
             self.last_reward = self._get_reward(reward_type)
 
             if isinstance(new_obs, pd.core.frame.DataFrame):
-                assert new_obs.shape[0] == observation.shape[0]
-
-                assert pd.infer_freq(new_obs.index) == pd.infer_freq(observation.index)
-                assert len(new_obs.index) == len(observation.index)
+                assert new_obs.shape[0] == observation.shape[0], "wrong observation size"
+                assert pd.infer_freq(new_obs.index) == pd.infer_freq(observation.index), "wrong observation frequency"
+                # assert len(new_obs.index) == len(observation.index), "wrong observation size"
 
             self.global_step += 1
 
-            return new_obs.astype(np.float32), np.float32(self.last_reward), done, self.status
+            return new_obs, np.float32(self.last_reward), done, self.status
 
         except Exception as e:
             self.logger.error(Apocalipse._step, self.parse_error(e))

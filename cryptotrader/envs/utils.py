@@ -2,7 +2,7 @@ import gc
 
 import numpy as np
 import pandas as pd
-import pymongo as pm
+from time import time
 
 from .driver import Apocalipse, get_historical
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
@@ -238,7 +238,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
     :return: list, list: symbols, dfs
     """
     # assert isinstance(conn, pm.database), 'conn must be an instance of mongo database'
-    assert isinstance(exchange, str), 'exchnage must be a string'
+    assert isinstance(exchange, str), 'exchange must be a string'
     symbols = []
     for item in conn.collection_names():
         if exchange in item:
@@ -247,7 +247,8 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
 
     dfs = []
     for symbol in symbols:
-        print("Downloading {} df".format(symbol))
+        t0 = time()
+        print("Downloading {} dataframe".format(symbol))
         if start and end is not None:
             filt = {'date': {'$gt': start, '$lt': end}}
         elif start is not None:
@@ -257,18 +258,26 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
 
         df = pd.DataFrame.from_records(conn[exchange + '_' + symbol + '_trades'].find(filt))
 
-        df['rate'] = df['rate'].apply(convert_to.decimal).ffill()
-        df['amount'] = df['amount'].apply(convert_to.decimal).fillna(convert_to.decimal('0E-8'))
+        df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
+        df['amount'] = df['amount'].apply(convert_to.decimal)
         df.index = df.date.apply(pd.to_datetime)
 
         index = df.resample(freq).first().index
         out = pd.DataFrame(index=index)
 
-        out['open'] = df['rate'].resample(freq).first()
-        out['high'] = df['rate'].resample(freq).max()
-        out['low'] = df['rate'].resample(freq).min()
-        out['close'] = df['rate'].resample(freq).last()
-        out['volume'] = df['amount'].resample(freq).sum()
+        def convert_and_clean(x):
+            x = x.apply(convert_to.decimal)
+            f = x.rolling(3, center=True, min_periods=1).mean().apply(convert_to.decimal)
+            x = x.apply(lambda x: x if x.is_finite() else np.nan)
+            return x.combine_first(f)
+
+        out['open'] = convert_and_clean(df['rate'].resample(freq).first())
+        out['high'] = convert_and_clean(df['rate'].resample(freq).max())
+        out['low'] = convert_and_clean(df['rate'].resample(freq).min())
+        out['close'] = convert_and_clean(df['rate'].resample(freq).last())
+        out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
+
+        print("Dataframe shape: {}, Acquisition time: {}".format(out.shape, time() - t0))
         dfs.append(out)
     print("Done!")
     return symbols, dfs
