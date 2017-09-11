@@ -2162,7 +2162,6 @@ class Apocalipse(Env):
         :return:
         """
 
-
         self.results = self.df.iloc[self.offset:].copy()
 
         self.results['portval'] = self.results['fiat', 'amount']
@@ -2173,7 +2172,6 @@ class Apocalipse(Env):
         self.results['beta'] = convert_to.decimal(np.nan)
         self.results['drawdown'] = convert_to.decimal(np.nan)
         self.results['sharpe'] = convert_to.decimal(np.nan)
-
 
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results[symbol + '_portval'] = self.results[symbol, 'close'] * self.results[symbol, 'amount']
@@ -2188,7 +2186,7 @@ class Apocalipse(Env):
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
                                         self._get_init_fiat() / (self.results.at[self.results.index[0],
-                                        (symbol, 'close')] * (self.action_space.low.shape[0]) - 1)
+                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
