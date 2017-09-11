@@ -544,11 +544,11 @@ class Apocalipse(Env):
             # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
             assert isinstance(fiat, Decimal), 'fiat is not decimal'
 
-            if fiat < 0.0:
+            if fiat < convert_to.decimal('0E-8'):
                 self.status['ValueError'] += 1
                 self.logger.error(Apocalipse._set_fiat, "Fiat value error: Negative value")
             self.fiat = fiat
-            self.df.at[timestamp, ('fiat', 'amount')] = fiat
+            self.df.loc[timestamp, ('fiat', 'amount')] = fiat
         except Exception as e:
             self.logger.error(Apocalipse._set_fiat, self.parse_error(e))
 
@@ -562,7 +562,7 @@ class Apocalipse(Env):
                 self.logger.error(Apocalipse._set_crypto, "Crypto value error: Negative value")
 
             self.crypto[symbol] = amount
-            self.df.at[timestamp, (symbol, 'amount')] = amount
+            self.df.loc[timestamp, (symbol, 'amount')] = amount
 
         except Exception as e:
             self.logger.error(Apocalipse._set_crypto, self.parse_error(e))
@@ -580,7 +580,7 @@ class Apocalipse(Env):
             # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
             assert 0.0 <= posit <= 1.0, posit
             self.posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'position')] = posit
+            self.df.loc[timestamp, (symbol, 'position')] = posit
 
         except AssertionError:
             self.status['ValueError'] += 1
@@ -607,7 +607,7 @@ class Apocalipse(Env):
             #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
             assert 0.0 <= posit <= 1.0, posit
             self.prev_posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'prev_position')] = posit
+            self.df.loc[timestamp, (symbol, 'prev_position')] = posit
 
         except AssertionError:
             self.status['ValueError'] += 1
@@ -887,7 +887,7 @@ class Apocalipse(Env):
         return self.crypto[symbol]
 
     def _get_init_fiat(self):
-        assert 0.0 <= self.init_fiat
+        assert convert_to.decimal('0E-8') <= self.init_fiat
         return self.init_fiat
 
     def _get_init_crypto(self, symbol):
@@ -1447,7 +1447,7 @@ class Apocalipse(Env):
 
         # Sell assets first
         for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0E-12'):
+            if change < convert_to.decimal('0E-8'):
 
                 symbol = self._get_df_symbols()[i]
 
@@ -1469,7 +1469,7 @@ class Apocalipse(Env):
 
         # Then buy some goods
         for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0E-12'):
+            if change > convert_to.decimal('0E-8'):
 
                 symbol = self._get_df_symbols()[i]
 
@@ -1477,10 +1477,10 @@ class Apocalipse(Env):
 
                 # if fiat_pool is negative, deduce it from portval and clip
                 try:
-                    assert fiat_pool >= convert_to.decimal('0E-12')
+                    assert fiat_pool >= convert_to.decimal('0E-8')
                 except AssertionError:
                     portval += fiat_pool
-                    fiat_pool = convert_to.decimal('0E-12')
+                    fiat_pool = convert_to.decimal('0E-8')
                     # if debug:
                     #     self.status['ValueError'] += 1
                     #     self.logger.error(Apocalipse._simulate_trade,
@@ -1544,8 +1544,8 @@ class Apocalipse(Env):
             timestamp = self.df.index[self.step_idx]
 
             for symbol in self._get_df_symbols():
-                # Set crypto and fiat amounts
-                if symbol in self._get_df_symbols(no_fiat=True):
+                # # Set crypto and fiat amounts
+                if symbol is not 'fiat':
                     self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
                 else:
                     self._set_fiat(self._get_fiat(), timestamp)
@@ -1589,23 +1589,16 @@ class Apocalipse(Env):
             self.df[symbol, 'position'] = convert_to.decimal(np.nan)
             self.df[symbol, 'prev_position'] = convert_to.decimal(np.nan)
 
-        if self._is_training:
-            if symbol in self._get_df_symbols(no_fiat=True):
+        if symbol is not 'fiat':
+            if len(self.crypto.keys()) <= len(self._get_df_symbols()) - 1 or reset_funds or self._is_training:
                 self._set_crypto(self._get_init_crypto(symbol), symbol, timestamp)
             else:
-                self._set_fiat(self._get_init_fiat(), timestamp)
-
+                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
         else:
-            if symbol in self._get_df_symbols(no_fiat=True):
-                if len(self.crypto.keys()) <= len(self._get_df_symbols()) - 1 or reset_funds:
-                    self._set_crypto(self._get_init_crypto(symbol), symbol, timestamp)
-                else:
-                    self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
+            if self.fiat is None or reset_funds or self._is_training:
+                self._set_fiat(self._get_init_fiat(), timestamp)
             else:
-                if self.fiat is None or reset_funds:
-                    self._set_fiat(self._get_init_fiat(), timestamp)
-                else:
-                    self._set_fiat(self._get_fiat(), timestamp)
+                self._set_fiat(self._get_fiat(), timestamp)
 
         # self.logger.info(Apocalipse._reset, "Symbol %s reset done." % (symbol))
 
@@ -1654,7 +1647,7 @@ class Apocalipse(Env):
                 self._simulate_trade(action, timestamp)
 
                 # Update step counter and environment observation
-                if self.step_idx < self.df.shape[0] - 2:
+                if self.step_idx < self.df.shape[0] - 1:
                     self.step_idx += 1
                     done = False
                 else:
@@ -2170,10 +2163,10 @@ class Apocalipse(Env):
         """
 
 
-        self.results = self.df.iloc[self.offset + 1:-2].copy()
+        self.results = self.df.iloc[self.offset + 1:].copy()
 
-        self.results['portval'] = convert_to.decimal(np.nan)
-        self.results['benchmark'] = convert_to.decimal(np.nan)
+        self.results['portval'] = self.results['fiat', 'amount']
+        self.results['benchmark'] = convert_to.decimal('0e-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)
@@ -2181,16 +2174,10 @@ class Apocalipse(Env):
         self.results['drawdown'] = convert_to.decimal(np.nan)
         self.results['sharpe'] = convert_to.decimal(np.nan)
 
-        # Crypto val
-        for symbol in self._get_df_symbols(no_fiat=True):
-            self.results[symbol + '_portval'] = self.df[symbol, 'close'] * self.df[symbol, 'amount'] + \
-                                                self.df['fiat', 'amount']
 
-        portval = self.df['fiat', 'amount']
         for symbol in self._get_df_symbols(no_fiat=True):
-            portval += self.results[symbol, 'amount'] * self.results[symbol, 'close']
-
-        self.results['portval'] = portval
+            self.results[symbol + '_portval'] = self.results[symbol, 'close'] * self.results[symbol, 'amount']
+            self.results['portval'] = self.results['portval'] + self.results[symbol + '_portval']
 
         # self.results['benchmark'] = self.results['btcusd', 'close'] * self._get_init_fiat() / self.df.at[
         #                             self.results.index[self.offset], ('btcusd', 'close')] - \
@@ -2200,11 +2187,8 @@ class Apocalipse(Env):
         # Calculate benchmark portifolio, just equaly distribute money over all the assets
         for symbol in self._get_df_symbols(no_fiat=True):
             self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
-                                        self._get_init_fiat() / (self.df.at[self.results.index[0],
+                                        self._get_init_fiat() / (self.results.at[self.results.index[0],
                                         (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
-
-        self.results['benchmark'] = convert_to.decimal('0e-12')
-        for symbol in self._get_df_symbols(no_fiat=True):
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)

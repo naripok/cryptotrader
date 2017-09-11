@@ -87,7 +87,7 @@ def array_normalize(x):
     if out.sum() < convert_to.decimal('1.0'):
         out[-1] += convert_to.decimal('1.0') - out.sum()
 
-    return np.float32(out)
+    return np.float32(convert_to.decimal(out))
 
 # Helper functions and classes
 class convert_to(object):
