@@ -200,7 +200,8 @@ class MomentumTrader(APrioriAgent):
     def __init__(self):
         super().__init__()
         self.ma_span = None
-        self.hysteresis = None
+        self.std_span = None
+        # self.hysteresis = None
         # self.rsi_span = None
         # self.rsi_threshold = None
         self.opt_params = None
@@ -224,7 +225,8 @@ class MomentumTrader(APrioriAgent):
 
     def set_hp(self, **kwargs):
         self.ma_span = [kwargs['ma1'],kwargs['ma2']]
-        self.hysteresis = [kwargs['dh'], kwargs['uh']]
+        # self.hysteresis = [kwargs['dh'], kwargs['uh']]
+        self.std_args = [kwargs['std_span'], kwargs['std_weight']]
 
     def act(self, obs):
         """
@@ -237,10 +239,12 @@ class MomentumTrader(APrioriAgent):
                 df = self.get_ma(df, span=self.ma_span, kama=True)
 
                 # Get action
-                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] * self.hysteresis[0]:
+                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
+                    self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = np.zeros(1)
 
-                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] * self.hysteresis[1]:
+                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
+                    self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
 
                 else:
@@ -270,7 +274,13 @@ class MomentumTrader(APrioriAgent):
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                self.set_hp(**{key:round(kwarg) for key, kwarg in kwargs.items()})
+                for key, value in kwargs.items():
+                    if key is not 'std_weight':
+                        kwargs[key] = round(value)
+
+                self.set_hp(**kwargs)
+
+                # self.set_hp(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 # run test on the main process
                 r = self.test(env,
@@ -296,14 +306,17 @@ class MomentumTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              ma1=[2, int(env.obs_steps / 2)],
-                                              ma2=[int(env.obs_steps / 10), env.obs_steps],
-                                              dh=[0.8, 1.0],
-                                              uh=[1.0, 1.2]
+                                              kwargs={'ma1':[2, int(env.obs_steps / 2)],
+                                              'ma2':[int(env.obs_steps / 10), env.obs_steps],
+                                              # dh=[0.5, 1.0],
+                                              # uh=[1.0, 1.5]
+                                              'std_span':[1, env.obs_steps],
+                                              'std_weight':[0.0, 3.0]}
                                               )
 
             for key, value in opt_params.items():
-                opt_params[key] = round(value)
+                if key is not 'std_weight':
+                    opt_params[key] = round(value)
 
             self.set_hp(**opt_params)
             env.set_training_stage(False)
