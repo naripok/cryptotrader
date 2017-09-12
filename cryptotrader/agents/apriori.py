@@ -306,12 +306,12 @@ class MomentumTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              kwargs={'ma1':[2, int(env.obs_steps / 2)],
-                                              'ma2':[int(env.obs_steps / 10), env.obs_steps],
+                                              ma1=[2, int(env.obs_steps / 2)],
+                                              ma2=[int(env.obs_steps / 10), env.obs_steps],
                                               # dh=[0.5, 1.0],
                                               # uh=[1.0, 1.5]
-                                              'std_span':[1, env.obs_steps],
-                                              'std_weight':[0.0, 3.0]}
+                                              std_span=[1, env.obs_steps],
+                                              std_weight=[0.0, 3.0]
                                               )
 
             for key, value in opt_params.items():
