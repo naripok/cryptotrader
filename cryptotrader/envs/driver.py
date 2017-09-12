@@ -2201,8 +2201,8 @@ class Apocalipse(Env):
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=3)
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=window, risk_free=0.001)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/10), risk_free=0.001)
 
         return self.results
 
