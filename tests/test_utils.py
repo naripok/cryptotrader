@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 def test_convert_to(data):
     if abs(data) < Decimal('1e20'):
         number = convert_to.decimal(data)
-        assert number == Decimal.from_float(data).quantize(Decimal('1e-12'))
+        assert number == Decimal.from_float(data).quantize(Decimal('1e-8'))
     else:
         with pytest.raises(InvalidOperation):
             convert_to.decimal(data)
