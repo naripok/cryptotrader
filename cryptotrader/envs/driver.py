@@ -482,7 +482,8 @@ class Apocalipse(Env):
             assert isinstance(steps, int) and steps >= 3
             if isinstance(df, pd.core.frame.DataFrame):
                 for col in df.columns:
-                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount']
+                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
+                    'wrong dataframe formatation'
                 self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
             else:
                 assert symbol in [s for s in self.tables.keys()]

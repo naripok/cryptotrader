@@ -59,7 +59,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             step,
-                            nb_max_episode_steps - env.obs_steps,
+                            nb_max_episode_steps - env.obs_steps + 1,
                             int(100 * step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
                             str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - step) / step))
@@ -194,12 +194,37 @@ class EqualyDistributedTrader(APrioriAgent):
 
 
 class MomentumTrader(APrioriAgent):
+    """
+    Momentum trading agent
+    """
     def __init__(self):
         super().__init__()
         self.ma_span = None
+        self.hysteresis = None
         # self.rsi_span = None
         # self.rsi_threshold = None
         self.opt_params = None
+
+    # GET INDICATORS FUNCTIONS
+    @staticmethod
+    def get_ma(df, span, exp=False, kama=False, mama=False):
+        if exp:
+            for window in span:
+                df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
+        elif kama:
+            for window in span:
+                df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
+        elif mama:
+            for window in span:
+                df[str(window) + '_ma'] = tl.MAMA(df.close.values, timeperiod=window)
+        else:
+            for window in span:
+                df[str(window) + '_ma'] = df.close.rolling(window).mean()
+        return df
+
+    def set_hp(self, **kwargs):
+        self.ma_span = [kwargs['ma1'],kwargs['ma2']]
+        self.hysteresis = [kwargs['dh'], kwargs['uh']]
 
     def act(self, obs):
         """
@@ -212,10 +237,10 @@ class MomentumTrader(APrioriAgent):
                 df = self.get_ma(df, span=self.ma_span, kama=True)
 
                 # Get action
-                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1]:
+                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] * self.hysteresis[0]:
                     action = np.zeros(1)
 
-                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1]:
+                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] * self.hysteresis[1]:
                     action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
 
                 else:
@@ -273,6 +298,8 @@ class MomentumTrader(APrioriAgent):
                                               num_evals=nb_steps,
                                               ma1=[2, int(env.obs_steps / 2)],
                                               ma2=[int(env.obs_steps / 10), env.obs_steps],
+                                              dh=[0.8, 1.0],
+                                              uh=[1.0, 1.2]
                                               )
 
             for key, value in opt_params.items():
@@ -284,20 +311,3 @@ class MomentumTrader(APrioriAgent):
 
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user.")
-
-    # GET INDICATORS FUNCTIONS
-    @staticmethod
-    def get_ma(df, span, exp=False, kama=False):
-        if exp:
-            for window in span:
-                df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
-        elif kama:
-            for window in span:
-                df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
-        else:
-            for window in span:
-                df[str(window) + '_ma'] = df.close.rolling(window).mean()
-        return df
-
-    def set_hp(self, **kwargs):
-        self.ma_span = [kwargs['ma1'],kwargs['ma2']]

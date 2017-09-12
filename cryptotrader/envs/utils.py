@@ -241,7 +241,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
     assert isinstance(exchange, str), 'exchange must be a string'
     symbols = []
     for item in conn.collection_names():
-        if exchange in item:
+        if exchange in item and 'zec' not in item:
             item = item.split('_')
             symbols.append(item[1])
 
