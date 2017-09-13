@@ -264,6 +264,7 @@ class Test_env_step(object):
         self.env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
         timestamp = self.env.df.index[self.env.step_idx]
         self.env._simulate_trade(action, timestamp)
+        
         # Assert position
         for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
             assert np.allclose(np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], atol=5e-2), \

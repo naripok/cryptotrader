@@ -79,10 +79,10 @@ class APrioriAgent(Agent):
                     break
 
         except TypeError:
-            print("You must fit the model or provide indicator parameters in order to test.")
+            print("\nYou must fit the model or provide indicator parameters in order to test.")
 
         except KeyboardInterrupt:
-            print("Keyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
+            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * step / nb_max_episode_steps)))
 
@@ -256,7 +256,7 @@ class MomentumTrader(APrioriAgent):
             return array_normalize(position)
 
         except TypeError:
-            print("You must fit the model or provide indicator parameters in order for the model to act.")
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
 
     def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -308,8 +308,8 @@ class MomentumTrader(APrioriAgent):
                                               ma1=[2, env.obs_steps],
                                               ma2=[2, env.obs_steps],
                                               std_span=[1, env.obs_steps],
-                                              std_weight_down=[0.0, 3.0],
-                                              std_weight_up=[0.0, 3.0]
+                                              std_weight_down=[0.0, 1.0],
+                                              std_weight_up=[0.0, 1.0]
                                               )
 
             for key, value in opt_params.items():
