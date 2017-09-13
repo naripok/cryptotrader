@@ -197,36 +197,35 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
-    def __init__(self):
+    def __init__(self, mean_type='kama'):
+        """
+        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
+        """
         super().__init__()
+        self.mean_type = mean_type
         self.ma_span = None
         self.std_span = None
-        # self.hysteresis = None
-        # self.rsi_span = None
-        # self.rsi_threshold = None
         self.opt_params = None
 
     # GET INDICATORS FUNCTIONS
-    @staticmethod
-    def get_ma(df, span, exp=False, kama=False, mama=False):
-        if exp:
-            for window in span:
+    def get_ma(self, df):
+        if self.mean_type == 'exp':
+            for window in self.ma_span:
                 df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
-        elif kama:
-            for window in span:
+        elif self.mean_type == 'kama':
+            for window in self.ma_span:
                 df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
-        elif mama:
-            for window in span:
-                df[str(window) + '_ma'] = tl.MAMA(df.close.values, timeperiod=window)
-        else:
-            for window in span:
+        elif self.mean_type == 'simple':
+            for window in self.ma_span:
                 df[str(window) + '_ma'] = df.close.rolling(window).mean()
+        else:
+            raise TypeError("Wrong mean_type param")
         return df
 
     def set_hp(self, **kwargs):
         self.ma_span = [kwargs['ma1'],kwargs['ma2']]
         # self.hysteresis = [kwargs['dh'], kwargs['uh']]
-        self.std_args = [kwargs['std_span'], kwargs['std_weight']]
+        self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
 
     def act(self, obs):
         """
@@ -236,7 +235,7 @@ class MomentumTrader(APrioriAgent):
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
                 df = obs[symbol].astype(np.float64).copy()
-                df = self.get_ma(df, span=self.ma_span, kama=True)
+                df = self.get_ma(df)
 
                 # Get action
                 if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
@@ -244,7 +243,7 @@ class MomentumTrader(APrioriAgent):
                     action = np.zeros(1)
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
-                    self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
+                    self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
 
                 else:
@@ -275,7 +274,7 @@ class MomentumTrader(APrioriAgent):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
                 for key, value in kwargs.items():
-                    if key is not 'std_weight':
+                    if key not in ('std_weight_up', 'std_weight_down'):
                         kwargs[key] = round(value)
 
                 self.set_hp(**kwargs)
@@ -306,16 +305,15 @@ class MomentumTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              ma1=[2, int(env.obs_steps / 2)],
-                                              ma2=[int(env.obs_steps / 10), env.obs_steps],
-                                              # dh=[0.5, 1.0],
-                                              # uh=[1.0, 1.5]
+                                              ma1=[2, env.obs_steps],
+                                              ma2=[2, env.obs_steps],
                                               std_span=[1, env.obs_steps],
-                                              std_weight=[0.0, 3.0]
+                                              std_weight_down=[0.0, 3.0],
+                                              std_weight_up=[0.0, 3.0]
                                               )
 
             for key, value in opt_params.items():
-                if key is not 'std_weight':
+                if key not in ('std_weight_up', 'std_weight_down'):
                     opt_params[key] = round(value)
 
             self.set_hp(**opt_params)

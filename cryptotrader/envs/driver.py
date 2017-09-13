@@ -2163,7 +2163,7 @@ class Apocalipse(Env):
         :return:
         """
 
-        self.results = self.df.iloc[self.offset:].copy()
+        self.results = self.df.iloc[self.offset + 1:].copy()
 
         self.results['portval'] = self.results['fiat', 'amount']
         self.results['benchmark'] = convert_to.decimal('0e-8')

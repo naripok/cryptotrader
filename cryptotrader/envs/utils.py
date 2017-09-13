@@ -267,7 +267,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
 
         def convert_and_clean(x):
             x = x.apply(convert_to.decimal)
-            f = x.rolling(3, center=True, min_periods=1).mean().apply(convert_to.decimal)
+            f = x.rolling(30, center=True, min_periods=1).mean().apply(convert_to.decimal)
             x = x.apply(lambda x: x if x.is_finite() else np.nan)
             return x.combine_first(f)
 
