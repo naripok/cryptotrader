@@ -143,8 +143,8 @@ class Test_env_setup(object):
         assert isinstance(self.env.action_space, Box)
         assert self.env.action_space.low.shape[0] == len(self.env.symbols)
 
-    @given(init_fiat=st.floats(max_value=1e12, min_value=0.1, allow_infinity=False, allow_nan=False),
-           init_crypto=st.floats(max_value=1e12, min_value=0.0, allow_infinity=False, allow_nan=False),
+    @given(init_fiat=st.floats(max_value=1e8, min_value=0.1, allow_infinity=False, allow_nan=False),
+           init_crypto=st.floats(max_value=1e8, min_value=0.0, allow_infinity=False, allow_nan=False),
            )
     @settings(max_examples=10)
     def test_reset(self, init_fiat, init_crypto):
@@ -192,7 +192,7 @@ class Test_env_setup(object):
                            amount.values.all() == convert_to.decimal(init_crypto)
                 # Assert position
                 for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
-                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                    assert self.env.df[symbol].get_value(self.env.df.index[step], 'position') -\
                            self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
 
@@ -270,13 +270,13 @@ class Test_env_step(object):
                 (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
 
         # Assert amount
-        # for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
-        #     assert self.env.df[symbol].get_value(timestamp, 'amount') - \
-        #             convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
-        #             self.env.df[symbol].get_value(timestamp, 'close') <= convert_to.decimal('1E-1'), \
-        #             (self.env.df[symbol].get_value(timestamp, 'amount'),
-        #              convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
-        #              self.env.df[symbol].get_value(timestamp, 'close'))
+        for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
+            assert self.env.df[symbol].get_value(timestamp, 'amount') - \
+                   self.env.df[symbol].get_value(timestamp, 'position') * self.env._calc_step_total_portval() / \
+                    self.env.df[symbol].get_value(timestamp, 'close') <= convert_to.decimal('1E-1'), \
+                    (self.env.df[symbol].get_value(timestamp, 'amount'),
+                     convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
+                     self.env.df[symbol].get_value(timestamp, 'close'))
 
 
 
