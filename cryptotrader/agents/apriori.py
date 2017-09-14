@@ -49,7 +49,7 @@ class APrioriAgent(Agent):
 
                     action = self.act(obs)
                     obs, reward, _, status = env.step(action)
-                    episode_reward += np.float32(reward)
+                    episode_reward += np.float64(reward)
 
                     step += 1
 
@@ -107,7 +107,7 @@ class APrioriAgent(Agent):
 
                     action = self.forward(obs)
                     obs, reward, done, status = env.step(action)
-                    episode_reward += pd.to_numeric(reward)
+                    episode_reward += np.float64(reward)
                     step += 1
                     t0 += time()
                     if done:
@@ -222,7 +222,7 @@ class MomentumTrader(APrioriAgent):
             raise TypeError("Wrong mean_type param")
         return df
 
-    def set_hp(self, **kwargs):
+    def set_params(self, **kwargs):
         self.ma_span = [kwargs['ma1'],kwargs['ma2']]
         # self.hysteresis = [kwargs['dh'], kwargs['uh']]
         self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
@@ -277,9 +277,9 @@ class MomentumTrader(APrioriAgent):
                     if key not in ('std_weight_up', 'std_weight_down'):
                         kwargs[key] = round(value)
 
-                self.set_hp(**kwargs)
+                self.set_params(**kwargs)
 
-                # self.set_hp(**{key:round(kwarg) for key, kwarg in kwargs.items()})
+                # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 # run test on the main process
                 r = self.test(env,
@@ -308,15 +308,120 @@ class MomentumTrader(APrioriAgent):
                                               ma1=[2, env.obs_steps],
                                               ma2=[2, env.obs_steps],
                                               std_span=[1, env.obs_steps],
-                                              std_weight_down=[0.0, 1.0],
-                                              std_weight_up=[0.0, 1.0]
+                                              std_weight_down=[0.0, 3.0],
+                                              std_weight_up=[0.0, 3.0]
                                               )
 
             for key, value in opt_params.items():
                 if key not in ('std_weight_up', 'std_weight_down'):
                     opt_params[key] = round(value)
 
-            self.set_hp(**opt_params)
+            self.set_params(**opt_params)
+            env.set_training_stage(False)
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user.")
+
+
+class MesaMomentumTrader(APrioriAgent):
+    """
+    Momentum trading agent that uses MESA adaptative moving averages as momentum factor
+    """
+    def __init__(self):
+        super().__init__()
+        self.mesa_span = None
+        # self.std_span = None
+        self.opt_params = None
+
+
+    def set_params(self, **kwargs):
+        self.mesa_args = [kwargs['ma1'], kwargs['ma2']]
+        # self.hysteresis = [kwargs['dh'], kwargs['uh']]
+        # self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        try:
+            position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
+                df = obs[symbol].astype(np.float64).copy()
+                df['mama'], df['fama'] = tl.MAMA(df.close.values, fastlimit=self.mesa_args[0], slowlimit=self.mesa_args[1])
+
+                # Get action
+                if df['mama'].iat[-1] < df['fama'].iat[-1]:# - \
+                    # self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
+                    action = np.zeros(1)
+
+                elif df['mama'].iat[-1] > df['fama'].iat[-1]:# + \
+                    # self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
+                    action = df['mama'].iat[-1] - df['fama'].iat[-1]
+
+                else:
+                    action = np.float64(df['position'].iat[-1])
+
+                position[key] = action
+
+            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+
+            return array_normalize(position)
+
+        except TypeError:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+
+    def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None):
+        try:
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            i = 0
+            t0 = time()
+            env._reset_status()
+            env.set_training_stage(True)
+            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+
+            def find_hp(**kwargs):
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                self.set_params(**kwargs)
+
+                # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
+
+                # run test on the main process
+                r = self.test(env,
+                                nb_episodes=1,
+                                action_repetition=action_repetition,
+                                callbacks=callbacks,
+                                visualize=visualize,
+                                nb_max_episode_steps=nb_max_episode_steps,
+                                nb_max_start_steps=nb_max_start_steps,
+                                start_step_policy=start_step_policy,
+                                verbose=False)
+
+                i += 1
+                if verbose:
+                    t0 += time()
+                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                        nb_steps,
+                                                                        r,
+                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
+                          end="\r")
+
+                return r
+
+            opt_params, info, _ = ot.maximize(find_hp,
+                                              num_evals=nb_steps,
+                                              ma1=[1e-8, 1],
+                                              ma2=[1e-8, 1],
+                                              # std_span=[1, env.obs_steps],
+                                              # std_weight_down=[0.0, 3.0],
+                                              # std_weight_up=[0.0, 3.0]
+                                              )
+
+            self.set_params(**opt_params)
             env.set_training_stage(False)
             return opt_params, info
 
