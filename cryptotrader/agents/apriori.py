@@ -1,11 +1,11 @@
-from time import time
+from time import time, sleep
+
+from ..core import Agent
+from ..utils import *
 
 import optunity as ot
 import pandas as pd
 import talib as tl
-
-from ..core import Agent
-from ..utils import *
 
 
 class APrioriAgent(Agent):
@@ -337,7 +337,6 @@ class MesaMomentumTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.mesa_args = [kwargs['ma1'], kwargs['ma2']]
-        # self.hysteresis = [kwargs['dh'], kwargs['uh']]
         # self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
 
     def act(self, obs):
