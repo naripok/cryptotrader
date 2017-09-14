@@ -482,7 +482,8 @@ class Apocalipse(Env):
             assert isinstance(steps, int) and steps >= 3
             if isinstance(df, pd.core.frame.DataFrame):
                 for col in df.columns:
-                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount']
+                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
+                    'wrong dataframe formatation'
                 self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
             else:
                 assert symbol in [s for s in self.tables.keys()]
@@ -2162,7 +2163,7 @@ class Apocalipse(Env):
         :return:
         """
 
-        self.results = self.df.iloc[self.offset:].copy()
+        self.results = self.df.iloc[self.offset + 1:].copy()
 
         self.results['portval'] = self.results['fiat', 'amount']
         self.results['benchmark'] = convert_to.decimal('0e-8')
@@ -2201,8 +2202,8 @@ class Apocalipse(Env):
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=3)
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=window, risk_free=0.001)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
 
         return self.results
 

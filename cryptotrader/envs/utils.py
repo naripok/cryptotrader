@@ -241,7 +241,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
     assert isinstance(exchange, str), 'exchange must be a string'
     symbols = []
     for item in conn.collection_names():
-        if exchange in item:
+        if exchange in item and 'zec' not in item and 'xmr' not in item:
             item = item.split('_')
             symbols.append(item[1])
 
@@ -267,7 +267,7 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
 
         def convert_and_clean(x):
             x = x.apply(convert_to.decimal)
-            f = x.rolling(3, center=True, min_periods=1).mean().apply(convert_to.decimal)
+            f = x.rolling(30, center=True, min_periods=1).mean().apply(convert_to.decimal)
             x = x.apply(lambda x: x if x.is_finite() else np.nan)
             return x.combine_first(f)
 
