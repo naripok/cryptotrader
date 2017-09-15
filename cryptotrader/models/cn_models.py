@@ -143,3 +143,7 @@ class EIIE(chainer.Chain):
         h = self.conv(h)
         h = self.cashbias(h)
         return h
+
+
+def train_EIIE():
+    pass
