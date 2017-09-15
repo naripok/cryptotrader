@@ -8,12 +8,9 @@ import chainer
 from chainer import report, Reporter, get_current_reporter
 from chainer import functions as F
 from chainer import links as L
-from chainerrl.agents import a3c
-from chainerrl import policies
-from chainerrl import distribution
 from chainer import initializer
 from chainer.initializers import Normal
-from chainerrl.policies import LinearGaussianPolicyWithDiagonalCovariance
+
 
 eps = 1e-8
 
