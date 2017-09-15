@@ -413,8 +413,8 @@ class MesaMomentumTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              ma1=[1e-8, 1],
-                                              ma2=[1e-8, 1],
+                                              ma1=[1e-2, 99e-2],
+                                              ma2=[1e-2, 99e-2],
                                               # std_span=[1, env.obs_steps],
                                               # std_weight_down=[0.0, 3.0],
                                               # std_weight_up=[0.0, 3.0]
