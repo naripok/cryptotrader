@@ -825,13 +825,13 @@ class Apocalipse(Env):
             return False
 
     def get_step_obs_all(self):
-        obs_dict = []
+        obs_list = []
         keys = []
         for symbol in self._get_df_symbols():
             keys.append(symbol)
-            obs_dict.append(self.get_step_obs(symbol))
+            obs_list.append(self.get_step_obs(symbol))
 
-        return pd.concat(obs_dict, keys=keys, axis=1)
+        return pd.concat(obs_list, keys=keys, axis=1)
 
     def get_step_obs(self, symbol):
         return self._get_step_obs(symbol=symbol, steps=self.obs_steps, float=True)
@@ -863,6 +863,7 @@ class Apocalipse(Env):
 
                 obs = self.df[symbol].iloc[self.step_idx - steps + 1:self.step_idx + 1].filter(columns)
 
+                # ffill last position with previous one
                 obs.iat[-1,-1] = obs.iat[-2,-1]
 
                 assert obs.shape[0] == self.obs_steps

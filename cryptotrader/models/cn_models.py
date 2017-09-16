@@ -1,19 +1,13 @@
 import numpy as np
 np.random.seed(42)
-from cached_property import cached_property
-from datetime import timedelta
-from time import time
 
 import chainer
 from chainer import report, Reporter, get_current_reporter
 from chainer import functions as F
 from chainer import links as L
-from chainerrl.agents import a3c
-from chainerrl import policies
-from chainerrl import distribution
 from chainer import initializer
 from chainer.initializers import Normal
-from chainerrl.policies import LinearGaussianPolicyWithDiagonalCovariance
+
 
 eps = 1e-8
 
@@ -24,6 +18,22 @@ def phi(obs):
     xp = chainer.cuda.get_array_module(obs)
     obs = xp.expand_dims(obs,0)
     return obs.astype(np.float32)
+
+
+def batch_states(states, xp, phi):
+    """The default method for making batch of observations.
+
+    Args:
+        states (list): list of observations from an environment.
+        xp (module): numpy or cupy
+        phi (callable): Feature extractor applied to observations
+
+    Return:
+        the object which will be given as input to the model.
+    """
+
+    states = [phi(s) for s in states]
+    return xp.asarray(states)
 
 
 class LeCunNormal(initializer.Initializer):
@@ -163,14 +173,14 @@ class EIIE(chainer.Chain):
         with self.init_scope():
             self.vision = VisionModel(input_shape, vn_number, pn_number)
             self.portvec = PortifolioVector(input_shape)
-            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
+            self.conv = L.Convolution2D(pn_number + 1, 1, 1, 1, nobias=False, initialW=LeCunNormal())
             self.cashbias = CashBias()
 
     def __call__(self, x):
         h = self.vision(x)
         h = F.concat([h, self.portvec(x)], axis=1)
         h = self.conv(h)
-        h = self.cashbias(h)
+        # h = self.cashbias(h)
         return h
 
 
