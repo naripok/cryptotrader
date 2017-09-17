@@ -172,13 +172,13 @@ class EIIE(chainer.Chain):
 
         with self.init_scope():
             self.vision = VisionModel(input_shape, vn_number, pn_number)
-            self.portvec = PortifolioVector(input_shape)
-            self.conv = L.Convolution2D(pn_number + 1, 1, 1, 1, nobias=False, initialW=LeCunNormal())
-            self.cashbias = CashBias()
+            # self.portvec = PortifolioVector(input_shape)
+            self.conv = L.Convolution2D(pn_number, 1, 1, 1, nobias=False, initialW=LeCunNormal())
+            # self.cashbias = CashBias()
 
     def __call__(self, x):
         h = self.vision(x)
-        h = F.concat([h, self.portvec(x)], axis=1)
+        # h = F.concat([h, self.portvec(x)], axis=1)
         h = self.conv(h)
         # h = self.cashbias(h)
         return h
