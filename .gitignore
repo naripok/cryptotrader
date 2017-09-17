@@ -98,5 +98,4 @@ cryptotrader/agents/__pycache__/
 cryptotrader/envs/__pycache__/
 dist/
 historical_data/
-notebooks/
 .cache/
