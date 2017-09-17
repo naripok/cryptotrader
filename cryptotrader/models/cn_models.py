@@ -1,8 +1,5 @@
 import numpy as np
 np.random.seed(42)
-from cached_property import cached_property
-from datetime import timedelta
-from time import time
 
 import chainer
 from chainer import report, Reporter, get_current_reporter
@@ -21,6 +18,51 @@ def phi(obs):
     xp = chainer.cuda.get_array_module(obs)
     obs = xp.expand_dims(obs,0)
     return obs.astype(np.float32)
+
+
+def batch_states(states, xp, phi):
+    """The default method for making batch of observations.
+
+    Args:
+        states (list): list of observations from an environment.
+        xp (module): numpy or cupy
+        phi (callable): Feature extractor applied to observations
+
+    Return:
+        the object which will be given as input to the model.
+    """
+
+    states = [phi(s) for s in states]
+    return xp.asarray(states)
+
+
+class LeCunNormal(initializer.Initializer):
+
+    """Initializes array with scaled Gaussian distribution.
+    Each element of the array is initialized by the value drawn
+    independently from Gaussian distribution whose mean is 0,
+    and standard deviation is
+    :math:`scale \\times \\sqrt{\\frac{1}{fan_{in}}}`,
+    where :math:`fan_{in}` is the number of input units.
+    Reference: LeCun 98, Efficient Backprop
+    http://yann.lecun.com/exdb/publis/pdf/lecun-98b.pdf
+    Args:
+        scale (float): A constant that determines the scale
+            of the standard deviation.
+        dtype: Data type specifier.
+    """
+
+    def __init__(self, scale=1.0, dtype=None):
+        self.scale = scale
+        super(LeCunNormal, self).__init__(dtype)
+
+    def __call__(self, array):
+        if self.dtype is not None:
+            assert array.dtype == self.dtype
+        fan_in, fan_out = initializer.get_fans(array.shape)
+        s = self.scale * np.sqrt(1. / fan_in)
+        Normal(s)(array)
+
 
 class ProcessObs(chainer.Link):
     """
@@ -130,15 +172,15 @@ class EIIE(chainer.Chain):
 
         with self.init_scope():
             self.vision = VisionModel(input_shape, vn_number, pn_number)
-            self.portvec = PortifolioVector(input_shape)
-            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
-            self.cashbias = CashBias()
+            # self.portvec = PortifolioVector(input_shape)
+            self.conv = L.Convolution2D(pn_number, 1, 1, 1, nobias=False, initialW=LeCunNormal())
+            # self.cashbias = CashBias()
 
     def __call__(self, x):
         h = self.vision(x)
-        h = F.concat([h, self.portvec(x)], axis=1)
+        # h = F.concat([h, self.portvec(x)], axis=1)
         h = self.conv(h)
-        h = self.cashbias(h)
+        # h = self.cashbias(h)
         return h
 
 
