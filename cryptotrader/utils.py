@@ -2,15 +2,18 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import partialmethod
-import pandas as pd
+
+import zmq
+import msgpack
 
 import numpy as np
+import pandas as pd
 from bson import Decimal128
 import math
 
 decimal_cases = 1E-8
 
-
+# Helper functions and classes
 class Logger(object):
     logger = None
 
@@ -89,7 +92,7 @@ def array_normalize(x):
 
     return np.float32(convert_to.decimal(out))
 
-# Helper functions and classes
+
 class convert_to(object):
     _quantize = partialmethod(Decimal.quantize, Decimal('1e-8'))
 
@@ -139,3 +142,61 @@ def sample_trades(df, freq):
     out['volume'] = df['trade_volume'].resample(freq).sum()
 
     return out
+
+
+def write(_socket, msg, flags=0, block=True):
+    if block:
+        _socket.send(msgpack.packb(msg), flags=flags)
+        return True
+    else:
+        try:
+            _socket.send(msgpack.packb(msg), flags=flags | zmq.NOBLOCK)
+            return True
+        except zmq.Again:
+            return False
+
+
+def read(_socket, flags=0, block=True):
+    if block:
+        return msgpack.unpackb(_socket.recv(flags=flags))
+    else:
+        try:
+            return msgpack.unpackb(_socket.recv(flags=flags | zmq.NOBLOCK))
+        except zmq.Again:
+            return False
+
+
+def send_array(socket, A, flags=0, copy=False, track=False, block=True):
+    """send a numpy array with metadata"""
+    md = dict(
+        dtype=str(A.dtype),
+        shape=A.shape,
+    )
+    if block:
+        socket.send_json(md, flags | zmq.SNDMORE)
+        return socket.send(A, flags, copy=copy, track=track)
+    else:
+        try:
+            socket.send_json(md, flags | zmq.SNDMORE | zmq.NOBLOCK)
+            return socket.send(A, flags| zmq.NOBLOCK, copy=copy, track=track)
+        except zmq.Again:
+            return False
+
+
+def recv_array(socket, flags=0, copy=False, track=False, block=True):
+    """recv a numpy array"""
+    if block:
+        md = socket.recv_json(flags=flags)
+        msg = socket.recv(flags=flags, copy=copy, track=track)
+        buf = bytearray(msg)
+        A = np.frombuffer(buf, dtype=md['dtype'])
+        return A.reshape(md['shape'])
+    else:
+        try:
+            md = socket.recv_json(flags=flags | zmq.NOBLOCK)
+            msg = socket.recv(flags=flags | zmq.NOBLOCK, copy=copy, track=track)
+            buf = bytearray(msg)
+            A = np.frombuffer(buf, dtype=md['dtype'])
+            return A.reshape(md['shape'])
+        except zmq.Again:
+            return False
