@@ -10,10 +10,10 @@ import os
 import smtplib
 from datetime import datetime, timedelta
 from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP, Decimal
-from time import time, sleep
+from time import sleep
 
 import empyrical as ec
-import pandas as pd
+
 import pymongo as pm
 from bitstamp.client import Trading
 from bokeh.layouts import column
@@ -24,7 +24,8 @@ from .. import error
 from .. import seeding
 from ..core import Env
 from ..spaces import *
-from ..utils import convert_to, Logger
+from ..utils import Logger
+from .utils import *
 
 # Decimal precision
 getcontext().prec = 32
@@ -76,6 +77,1067 @@ def get_historical(file, freq, start=None, end=None):
     out['volume'] = df.resample(freq).sum().volume
 
     return out.applymap(convert_to.decimal)
+
+
+class TrainingEnvironment(Env):
+    '''
+    The end and the beginning, the revelation of a new life
+    '''
+    def __init__(self, db=None, name=None, seed=42):
+
+        try:
+            assert isinstance(name, str)
+            self.name = name
+        except AssertionError:
+            print("Must enter environment name")
+            raise ValueError
+
+        self._seed(seed)
+
+        if not os.path.exists('./logs'):
+            os.makedirs('./logs')
+        self.logger = Logger(self.name, './logs/')
+
+        self.crypto = {}
+        self.fiat = None
+        self.prev_posit = {}
+        self.posit = {}
+        self.prev_val = np.nan
+        self.init_crypto = {}
+        self.init_fiat = None
+        self.tax = {}
+        self.symbols = ['fiat']
+
+        self.status = None
+        self.np_random = None
+        self._is_training = False
+        self.epsilon = 1e-8
+        self.step_idx = None
+        self.global_step = 0
+        self.obs_steps = 0
+        self.offset = 0
+        self.last_reward = 0.0
+        self.last_action = np.zeros(0)
+
+        # Data input
+        # Gets data table from database server
+        self.db = db
+        self.tables = {}
+        self.dfs = {}
+        self.df = None
+
+        self.logger.info("Training Environment initialization",
+                         "Training Environment Initialized!")
+
+    # Setters
+    def add_table(self, number=None, name=None):
+        try:
+            try:
+                assert isinstance(self.db, pm.database.Database)
+            except AssertionError:
+                print("db must be a pymongo database instance")
+                raise ValueError
+
+            col_names = self.db.collection_names()
+            col_names_str = ""
+            for i, n in enumerate(col_names):
+                col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
+
+            welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
+                          "Select from db a table to trade on:\n" + col_names_str
+
+            if isinstance(number, int):
+                table_n = number
+            elif isinstance(name, str):
+                table_n = name
+            else:
+                print(welcome_str)
+
+                table_n = input("Enter a table number or name:")
+            if isinstance(table_n, int):
+                table = self.db[col_names[int(table_n)]]
+                self.logger.info(TrainingEnvironment.add_table,
+                                 "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
+
+            if isinstance(table_n, str):
+                table = self.db[table_n]
+                self.logger.info(TrainingEnvironment.add_table,
+                                 "Initializing Apocalipse instance with table %s" % (table_n))
+
+            if table_n == '':
+                print("You must enter a table number or name!")
+                raise ValueError
+
+            assert isinstance(table, pm.collection.Collection)
+            assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
+
+            symbol = self._get_table_symbol(table)
+            self.tables[symbol] = table
+
+        except AssertionError:
+            self.logger.error(TrainingEnvironment.add_table, "Table error. Please, enter a valid table number.")
+            raise ValueError
+        except Exception as e:
+            if debug:
+                self.logger.error(TrainingEnvironment.add_table, self.parse_error(e))
+            else:
+                self.logger.error(TrainingEnvironment.add_table, "Wrong table.")
+                raise ValueError
+
+    def clear_dfs(self):
+        if hasattr(self, 'dfs'):
+            del self.dfs
+        self.dfs = {}
+
+    def add_df(self, df=None, symbol=None, steps=5):
+        try:
+            assert isinstance(self.freq, int) and self.freq >=1
+
+            assert isinstance(steps, int) and steps >= 3
+            if isinstance(df, pd.core.frame.DataFrame):
+                for col in df.columns:
+                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
+                    'wrong dataframe formatation'
+                self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
+            else:
+                assert symbol in [s for s in self.tables.keys()]
+                assert isinstance(self.tables[symbol], pm.collection.Collection)
+
+                try:
+                    assert steps >= 3
+                except AssertionError:
+                    print("Observation steps must be greater than 3")
+                    return False
+                self.dfs[symbol] = self._get_obs(symbol=symbol, steps=steps, freq=self.freq)
+
+            assert isinstance(self.dfs[symbol], pd.core.frame.DataFrame)
+
+            self.dfs[symbol]['prev_position'] = np.nan
+            self.dfs[symbol]['position'] = np.nan
+            self.dfs[symbol]['amount'] = np.nan
+
+            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-8).applymap(convert_to.decimal)
+
+            assert self.dfs[symbol].columns.all() in ['open', 'high', 'low', 'close', 'volume', 'prev_position',
+                                                      'position', 'amount']
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment.add_df, self.parse_error(e))
+
+    def add_symbol(self, symbol):
+        assert isinstance(symbol, str)
+        self.symbols.append(symbol)
+        if symbol not in [k for k in self.dfs.keys()]:
+            self.add_df(symbol=symbol, steps=int(self.obs_steps * 5))
+        self.make_df()
+        self._set_posit(convert_to.decimal('0.0'), symbol, self.df.index[0])
+
+    def make_df(self):
+        self.df = pd.concat(self.dfs, axis=1)
+        assert isinstance(self.df, pd.core.frame.DataFrame)
+        self.df['fiat', 'prev_position'] = convert_to.decimal(np.nan)
+        self.df['fiat', 'position'] = convert_to.decimal(np.nan)
+        self.df['fiat', 'amount'] = convert_to.decimal(np.nan)
+        # self.clear_dfs()
+        self.set_observation_space()
+        try:
+            assert self.df.shape[0] >= self.obs_steps
+        except AssertionError:
+            self.logger.error(TrainingEnvironment.make_df, "Trying to make dataframe with less observations than obs_steps.")
+
+    def set_init_fiat(self, fiat):
+        assert fiat >= 0.0
+        self.init_fiat = convert_to.decimal(fiat)
+
+    def set_init_crypto(self, amount, symbol):
+        assert amount >= 0.0
+        assert symbol in self._get_df_symbols()
+        self.init_crypto[symbol] = convert_to.decimal(amount)
+
+    def _set_fiat(self, fiat, timestamp):
+        try:
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert isinstance(fiat, Decimal), 'fiat is not decimal'
+
+            if fiat < convert_to.decimal('0E-8'):
+                self.status['ValueError'] += 1
+                self.logger.error(TrainingEnvironment._set_fiat, "Fiat value error: Negative value")
+            self.fiat = fiat
+            self.df.loc[timestamp, ('fiat', 'amount')] = fiat
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_fiat, self.parse_error(e))
+
+    def _set_crypto(self, amount, symbol, timestamp):
+        try:
+            # assert symbol in self._get_df_symbols(no_fiat=True) # taken out for speed
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert isinstance(amount, Decimal)
+            if amount < 0.0:
+                self.status['ValueError'] += 1
+                self.logger.error(TrainingEnvironment._set_crypto, "Crypto value error: Negative value")
+
+            self.crypto[symbol] = amount
+            self.df.loc[timestamp, (symbol, 'amount')] = amount
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_crypto, self.parse_error(e))
+
+    def _set_posit(self, posit, symbol, timestamp):
+        # TODO: VALIDATE
+        try:
+            try:
+                assert isinstance(posit, Decimal)
+            except AssertionError:
+                if isinstance(posit, float):
+                    posit = convert_to.decimal(posit)
+                else:
+                    raise AssertionError
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert  convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
+            self.posit[symbol] = posit
+            self.df.loc[timestamp, (symbol, 'position')] = posit
+
+        except AssertionError:
+            self.status['ValueError'] += 1
+            self.logger.error(TrainingEnvironment._set_posit, "Invalid previous position value.")
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_posit, self.parse_error(e))
+
+    def _set_prev_posit(self, posit, symbol, timestamp):
+        try:
+            try:
+                assert isinstance(posit, Decimal)
+            except AssertionError:
+                if isinstance(posit, float):
+                    posit = convert_to.decimal(posit)
+                else:
+                    raise AssertionError
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            # try:
+            #     assert 0.0 <= posit <= 1.0, posit
+            # except AssertionError:
+            #     posit = np.clip(np.array([posit]), a_min=0.0, a_max=1.0)[0]
+            #     self.status['ValueError'] += 1
+            #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
+            assert convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
+            self.prev_posit[symbol] = posit
+            self.df.loc[timestamp, (symbol, 'prev_position')] = posit
+
+        except AssertionError:
+            self.status['ValueError'] += 1
+            self.logger.error(TrainingEnvironment._set_prev_posit, "Invalid previous position value.")
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_prev_posit, self.parse_error(e))
+
+    def _save_prev_portval(self):
+        try:
+            portval = self._calc_step_total_portval()
+            assert portval >= 0.0
+            self.prev_val = portval
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._save_prev_portval, self.parse_error(e))
+
+    def _save_prev_portifolio_posit(self, timestamp):
+        for symbol in self._get_df_symbols():
+            self._set_prev_posit(self._get_posit(symbol), symbol, timestamp)
+
+    def set_action_space(self):
+        # Action space
+        self.action_space = Box(0., 1., len(self._get_df_symbols()))
+        self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self._get_df_symbols())))
+
+    def set_observation_space(self):
+        # Observation space:
+        obs_space = []
+        # OPEN, HIGH, LOW, CLOSE
+        for _ in range(4):
+            obs_space.append(Box(0.0, 1e9, 1))
+        # VOLUME
+        obs_space.append(Box(0.0, 1e12, 1))
+        # POSITION
+        obs_space.append(Box(0.0, 1.0, 1))
+
+        self.observation_space = Tuple(obs_space)
+
+    def set_obs_steps(self, steps):
+        assert isinstance(steps, int) and steps >= 3
+        self.obs_steps = steps
+        self.step_idx = steps
+        self.offset = steps
+
+    def set_freq(self, freq):
+        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
+        self.freq = freq
+
+    def set_tax(self, tax, symbol):
+        assert 0.0 <= tax <= 1.0
+        assert symbol in self._get_df_symbols()
+        self.tax[symbol] = convert_to.decimal(tax)
+
+    def set_training_stage(self, train):
+        assert isinstance(train, bool)
+        self._is_training = train
+
+    def _save_df_to_db(self, name):
+        self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
+
+    # Getters
+    def _get_df_symbols(self, no_fiat=False):
+        if no_fiat:
+            return [s for s in self.df.columns.levels[0] if s is not 'fiat']
+        else:
+            return [s for s in self.df.columns.levels[0]]
+
+    @staticmethod
+    def _get_table_symbol(table):
+        return table.full_name.split('.')[1].split('_')[2]
+
+    def get_step_obs_all(self):
+        obs_list = []
+        keys = []
+        for symbol in self._get_df_symbols():
+            keys.append(symbol)
+            obs_list.append(self.get_step_obs(symbol))
+
+        return pd.concat(obs_list, keys=keys, axis=1)
+
+    def get_step_obs(self, symbol):
+        return self._get_step_obs(symbol=symbol, steps=self.obs_steps, float=True)
+
+    def _get_step_obs(self, symbol, steps=1, step_price=False, float=False):
+        """
+        Observe the environment. Is usually used after the step is taken
+        """
+        # observation as per observation space
+        try:
+            # assert symbol in self._get_df_symbols() #taken out for speed
+            # assert steps >= 1 and isinstance(last_price, bool) #taken out for speed
+
+            if step_price:
+                return self.df.get_value(self.df.index[self.step_idx], (symbol, 'close'))
+
+            else:
+                if symbol in self._get_df_symbols(no_fiat=True):
+                    columns = ['open', 'high', 'low', 'close', 'volume', 'position']
+
+                else:
+                    columns = ['position']
+
+                # obs = self.df.loc[self.df.index[self.step_idx - steps + 1:self.step_idx + 1],
+                #                   (symbol, columns)]
+                # Better performance methods
+                # idx = self.df[symbol].columns.get_indexer(columns)
+                # obs = self.df[symbol].iloc[self.step_idx - steps + 1:self.step_idx + 1].take(idx, axis=1)
+
+                obs = self.df[symbol].iloc[self.step_idx - steps + 1:self.step_idx + 1].filter(columns)
+
+                # ffill last position with previous one
+                obs.iat[-1,-1] = obs.iat[-2,-1]
+
+                assert obs.shape[0] == self.obs_steps
+                if float:
+                    return obs.astype(np.float64)
+                else:
+                    return obs
+
+        except IndexError as e:
+            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
+            return False
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
+            return False
+
+    def _get_fiat(self):
+        assert self.fiat >= convert_to.decimal('0E-12'), self.fiat
+        return self.fiat
+
+    def _get_crypto(self, symbol):
+        assert self.crypto[symbol] >= Decimal('0E-12'), self.crypto[symbol]
+        # assert symbol in self._get_df_symbols(no_fiat=True) # Took out for sp
+        return self.crypto[symbol]
+
+    def _get_init_fiat(self):
+        assert convert_to.decimal('0E-8') <= self.init_fiat
+        return self.init_fiat
+
+    def _get_init_crypto(self, symbol):
+        assert symbol in [s for s in self.init_crypto.keys()], (symbol, self.init_crypto.keys())
+        assert 0.0 <= self.init_crypto[symbol], self.init_crypto[symbol]
+        return self.init_crypto[symbol]
+
+    def _get_posit(self, symbol):
+        assert self.posit[symbol] <= 1.0
+        return self.posit[symbol]
+
+    def _get_portifolio_posit(self):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._get_posit(symbol))
+        return np.array(portifolio)
+
+    def _get_prev_posit(self, symbol):
+        assert self.prev_posit[symbol] <= 1.0
+        return self.prev_posit[symbol]
+
+    def _get_prev_portifolio_posit(self, no_fiat=False):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._get_prev_posit(symbol))
+        if no_fiat:
+            return np.array(portifolio)[:-1]
+        else:
+            return np.array(portifolio)
+
+    def _calc_step_posit(self, symbol):
+        if symbol is not 'fiat':
+            return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True) /\
+                   self._calc_step_total_portval()
+        else:
+            return self._get_fiat() / self._calc_step_total_portval()
+
+    def _calc_step_potifolio_posit(self):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._calc_step_posit(symbol))
+        return np.array(portifolio)
+
+    def _calc_step_portval(self, symbol):
+        return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
+
+    def _calc_step_total_portval(self):
+        portval = convert_to.decimal('0.0')
+
+        for symbol in self._get_df_symbols(no_fiat=True):
+            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
+        portval += self._get_fiat()
+
+        return portval
+
+    def _get_prev_portval(self):
+        assert self.prev_val >= 0.0
+        return self.prev_val
+
+    def _get_tax(self, symbol):
+        # assert symbol in [s for s in self.tax.keys()]
+        return self.tax[symbol]
+
+    def _get_historical_data(self, symbol=None, start=None, end=None, freq=1, file=None):
+        """
+        Gets obs from data server
+        :args:
+        :steps: int: Number of bar to retrieve
+        :freq: int: Sampling frequency in minutes
+        """
+        try:
+            assert freq >= 1
+
+            start = pd.to_datetime(start)
+            end = pd.to_datetime(end)
+
+            if file:
+                assert isinstance(file, str) or isinstance(file, pd.core.frame.DataFrame)
+                obs = get_historical(file, freq, start, end)
+            else:
+                assert symbol in [s for s in self.tables.keys()]
+                columns = self.tables[symbol].find().limit(-1).sort('index', pm.DESCENDING).next()['columns']
+
+                cursor = self.tables[symbol].find({'index': {'$lt': end,
+                                                    '$gte': start}}).sort('index', pm.DESCENDING)
+
+                data = [[item['data'][0][i] for i in range(len(item) - 2)] + [item['data'][0][2]] for item in cursor]
+
+                obs = self.sample_trades(pd.DataFrame(data=data, columns=columns).set_index('trades_date_time',
+                                                                                        drop=True),
+                                                                                        "%dmin" % (freq))
+
+            obs.ffill(inplace=True)
+            obs.bfill(inplace=True)
+
+            try:
+                assert obs.shape[0] > 0
+            except AssertionError:
+                self.logger.info(TrainingEnvironment._get_historical_data,
+                                 "There is no data for this time period within the data server.")
+                obs = False
+
+            return obs
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_historical_data, self.parse_error(e))
+            return False
+
+    def _get_timestamp_now(self):
+        return pd.to_datetime(datetime.now() + timedelta(hours=3))  # timezone
+
+    ## Environment methos
+    def _get_reward(self, type='absolute return'):
+        if type == 'absolute return':
+            return self._calc_step_total_portval() - self._get_prev_portval()
+
+        elif type == 'percent change':
+            prev_portval = self._get_prev_portval()
+            if prev_portval > convert_to.decimal('0.0'):
+                return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
+            else:
+                return (self._calc_step_total_portval() - self._get_prev_portval())
+
+        elif type == 'sharpe ratio':
+            # TODO: IMPLEMENT SHARPE REWARD
+            raise NotImplementedError
+            return self._calc_step_total_portval() - self._get_prev_portval()
+
+        else:
+            raise NotImplementedError
+
+    def _assert_action(self, action):
+        try:
+            for posit in action:
+                if not isinstance(posit, Decimal):
+                    action = convert_to.decimal(np.float64(action))
+
+            try:
+                assert self.action_space.contains(action)
+
+            except AssertionError:
+                # normalize
+                if action.sum() != convert_to.decimal('1.0'):
+                    action /= action.sum()
+                    try:
+                        assert action.sum() == convert_to.decimal('1.0')
+                    except AssertionError:
+                        action[-1] += convert_to.decimal('1.0') - action.sum()
+                        action /= action.sum()
+                        assert action.sum() == convert_to.decimal('1.0')
+
+                # if debug:
+                #     self.logger.error(Apocalipse._assert_action, "Action does not belong to action space")
+
+            assert action.sum() - convert_to.decimal('1.0') < convert_to.decimal('1e-6')
+
+        except AssertionError:
+            if debug:
+                self.status['ActionError'] += 1
+                # self.logger.error(Apocalipse._assert_action, "Action out of range")
+
+            action /= action.sum()
+            try:
+                assert action.sum() == convert_to.decimal('1.0')
+            except AssertionError:
+                action[-1] += convert_to.decimal('1.0') - action.sum()
+                try:
+                    assert action.sum() == convert_to.decimal('1.0')
+                except AssertionError:
+                    action /= action.sum()
+
+        return action
+
+    def _reset_funds(self):
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.df[(symbol, 'amount')] = np.nan
+            self._set_crypto(self._get_init_crypto(symbol), symbol, self.df.index[self.step_idx])
+
+        self.df['fiat'] = np.nan
+        self._set_fiat(self._get_init_fiat(), self.df.index[self.step_idx])
+
+    def _reset_status(self):
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+
+    def _seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+    def _simulate_trade(self, action, timestamp):
+
+        # Assert inputs
+        action = self._assert_action(action)
+        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
+        #     self.observation_space.contains(observation[symbol])
+        # assert isinstance(timestamp, pd.Timestamp)
+
+        # Calculate position change given action
+        posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
+
+        # Get fiat_pool
+        fiat_pool = self._get_fiat()
+        portval = self._calc_step_total_portval()
+
+        # Sell assets first
+        for i, change in enumerate(posit_change):
+            if change < convert_to.decimal('0E-8'):
+
+                symbol = self._get_df_symbols()[i]
+
+                crypto_pool = portval * action[i] / self._get_step_obs(symbol, step_price=True)
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = portval * change.copy_abs() * self._get_tax(symbol)
+
+                fiat_pool += portval.fma(change.copy_abs(), -fee)
+
+                self._set_crypto(crypto_pool, symbol, timestamp)
+
+        self._set_fiat(fiat_pool, timestamp)
+
+        # Uodate prev portval with deduced taxes
+        portval = self._calc_step_total_portval()
+
+        # Then buy some goods
+        for i, change in enumerate(posit_change):
+            if change > convert_to.decimal('0E-8'):
+
+                symbol = self._get_df_symbols()[i]
+
+                fiat_pool -= portval * change.copy_abs()
+
+                # if fiat_pool is negative, deduce it from portval and clip
+                try:
+                    assert fiat_pool >= convert_to.decimal('0E-8')
+                except AssertionError:
+                    portval += fiat_pool
+                    fiat_pool = convert_to.decimal('0E-8')
+                    # if debug:
+                    #     self.status['ValueError'] += 1
+                    #     self.logger.error(Apocalipse._simulate_trade,
+                    #                       "Negative value for fiat pool at trade end." + str(fiat_pool))
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = self._get_tax(symbol) * portval * change
+
+                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(symbol, step_price=True)
+
+                self._set_crypto(crypto_pool, symbol, timestamp)
+
+        # And don't forget to take your change!
+        self._set_fiat(fiat_pool, timestamp)
+
+        # If nothing more interests you, just save and leave
+        for i, change in enumerate(posit_change):
+            if change == convert_to.decimal('0.0'):
+                # No order to execute, just save the variables and exit
+
+                symbol = self._get_df_symbols()[i]
+
+                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
+
+        ## Update your position on the exit
+        for i, symbol in enumerate(self._get_df_symbols(no_fiat=True)):
+            self._set_posit(self._get_step_obs(symbol, step_price=True) * self._get_crypto(symbol) /
+                            self._calc_step_total_portval(), symbol, timestamp)
+        self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
+
+    def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
+        """
+        Resets environment and returns a initial observation
+        :param reset_funds: Reset funds to initial value
+        :param reset_results: Reset results from instance dataframe
+        :param reset_global_step: Reset global step counter
+        :return: observation
+        """
+
+        if reset_global_step:
+            self.global_step = 0
+
+        if self._is_training:
+            self.step_idx = self.offset + np.random.randint(high=self.df.shape[0] - self.offset - 1, low=0)
+            timestamp = self.df.index[self.step_idx]
+        else:
+            self.step_idx = self.offset
+            timestamp = self.df.index[self.step_idx]
+
+        for symbol in self._get_df_symbols():
+            self._reset(symbol, timestamp, reset_funds=reset_funds, reset_results=reset_results)
+
+        self.step_idx -= self.obs_steps
+
+        for _ in range(self.obs_steps):
+            timestamp = self.df.index[self.step_idx]
+
+            for symbol in self._get_df_symbols():
+                # # Set crypto and fiat amounts
+                if symbol is not 'fiat':
+                    self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
+                else:
+                    self._set_fiat(self._get_fiat(), timestamp)
+
+                # portval = self._calc_step_total_portval()
+
+                # Calculate positions
+                # if portval > convert_to.decimal('0.0'):
+                posit = self._calc_step_posit(symbol)
+                self._set_prev_posit(posit, symbol, timestamp)
+                self._set_posit(posit, symbol, timestamp)
+                # else:
+                #     self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
+                #     self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
+
+            self.step_idx += 1
+
+        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.tax) is not None
+
+        return self.get_step_obs_all()
+
+    def _reset(self, symbol, timestamp, reset_results=False, reset_funds=False):
+        # TODO: VALIDATE
+        # Assert conditions
+        assert symbol in self._get_df_symbols()
+        assert (self._is_training, self.obs_steps, self.tax) is not None
+        assert isinstance(self.obs_steps, int) and self.obs_steps > 0
+
+        try:
+            assert self.df[symbol].shape[0] > self.obs_steps
+        except AssertionError:
+            self.logger.error(TrainingEnvironment._reset, "Calling reset with steps <= obs_steps")
+            raise ValueError
+
+        # set offset
+        self.offset = self.obs_steps
+
+        # Reset results columns
+        if reset_results:
+            self.df[symbol, 'amount'] = convert_to.decimal(np.nan)
+            self.df[symbol, 'position'] = convert_to.decimal(np.nan)
+            self.df[symbol, 'prev_position'] = convert_to.decimal(np.nan)
+
+        if symbol is not 'fiat':
+            if len(self.crypto.keys()) <= len(self._get_df_symbols()) - 1 or reset_funds or self._is_training:
+                self._set_crypto(self._get_init_crypto(symbol), symbol, timestamp)
+            else:
+                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
+        else:
+            if self.fiat is None or reset_funds or self._is_training:
+                self._set_fiat(self._get_init_fiat(), timestamp)
+            else:
+                self._set_fiat(self._get_fiat(), timestamp)
+
+        # self.logger.info(Apocalipse._reset, "Symbol %s reset done." % (symbol))
+
+        # return self._get_step_obs(symbol, self.obs_steps)
+
+    def step(self, action):
+        return self._step(self.get_step_obs_all(), action)
+
+    def _step(self, observation, action, reward_type='percent change', timeout=10):
+        # TODO: VALIDATE
+        try:
+            # Assert observation is valid
+            # assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
+            #        observation.shape[0] >= 3
+
+            # for symbol in self._get_df_symbols(no_fiat=True):
+            #     assert self.observation_space.contains(observation[symbol])
+
+            # Assert action is valid
+            action = self._assert_action(action)
+            self.last_action = action
+
+            # Get step timestamp
+            timestamp = self.df.index[self.step_idx]
+
+            # Save previous val and position
+            self._save_prev_portval()
+            self._save_prev_portifolio_posit(timestamp)
+
+            self._simulate_trade(action, timestamp)
+
+            # Update step counter and environment observation
+            if self.step_idx < self.df.shape[0] - 1:
+                self.step_idx += 1
+                done = False
+            else:
+                self.status['OOD'] = True
+                done = True
+
+            new_obs = self.get_step_obs_all()
+
+            # Calculate step reward
+            self.last_reward = self._get_reward(reward_type)
+
+            if isinstance(new_obs, pd.core.frame.DataFrame):
+                assert new_obs.shape[0] == observation.shape[0], "wrong observation size"
+                assert pd.infer_freq(new_obs.index) == pd.infer_freq(observation.index), "wrong observation frequency"
+                # assert len(new_obs.index) == len(observation.index), "wrong observation size"
+
+            self.global_step += 1
+
+            return new_obs, np.float32(self.last_reward), done, self.status
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._step, self.parse_error(e))
+            self._send_email(self.name + "step error:", self.parse_error(e))
+
+            return False, False, True, self.status
+
+    # Helper methods
+    def parse_error(self, e):
+        error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
+            e.__traceback__.tb_lineno) + ': ' + str(e)
+        return error_msg
+
+    def set_email(self, email, psw):
+        """
+        Set Gmail address and password for log keeping
+        :param email: str: Gmail address
+        :param psw: str: account password
+        :return:
+        """
+        try:
+            assert isinstance(email, str) and isinstance(psw, str)
+            self.email = email
+            self.psw = psw
+            self.logger.info(TrainingEnvironment.set_email, "Email report address set to: %s" % (self.email))
+        except Exception as e:
+            self.logger.error(TrainingEnvironment.set_email, self.parse_error(e))
+
+    def _send_email(self, subject, body):
+        try:
+            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
+                   isinstance(subject, str) and isinstance(body, str)
+            gmail_user = self.email
+            gmail_pwd = self.psw
+            FROM = self.email
+            TO = self.email if type(self.email) is list else [self.email]
+            SUBJECT = subject
+            TEXT = body
+
+            # Prepare actual message
+            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_user, gmail_pwd)
+            server.sendmail(FROM, TO, message)
+            server.close()
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._send_email, self.parse_error(e))
+        finally:
+            pass
+
+    def plot_results(self, df):
+        def config_fig(fig):
+            fig.background_fill_color = "black"
+            fig.background_fill_alpha = 0.5
+            fig.border_fill_color = "#232323"
+            fig.outline_line_color = "#232323"
+            fig.title.text_color = "whitesmoke"
+            fig.xaxis.axis_label_text_color = "whitesmoke"
+            fig.yaxis.axis_label_text_color = "whitesmoke"
+            fig.yaxis.major_label_text_color = "whitesmoke"
+            fig.xaxis.major_label_orientation = np.pi / 4
+            fig.grid.grid_line_alpha = 0.3
+
+        df = df.astype(np.float64)
+        # Results figures
+        results = {}
+
+        # Position
+        p_pos = figure(title="Position over time",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='position',
+                       plot_width=800, plot_height=400,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_pos)
+
+        palettes = inferno(len(self._get_df_symbols()))
+
+        for i, symbol in enumerate(self._get_df_symbols()):
+            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol, 'position'], color=palettes[i], legend=symbol)
+
+        # Portifolio and benchmark values
+        p_val = figure(title="Portifolio / Benchmark Value",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='position',
+                       plot_width=800, plot_height=400,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_val)
+
+        results['portval'] = p_val.line(df.index, df.portval, color='green')
+        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
+
+        # Portifolio and benchmark returns
+        p_ret = figure(title="Portifolio / Benchmark Returns",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='Returns',
+                       plot_width=800, plot_height=200,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_ret)
+
+        results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
+        results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
+        
+        p_hist = figure(title="Portifolio Value Pct Change Distribution",
+                        x_axis_label='Pct Change',
+                        y_axis_label='frequency',
+                        plot_width=800, plot_height=300,
+                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        toolbar_location="above"
+                        )
+        config_fig(p_hist)
+
+        hist, edges = np.histogram(df.returns, density=True, bins=100)
+
+        p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
+                    fill_color="#036564", line_color="#033649")
+
+        # Portifolio rolling alpha
+        p_alpha = figure(title="Portifolio rolling alpha",
+                         x_axis_type="datetime",
+                         x_axis_label='timestep',
+                         y_axis_label='alpha',
+                         plot_width=800, plot_height=200,
+                         tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                         toolbar_location="above"
+                         )
+        config_fig(p_alpha)
+
+        results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
+
+        # Portifolio rolling beta
+        p_beta = figure(title="Portifolio rolling beta",
+                        x_axis_type="datetime",
+                        x_axis_label='timestep',
+                        y_axis_label='beta',
+                        plot_width=800, plot_height=200,
+                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        toolbar_location="above"
+                        )
+        config_fig(p_beta)
+
+        results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
+
+        # Rolling Drawdown
+        p_dd = figure(title="Portifolio rolling drawdown",
+                      x_axis_type="datetime",
+                      x_axis_label='timestep',
+                      y_axis_label='drawdown',
+                      plot_width=800, plot_height=200,
+                      tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                      toolbar_location="above"
+                      )
+        config_fig(p_dd)
+
+        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
+
+        # Portifolio Sharpe ratio
+        p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
+                          x_axis_type="datetime",
+                          x_axis_label='timestep',
+                          y_axis_label='Sharpe ratio',
+                          plot_width=800, plot_height=200,
+                          tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                          toolbar_location="above"
+                          )
+        config_fig(p_sharpe)
+
+        results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
+
+        print("################### > Portifolio Performance Analysis < ###################\n")
+        print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
+        print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
+                                                                     ec.sharpe_ratio(df.benchmark_returns)))
+        print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
+                                                                     ec.omega_ratio(df.benchmark_returns)))
+        print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
+                                                                     ec.max_drawdown(df.benchmark_returns)))
+
+        results['handle'] = show(column(p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta), notebook_handle=True)
+
+        return results
+
+    def _get_results(self, window=30):
+        """
+        Calculate arbiter desired actions statistics
+        :return:
+        """
+
+        self.results = self.df.iloc[self.offset + 1:].copy()
+
+        self.results['portval'] = self.results['fiat', 'amount']
+        self.results['benchmark'] = convert_to.decimal('0e-8')
+        self.results['returns'] = convert_to.decimal(np.nan)
+        self.results['benchmark_returns'] = convert_to.decimal(np.nan)
+        self.results['alpha'] = convert_to.decimal(np.nan)
+        self.results['beta'] = convert_to.decimal(np.nan)
+        self.results['drawdown'] = convert_to.decimal(np.nan)
+        self.results['sharpe'] = convert_to.decimal(np.nan)
+
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results[symbol + '_portval'] = self.results[symbol, 'close'] * self.results[symbol, 'amount']
+            self.results['portval'] = self.results['portval'] + self.results[symbol + '_portval']
+
+        # self.results['benchmark'] = self.results['btcusd', 'close'] * self._get_init_fiat() / self.df.at[
+        #                             self.results.index[self.offset], ('btcusd', 'close')] - \
+        #                             self._get_tax('btcusd') * self._get_init_fiat() / self.results.at[
+        #                             self.results.index[self.offset], ('btcusd', 'close')]
+
+        # Calculate benchmark portifolio, just equaly distribute money over all the assets
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
+                                        self._get_init_fiat() / (self.results.at[self.results.index[0],
+                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
+            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+
+        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
+        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
+        self.results['alpha'] = ec.utils.roll(self.results.returns,
+                                              self.results.benchmark_returns,
+                                              function=ec.alpha_aligned,
+                                              window=window,
+                                              risk_free=0.001
+                                              )
+        self.results['beta'] = ec.utils.roll(self.results.returns,
+                                             self.results.benchmark_returns,
+                                             function=ec.beta_aligned,
+                                             window=window)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
+
+        return self.results
+
+    # TODO: \/ ############### REWORK ################# \/
+
+    def render(self, mode='human', close=False):
+        return self._render(close=close)
+
+    def _render(self, mode='human', close=False):
+        if close:
+            return
+        if mode == 'human':
+            print("""\n>> Step: {0}, \
+                     \n   Timestamp: {1}, \
+                     \n   Crypto Price: {2}, \
+                     \n   Fiat allocation: {3}, \
+                     \n   Previous position: {4}, \
+                     \n   New position (Action): {5}, \
+                     \n   Portifolio dolar value: {6}""".format(self.step_idx,
+                                                                self.df.index[self.step_idx],
+                                                                self._get_obs(last_price=True),
+                                                                str(self._get_fiat()),
+                                                                str(self._get_prev_portifolio_posit()),
+                                                                str(self._get_portifolio_posit()),
+                                                                str(self._calc_step_total_portval())))
+        if mode == 'print':
+            pass
+
+        else:
+            raise TypeError
 
 
 class TradingEnvironment(Env):
@@ -962,1357 +2024,3 @@ class TradingEnvironment(Env):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
         return error_msg
-
-
-class TrainingEnvironment(Env):
-    '''
-    The end and the beginning, the revelation of a new life
-    '''
-    def __init__(self, db=None, name=None, seed=42):
-
-        try:
-            assert isinstance(name, str)
-            self.name = name
-        except AssertionError:
-            print("Must enter environment name")
-            raise ValueError
-
-        self._seed(seed)
-
-        if not os.path.exists('./logs'):
-            os.makedirs('./logs')
-        self.logger = Logger(self.name, './logs/')
-
-        self.crypto = {}
-        self.fiat = None
-        self.prev_posit = {}
-        self.posit = {}
-        self.prev_val = np.nan
-        self.init_crypto = {}
-        self.init_fiat = None
-        self.tax = {}
-        self.symbols = ['fiat']
-
-        self.status = None
-        self.np_random = None
-        self._is_training = False
-        self.epsilon = 1e-8
-        self.step_idx = None
-        self.global_step = 0
-        self.obs_steps = 0
-        self.offset = 0
-        self.last_reward = 0.0
-        self.last_action = np.zeros(0)
-
-        # Data input
-        # Gets data table from database server
-        self.db = db
-        self.tables = {}
-        self.dfs = {}
-        self.df = None
-
-        self.logger.info("Training Environment initialization",
-                         "Training Environment Initialized!")
-
-    # Setters
-    def add_table(self, number=None, name=None):
-        try:
-            try:
-                assert isinstance(self.db, pm.database.Database)
-            except AssertionError:
-                print("db must be a pymongo database instance")
-                raise ValueError
-
-            col_names = self.db.collection_names()
-            col_names_str = ""
-            for i, n in enumerate(col_names):
-                col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
-
-            welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
-                          "Select from db a table to trade on:\n" + col_names_str
-
-            if isinstance(number, int):
-                table_n = number
-            elif isinstance(name, str):
-                table_n = name
-            else:
-                print(welcome_str)
-
-                table_n = input("Enter a table number or name:")
-            if isinstance(table_n, int):
-                table = self.db[col_names[int(table_n)]]
-                self.logger.info(TrainingEnvironment.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
-
-            if isinstance(table_n, str):
-                table = self.db[table_n]
-                self.logger.info(TrainingEnvironment.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (table_n))
-
-            if table_n == '':
-                print("You must enter a table number or name!")
-                raise ValueError
-
-            assert isinstance(table, pm.collection.Collection)
-            assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
-
-            symbol = self._get_table_symbol(table)
-            self.tables[symbol] = table
-
-        except AssertionError:
-            self.logger.error(TrainingEnvironment.add_table, "Table error. Please, enter a valid table number.")
-            raise ValueError
-        except Exception as e:
-            if debug:
-                self.logger.error(TrainingEnvironment.add_table, self.parse_error(e))
-            else:
-                self.logger.error(TrainingEnvironment.add_table, "Wrong table.")
-                raise ValueError
-
-    def clear_dfs(self):
-        if hasattr(self, 'dfs'):
-            del self.dfs
-        self.dfs = {}
-
-    def add_df(self, df=None, symbol=None, steps=5):
-        try:
-            assert isinstance(self.freq, int) and self.freq >=1
-
-            assert isinstance(steps, int) and steps >= 3
-            if isinstance(df, pd.core.frame.DataFrame):
-                for col in df.columns:
-                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
-                    'wrong dataframe formatation'
-                self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
-            else:
-                assert symbol in [s for s in self.tables.keys()]
-                assert isinstance(self.tables[symbol], pm.collection.Collection)
-
-                try:
-                    assert steps >= 3
-                except AssertionError:
-                    print("Observation steps must be greater than 3")
-                    return False
-                self.dfs[symbol] = self._get_obs(symbol=symbol, steps=steps, freq=self.freq)
-
-            assert isinstance(self.dfs[symbol], pd.core.frame.DataFrame)
-
-            self.dfs[symbol]['prev_position'] = np.nan
-            self.dfs[symbol]['position'] = np.nan
-            self.dfs[symbol]['amount'] = np.nan
-
-            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-8).applymap(convert_to.decimal)
-
-            assert self.dfs[symbol].columns.all() in ['open', 'high', 'low', 'close', 'volume', 'prev_position',
-                                                      'position', 'amount']
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment.add_df, self.parse_error(e))
-
-    def add_symbol(self, symbol):
-        assert isinstance(symbol, str)
-        self.symbols.append(symbol)
-        if symbol not in [k for k in self.dfs.keys()]:
-            self.add_df(symbol=symbol, steps=int(self.obs_steps * 5))
-        self.make_df()
-        self._set_posit(convert_to.decimal('0.0'), symbol, self.df.index[0])
-
-    def make_df(self):
-        self.df = pd.concat(self.dfs, axis=1)
-        assert isinstance(self.df, pd.core.frame.DataFrame)
-        self.df['fiat', 'prev_position'] = convert_to.decimal(np.nan)
-        self.df['fiat', 'position'] = convert_to.decimal(np.nan)
-        self.df['fiat', 'amount'] = convert_to.decimal(np.nan)
-        # self.clear_dfs()
-        self.set_observation_space()
-        try:
-            assert self.df.shape[0] >= self.obs_steps
-        except AssertionError:
-            self.logger.error(TrainingEnvironment.make_df, "Trying to make dataframe with less observations than obs_steps.")
-
-    def set_init_fiat(self, fiat):
-        assert fiat >= 0.0
-        self.init_fiat = convert_to.decimal(fiat)
-
-    def set_init_crypto(self, amount, symbol):
-        assert amount >= 0.0
-        assert symbol in self._get_df_symbols()
-        self.init_crypto[symbol] = convert_to.decimal(amount)
-
-    def _set_fiat(self, fiat, timestamp):
-        try:
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert isinstance(fiat, Decimal), 'fiat is not decimal'
-
-            if fiat < convert_to.decimal('0E-8'):
-                self.status['ValueError'] += 1
-                self.logger.error(TrainingEnvironment._set_fiat, "Fiat value error: Negative value")
-            self.fiat = fiat
-            self.df.loc[timestamp, ('fiat', 'amount')] = fiat
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._set_fiat, self.parse_error(e))
-
-    def _set_crypto(self, amount, symbol, timestamp):
-        try:
-            # assert symbol in self._get_df_symbols(no_fiat=True) # taken out for speed
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert isinstance(amount, Decimal)
-            if amount < 0.0:
-                self.status['ValueError'] += 1
-                self.logger.error(TrainingEnvironment._set_crypto, "Crypto value error: Negative value")
-
-            self.crypto[symbol] = amount
-            self.df.loc[timestamp, (symbol, 'amount')] = amount
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._set_crypto, self.parse_error(e))
-
-    def _set_posit(self, posit, symbol, timestamp):
-        # TODO: VALIDATE
-        try:
-            try:
-                assert isinstance(posit, Decimal)
-            except AssertionError:
-                if isinstance(posit, float):
-                    posit = convert_to.decimal(posit)
-                else:
-                    raise AssertionError
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert  convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
-            self.posit[symbol] = posit
-            self.df.loc[timestamp, (symbol, 'position')] = posit
-
-        except AssertionError:
-            self.status['ValueError'] += 1
-            self.logger.error(TrainingEnvironment._set_posit, "Invalid previous position value.")
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._set_posit, self.parse_error(e))
-
-    def _set_prev_posit(self, posit, symbol, timestamp):
-        try:
-            try:
-                assert isinstance(posit, Decimal)
-            except AssertionError:
-                if isinstance(posit, float):
-                    posit = convert_to.decimal(posit)
-                else:
-                    raise AssertionError
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            # try:
-            #     assert 0.0 <= posit <= 1.0, posit
-            # except AssertionError:
-            #     posit = np.clip(np.array([posit]), a_min=0.0, a_max=1.0)[0]
-            #     self.status['ValueError'] += 1
-            #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
-            assert convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
-            self.prev_posit[symbol] = posit
-            self.df.loc[timestamp, (symbol, 'prev_position')] = posit
-
-        except AssertionError:
-            self.status['ValueError'] += 1
-            self.logger.error(TrainingEnvironment._set_prev_posit, "Invalid previous position value.")
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._set_prev_posit, self.parse_error(e))
-
-    def _save_prev_portval(self):
-        try:
-            portval = self._calc_step_total_portval()
-            assert portval >= 0.0
-            self.prev_val = portval
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._save_prev_portval, self.parse_error(e))
-
-    def _save_prev_portifolio_posit(self, timestamp):
-        for symbol in self._get_df_symbols():
-            self._set_prev_posit(self._get_posit(symbol), symbol, timestamp)
-
-    def set_action_space(self):
-        # Action space
-        self.action_space = Box(0., 1., len(self._get_df_symbols()))
-        self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self._get_df_symbols())))
-
-    def set_observation_space(self):
-        # Observation space:
-        obs_space = []
-        # OPEN, HIGH, LOW, CLOSE
-        for _ in range(4):
-            obs_space.append(Box(0.0, 1e9, 1))
-        # VOLUME
-        obs_space.append(Box(0.0, 1e12, 1))
-        # POSITION
-        obs_space.append(Box(0.0, 1.0, 1))
-
-        self.observation_space = Tuple(obs_space)
-
-    def set_obs_steps(self, steps):
-        assert isinstance(steps, int) and steps >= 3
-        self.obs_steps = steps
-        self.step_idx = steps
-        self.offset = steps
-
-    def set_freq(self, freq):
-        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
-        self.freq = freq
-
-    def set_tax(self, tax, symbol):
-        assert 0.0 <= tax <= 1.0
-        assert symbol in self._get_df_symbols()
-        self.tax[symbol] = convert_to.decimal(tax)
-
-    def set_training_stage(self, train):
-        assert isinstance(train, bool)
-        self._is_training = train
-
-    def _save_df_to_db(self, name):
-        self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
-
-    # Getters
-    def _get_df_symbols(self, no_fiat=False):
-        if no_fiat:
-            return [s for s in self.df.columns.levels[0] if s is not 'fiat']
-        else:
-            return [s for s in self.df.columns.levels[0]]
-
-    @staticmethod
-    def _get_table_symbol(table):
-        return table.full_name.split('.')[1].split('_')[2]
-
-    def get_step_obs_all(self):
-        obs_list = []
-        keys = []
-        for symbol in self._get_df_symbols():
-            keys.append(symbol)
-            obs_list.append(self.get_step_obs(symbol))
-
-        return pd.concat(obs_list, keys=keys, axis=1)
-
-    def get_step_obs(self, symbol):
-        return self._get_step_obs(symbol=symbol, steps=self.obs_steps, float=True)
-
-    def _get_step_obs(self, symbol, steps=1, step_price=False, float=False):
-        """
-        Observe the environment. Is usually used after the step is taken
-        """
-        # observation as per observation space
-        try:
-            # assert symbol in self._get_df_symbols() #taken out for speed
-            # assert steps >= 1 and isinstance(last_price, bool) #taken out for speed
-
-            if step_price:
-                return self.df.get_value(self.df.index[self.step_idx], (symbol, 'close'))
-
-            else:
-                if symbol in self._get_df_symbols(no_fiat=True):
-                    columns = ['open', 'high', 'low', 'close', 'volume', 'position']
-
-                else:
-                    columns = ['position']
-
-                # obs = self.df.loc[self.df.index[self.step_idx - steps + 1:self.step_idx + 1],
-                #                   (symbol, columns)]
-                # Better performance methods
-                # idx = self.df[symbol].columns.get_indexer(columns)
-                # obs = self.df[symbol].iloc[self.step_idx - steps + 1:self.step_idx + 1].take(idx, axis=1)
-
-                obs = self.df[symbol].iloc[self.step_idx - steps + 1:self.step_idx + 1].filter(columns)
-
-                # ffill last position with previous one
-                obs.iat[-1,-1] = obs.iat[-2,-1]
-
-                assert obs.shape[0] == self.obs_steps
-                if float:
-                    return obs.astype(np.float64)
-                else:
-                    return obs
-
-        except IndexError as e:
-            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
-            return False
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
-            return False
-
-    def _get_fiat(self):
-        assert self.fiat >= convert_to.decimal('0E-12'), self.fiat
-        return self.fiat
-
-    def _get_crypto(self, symbol):
-        assert self.crypto[symbol] >= Decimal('0E-12'), self.crypto[symbol]
-        # assert symbol in self._get_df_symbols(no_fiat=True) # Took out for sp
-        return self.crypto[symbol]
-
-    def _get_init_fiat(self):
-        assert convert_to.decimal('0E-8') <= self.init_fiat
-        return self.init_fiat
-
-    def _get_init_crypto(self, symbol):
-        assert symbol in [s for s in self.init_crypto.keys()], (symbol, self.init_crypto.keys())
-        assert 0.0 <= self.init_crypto[symbol], self.init_crypto[symbol]
-        return self.init_crypto[symbol]
-
-    def _get_posit(self, symbol):
-        assert self.posit[symbol] <= 1.0
-        return self.posit[symbol]
-
-    def _get_portifolio_posit(self):
-        portifolio = []
-        for symbol in self._get_df_symbols():
-            portifolio.append(self._get_posit(symbol))
-        return np.array(portifolio)
-
-    def _get_prev_posit(self, symbol):
-        assert self.prev_posit[symbol] <= 1.0
-        return self.prev_posit[symbol]
-
-    def _get_prev_portifolio_posit(self, no_fiat=False):
-        portifolio = []
-        for symbol in self._get_df_symbols():
-            portifolio.append(self._get_prev_posit(symbol))
-        if no_fiat:
-            return np.array(portifolio)[:-1]
-        else:
-            return np.array(portifolio)
-
-    def _calc_step_posit(self, symbol):
-        if symbol is not 'fiat':
-            return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True) /\
-                   self._calc_step_total_portval()
-        else:
-            return self._get_fiat() / self._calc_step_total_portval()
-
-    def _calc_step_potifolio_posit(self):
-        portifolio = []
-        for symbol in self._get_df_symbols():
-            portifolio.append(self._calc_step_posit(symbol))
-        return np.array(portifolio)
-
-    def _calc_step_portval(self, symbol):
-        return self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
-
-    def _calc_step_total_portval(self):
-        portval = convert_to.decimal('0.0')
-
-        for symbol in self._get_df_symbols(no_fiat=True):
-            portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
-        portval += self._get_fiat()
-
-        return portval
-
-    def _get_prev_portval(self):
-        assert self.prev_val >= 0.0
-        return self.prev_val
-
-    def _get_tax(self, symbol):
-        # assert symbol in [s for s in self.tax.keys()]
-        return self.tax[symbol]
-
-    def _get_historical_data(self, symbol=None, start=None, end=None, freq=1, file=None):
-        """
-        Gets obs from data server
-        :args:
-        :steps: int: Number of bar to retrieve
-        :freq: int: Sampling frequency in minutes
-        """
-        try:
-            assert freq >= 1
-
-            start = pd.to_datetime(start)
-            end = pd.to_datetime(end)
-
-            if file:
-                assert isinstance(file, str) or isinstance(file, pd.core.frame.DataFrame)
-                obs = get_historical(file, freq, start, end)
-            else:
-                assert symbol in [s for s in self.tables.keys()]
-                columns = self.tables[symbol].find().limit(-1).sort('index', pm.DESCENDING).next()['columns']
-
-                cursor = self.tables[symbol].find({'index': {'$lt': end,
-                                                    '$gte': start}}).sort('index', pm.DESCENDING)
-
-                data = [[item['data'][0][i] for i in range(len(item) - 2)] + [item['data'][0][2]] for item in cursor]
-
-                obs = self.sample_trades(pd.DataFrame(data=data, columns=columns).set_index('trades_date_time',
-                                                                                        drop=True),
-                                                                                        "%dmin" % (freq))
-
-            obs.ffill(inplace=True)
-            obs.bfill(inplace=True)
-
-            try:
-                assert obs.shape[0] > 0
-            except AssertionError:
-                self.logger.info(TrainingEnvironment._get_historical_data,
-                                 "There is no data for this time period within the data server.")
-                obs = False
-
-            return obs
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._get_historical_data, self.parse_error(e))
-            return False
-
-    def _get_timestamp_now(self):
-        return pd.to_datetime(datetime.now() + timedelta(hours=3))  # timezone
-
-    ## Environment methos
-    def _get_reward(self, type='absolute return'):
-        if type == 'absolute return':
-            return self._calc_step_total_portval() - self._get_prev_portval()
-
-        elif type == 'percent change':
-            prev_portval = self._get_prev_portval()
-            if prev_portval > convert_to.decimal('0.0'):
-                return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
-            else:
-                return (self._calc_step_total_portval() - self._get_prev_portval())
-
-        elif type == 'sharpe ratio':
-            # TODO: IMPLEMENT SHARPE REWARD
-            raise NotImplementedError
-            return self._calc_step_total_portval() - self._get_prev_portval()
-
-        else:
-            raise NotImplementedError
-
-    def _assert_action(self, action):
-        try:
-            for posit in action:
-                if not isinstance(posit, Decimal):
-                    action = convert_to.decimal(np.float64(action))
-
-            try:
-                assert self.action_space.contains(action)
-
-            except AssertionError:
-                # normalize
-                if action.sum() != convert_to.decimal('1.0'):
-                    action /= action.sum()
-                    try:
-                        assert action.sum() == convert_to.decimal('1.0')
-                    except AssertionError:
-                        action[-1] += convert_to.decimal('1.0') - action.sum()
-                        action /= action.sum()
-                        assert action.sum() == convert_to.decimal('1.0')
-
-                # if debug:
-                #     self.logger.error(Apocalipse._assert_action, "Action does not belong to action space")
-
-            assert action.sum() - convert_to.decimal('1.0') < convert_to.decimal('1e-6')
-
-        except AssertionError:
-            if debug:
-                self.status['ActionError'] += 1
-                # self.logger.error(Apocalipse._assert_action, "Action out of range")
-
-            action /= action.sum()
-            try:
-                assert action.sum() == convert_to.decimal('1.0')
-            except AssertionError:
-                action[-1] += convert_to.decimal('1.0') - action.sum()
-                try:
-                    assert action.sum() == convert_to.decimal('1.0')
-                except AssertionError:
-                    action /= action.sum()
-
-        return action
-
-    def _reset_funds(self):
-        for symbol in self._get_df_symbols(no_fiat=True):
-            self.df[(symbol, 'amount')] = np.nan
-            self._set_crypto(self._get_init_crypto(symbol), symbol, self.df.index[self.step_idx])
-
-        self.df['fiat'] = np.nan
-        self._set_fiat(self._get_init_fiat(), self.df.index[self.step_idx])
-
-    def _reset_status(self):
-        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
-
-    def _seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
-
-    def _simulate_trade(self, action, timestamp):
-
-        # Assert inputs
-        action = self._assert_action(action)
-        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-        #     self.observation_space.contains(observation[symbol])
-        # assert isinstance(timestamp, pd.Timestamp)
-
-        # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
-
-        # Get fiat_pool
-        fiat_pool = self._get_fiat()
-        portval = self._calc_step_total_portval()
-
-        # Sell assets first
-        for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0E-8'):
-
-                symbol = self._get_df_symbols()[i]
-
-                crypto_pool = portval * action[i] / self._get_step_obs(symbol, step_price=True)
-
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
-
-                    fee = portval * change.copy_abs() * self._get_tax(symbol)
-
-                fiat_pool += portval.fma(change.copy_abs(), -fee)
-
-                self._set_crypto(crypto_pool, symbol, timestamp)
-
-        self._set_fiat(fiat_pool, timestamp)
-
-        # Uodate prev portval with deduced taxes
-        portval = self._calc_step_total_portval()
-
-        # Then buy some goods
-        for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0E-8'):
-
-                symbol = self._get_df_symbols()[i]
-
-                fiat_pool -= portval * change.copy_abs()
-
-                # if fiat_pool is negative, deduce it from portval and clip
-                try:
-                    assert fiat_pool >= convert_to.decimal('0E-8')
-                except AssertionError:
-                    portval += fiat_pool
-                    fiat_pool = convert_to.decimal('0E-8')
-                    # if debug:
-                    #     self.status['ValueError'] += 1
-                    #     self.logger.error(Apocalipse._simulate_trade,
-                    #                       "Negative value for fiat pool at trade end." + str(fiat_pool))
-
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
-
-                    fee = self._get_tax(symbol) * portval * change
-
-                crypto_pool = portval.fma(action[i], -fee) / self._get_step_obs(symbol, step_price=True)
-
-                self._set_crypto(crypto_pool, symbol, timestamp)
-
-        # And don't forget to take your change!
-        self._set_fiat(fiat_pool, timestamp)
-
-        # If nothing more interests you, just save and leave
-        for i, change in enumerate(posit_change):
-            if change == convert_to.decimal('0.0'):
-                # No order to execute, just save the variables and exit
-
-                symbol = self._get_df_symbols()[i]
-
-                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
-
-        ## Update your position on the exit
-        for i, symbol in enumerate(self._get_df_symbols(no_fiat=True)):
-            self._set_posit(self._get_step_obs(symbol, step_price=True) * self._get_crypto(symbol) /
-                            self._calc_step_total_portval(), symbol, timestamp)
-        self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
-
-    def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
-        """
-        Resets environment and returns a initial observation
-        :param reset_funds: Reset funds to initial value
-        :param reset_results: Reset results from instance dataframe
-        :param reset_global_step: Reset global step counter
-        :return: observation
-        """
-
-        if reset_global_step:
-            self.global_step = 0
-
-        if self._is_training:
-            self.step_idx = self.offset + np.random.randint(high=self.df.shape[0] - self.offset - 1, low=0)
-            timestamp = self.df.index[self.step_idx]
-        else:
-            self.step_idx = self.offset
-            timestamp = self.df.index[self.step_idx]
-
-        for symbol in self._get_df_symbols():
-            self._reset(symbol, timestamp, reset_funds=reset_funds, reset_results=reset_results)
-
-        self.step_idx -= self.obs_steps
-
-        for _ in range(self.obs_steps):
-            timestamp = self.df.index[self.step_idx]
-
-            for symbol in self._get_df_symbols():
-                # # Set crypto and fiat amounts
-                if symbol is not 'fiat':
-                    self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
-                else:
-                    self._set_fiat(self._get_fiat(), timestamp)
-
-                # portval = self._calc_step_total_portval()
-
-                # Calculate positions
-                # if portval > convert_to.decimal('0.0'):
-                posit = self._calc_step_posit(symbol)
-                self._set_prev_posit(posit, symbol, timestamp)
-                self._set_posit(posit, symbol, timestamp)
-                # else:
-                #     self._set_prev_posit(convert_to.decimal('0.0'), symbol, timestamp)
-                #     self._set_posit(convert_to.decimal('0.0'), symbol, timestamp)
-
-            self.step_idx += 1
-
-        assert (self.crypto and self.fiat and self.obs_steps and self.offset and self.tax) is not None
-
-        return self.get_step_obs_all()
-
-    def _reset(self, symbol, timestamp, reset_results=False, reset_funds=False):
-        # TODO: VALIDATE
-        # Assert conditions
-        assert symbol in self._get_df_symbols()
-        assert (self._is_training, self.obs_steps, self.tax) is not None
-        assert isinstance(self.obs_steps, int) and self.obs_steps > 0
-
-        try:
-            assert self.df[symbol].shape[0] > self.obs_steps
-        except AssertionError:
-            self.logger.error(TrainingEnvironment._reset, "Calling reset with steps <= obs_steps")
-            raise ValueError
-
-        # set offset
-        self.offset = self.obs_steps
-
-        # Reset results columns
-        if reset_results:
-            self.df[symbol, 'amount'] = convert_to.decimal(np.nan)
-            self.df[symbol, 'position'] = convert_to.decimal(np.nan)
-            self.df[symbol, 'prev_position'] = convert_to.decimal(np.nan)
-
-        if symbol is not 'fiat':
-            if len(self.crypto.keys()) <= len(self._get_df_symbols()) - 1 or reset_funds or self._is_training:
-                self._set_crypto(self._get_init_crypto(symbol), symbol, timestamp)
-            else:
-                self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
-        else:
-            if self.fiat is None or reset_funds or self._is_training:
-                self._set_fiat(self._get_init_fiat(), timestamp)
-            else:
-                self._set_fiat(self._get_fiat(), timestamp)
-
-        # self.logger.info(Apocalipse._reset, "Symbol %s reset done." % (symbol))
-
-        # return self._get_step_obs(symbol, self.obs_steps)
-
-    def step(self, action):
-        return self._step(self.get_step_obs_all(), action)
-
-    def _step(self, observation, action, reward_type='percent change', timeout=10):
-        # TODO: VALIDATE
-        try:
-            # Assert observation is valid
-            # assert (isinstance(observation, pd.core.frame.DataFrame) or isinstance(observation, np.ndarray)) and \
-            #        observation.shape[0] >= 3
-
-            # for symbol in self._get_df_symbols(no_fiat=True):
-            #     assert self.observation_space.contains(observation[symbol])
-
-            # Assert action is valid
-            action = self._assert_action(action)
-            self.last_action = action
-
-            # Get step timestamp
-            timestamp = self.df.index[self.step_idx]
-
-            # Save previous val and position
-            self._save_prev_portval()
-            self._save_prev_portifolio_posit(timestamp)
-
-            self._simulate_trade(action, timestamp)
-
-            # Update step counter and environment observation
-            if self.step_idx < self.df.shape[0] - 1:
-                self.step_idx += 1
-                done = False
-            else:
-                self.status['OOD'] = True
-                done = True
-
-            new_obs = self.get_step_obs_all()
-
-            # Calculate step reward
-            self.last_reward = self._get_reward(reward_type)
-
-            if isinstance(new_obs, pd.core.frame.DataFrame):
-                assert new_obs.shape[0] == observation.shape[0], "wrong observation size"
-                assert pd.infer_freq(new_obs.index) == pd.infer_freq(observation.index), "wrong observation frequency"
-                # assert len(new_obs.index) == len(observation.index), "wrong observation size"
-
-            self.global_step += 1
-
-            return new_obs, np.float32(self.last_reward), done, self.status
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._step, self.parse_error(e))
-            self._send_email(self.name + "step error:", self.parse_error(e))
-
-            return False, False, True, self.status
-
-    # Helper methods
-    def parse_error(self, e):
-        error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
-            e.__traceback__.tb_lineno) + ': ' + str(e)
-        return error_msg
-
-    def set_email(self, email, psw):
-        """
-        Set Gmail address and password for log keeping
-        :param email: str: Gmail address
-        :param psw: str: account password
-        :return:
-        """
-        try:
-            assert isinstance(email, str) and isinstance(psw, str)
-            self.email = email
-            self.psw = psw
-            self.logger.info(TrainingEnvironment.set_email, "Email report address set to: %s" % (self.email))
-        except Exception as e:
-            self.logger.error(TrainingEnvironment.set_email, self.parse_error(e))
-
-    def _send_email(self, subject, body):
-        try:
-            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
-                   isinstance(subject, str) and isinstance(body, str)
-            gmail_user = self.email
-            gmail_pwd = self.psw
-            FROM = self.email
-            TO = self.email if type(self.email) is list else [self.email]
-            SUBJECT = subject
-            TEXT = body
-
-            # Prepare actual message
-            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
-
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.ehlo()
-            server.starttls()
-            server.login(gmail_user, gmail_pwd)
-            server.sendmail(FROM, TO, message)
-            server.close()
-
-        except Exception as e:
-            self.logger.error(TrainingEnvironment._send_email, self.parse_error(e))
-        finally:
-            pass
-
-    @staticmethod
-    def sample_trades(df, freq):
-
-        df['trade_px'] = df['trade_px'].ffill()
-        df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
-
-        # TODO FIND OUT WHAT TO DO WITH NANS
-        index = df.resample(freq).first().index
-        out = pd.DataFrame(index=index)
-
-        out['open'] = df['trade_px'].resample(freq).first()
-        out['high'] = df['trade_px'].resample(freq).max()
-        out['low'] = df['trade_px'].resample(freq).min()
-        out['close'] = df['trade_px'].resample(freq).last()
-        out['volume'] = df['trade_volume'].resample(freq).sum()
-
-        return out
-
-    @staticmethod
-    def sample_ohlc(df, freq):
-
-        # TODO FIND OUT WHAT TO DO WITH NANS
-        index = df.resample(freq).first().index
-        out = pd.DataFrame(index=index, columns=df.columns)
-
-        out['open'] = df['open'].resample(freq).first().ffill()
-        out['high'] = df['high'].resample(freq).max().ffill()
-        out['low'] = df['low'].resample(freq).min().ffill()
-        out['close'] = df['close'].resample(freq).last().ffill()
-        out['volume'] = df['volume'].resample(freq).sum().fillna(convert_to.decimal('1e-8'))
-
-        return out
-
-    @staticmethod
-    def sample_position(df, freq):
-        """
-        Sample position obs dataframe
-        :param df: pandas df: obs df
-        :param freq: frequency to sample
-        :return: sampled dataframe with same columns and last observations of each step
-        """
-        # TODO FIND OUT WHAT TO DO WITH NANS
-
-        index = df.resample(freq).first().index
-        out = pd.DataFrame(index=index)
-
-        for col in df.columns:
-            out[col] = df[col].resample(freq).last()
-
-        assert df.columns.all() == out.columns.all()
-
-        return out
-
-    @staticmethod
-    def plot_candles(df, results=False):
-        def config_fig(fig):
-            fig.background_fill_color = "black"
-            fig.background_fill_alpha = 0.5
-            fig.border_fill_color = "#232323"
-            fig.outline_line_color = "#232323"
-            fig.title.text_color = "whitesmoke"
-            fig.xaxis.axis_label_text_color = "whitesmoke"
-            fig.yaxis.axis_label_text_color = "whitesmoke"
-            fig.yaxis.major_label_text_color = "whitesmoke"
-            fig.xaxis.major_label_orientation = np.pi / 4
-            fig.grid.grid_line_alpha = 0.3
-
-        df = df.astype(np.float64)
-        handles = {}
-
-        # CANDLES
-        candles = {}
-        # Figure instance
-        p_candle = figure(title="Cryptocurrency candlesticks",
-                          x_axis_type="datetime",
-                          x_axis_label='timestep',
-                          y_axis_label='price',
-                          plot_width=800, plot_height=500,
-                          tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                          toolbar_location="above"
-                          )
-
-        # Figure configuration
-        config_fig(p_candle)
-
-        # Bar width
-        w = 10000000 / (df.shape[0] ** (0.7))
-
-        #
-        inc = df.close > df.open
-        dec = df.open > df.close
-
-        # CANDLES
-        candles['p1'] = p_candle.segment(df.index, df.high, df.index, df.low, color="white")
-        candles['p2'] = p_candle.vbar(df.index[inc], w, df.open[inc], df.close[inc],
-                                      fill_color="green", line_color="green")
-        candles['p3'] = p_candle.vbar(df.index[dec], w, df.open[dec], df.close[dec],
-                                      fill_color="red", line_color="red")
-
-        handles['candles'] = candles
-
-        volume = {}
-        p_volume = figure(title="Trade pvolume on BTC-e",
-                          x_axis_type="datetime",
-                          x_axis_label='timestep',
-                          y_axis_label='volume',
-                          plot_width=800, plot_height=200,
-                          tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                          toolbar_location="above"
-                          )
-        config_fig(p_volume)
-
-        volume['v1'] = p_volume.vbar(df.index[inc], w, df.volume[inc], 0,
-                                     fill_color="green", line_color="green")
-        volume['v2'] = p_volume.vbar(df.index[dec], w, df.volume[dec], 0,
-                                     fill_color="red", line_color="red")
-
-        handles['volume'] = volume
-
-        # BBAND
-        bb = {}
-        if ('lowbb' and 'lowbb' and 'upbb') in df.columns:
-            bb['mdbb'] = p_candle.line(df.index, df['mdbb'], color='green')
-            bb['upbb'] = p_candle.line(df.index, df['upbb'], color='whitesmoke')
-            bb['lowbb'] = p_candle.line(df.index, df['lowbb'], color='whitesmoke')
-
-        handles['bb'] = bb
-
-        # MA
-        ma = {}
-        for col in df.columns:
-            if 'ma' in col:
-                if 'benchmark' not in col:
-                    ma[col] = p_candle.line(df.index, df[col], color='red')
-
-        handles['ma'] = ma
-
-        p_rsi = False
-        if 'rsi' in df.columns:
-            p_rsi = figure(title="RSI oscillator",
-                           x_axis_type="datetime",
-                           x_axis_label='timestep',
-                           y_axis_label='RSI',
-                           plot_width=800, plot_height=200,
-                           tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                           toolbar_location="above"
-                           )
-            config_fig(p_rsi)
-
-            rsi = p_rsi.line(df.index, df['rsi'], color='red')
-
-            handles['rsi'] = rsi
-
-        if results:
-            # Results figures
-            results = {}
-
-            # Position
-            p_pos = figure(title="Position over time",
-                           x_axis_type="datetime",
-                           x_axis_label='timestep',
-                           y_axis_label='position',
-                           plot_width=800, plot_height=200,
-                           tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                           toolbar_location="above"
-                           )
-            config_fig(p_pos)
-
-            results['posit'] = p_pos.line(df.index, df.prev_position, color='green')
-
-            # Portifolio and benchmark values
-            p_val = figure(title="Portifolio / Benchmark Value",
-                           x_axis_type="datetime",
-                           x_axis_label='timestep',
-                           y_axis_label='position',
-                           plot_width=800, plot_height=400,
-                           tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                           toolbar_location="above"
-                           )
-            config_fig(p_val)
-
-            results['portval'] = p_val.line(df.index, df.portval, color='green')
-            results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
-
-            # Portifolio and benchmark returns
-            p_ret = figure(title="Portifolio / Benchmark Returns",
-                           x_axis_type="datetime",
-                           x_axis_label='timestep',
-                           y_axis_label='Returns',
-                           plot_width=800, plot_height=200,
-                           tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                           toolbar_location="above"
-                           )
-            config_fig(p_ret)
-
-            results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
-            results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
-
-            p_hist = figure(title="Portifolio Value Pct Change Distribution",
-                            x_axis_label='Pct Change',
-                            y_axis_label='frequency',
-                            plot_width=800, plot_height=300,
-                            tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                            toolbar_location="above"
-                            )
-            config_fig(p_hist)
-
-            hist, edges = np.histogram(df.returns, density=True, bins=100)
-
-            p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
-                        fill_color="#036564", line_color="#033649")
-
-            # Portifolio rolling alpha
-            p_alpha = figure(title="Portifolio rolling alpha",
-                             x_axis_type="datetime",
-                             x_axis_label='timestep',
-                             y_axis_label='alpha',
-                             plot_width=800, plot_height=200,
-                             tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                             toolbar_location="above"
-                             )
-            config_fig(p_alpha)
-
-            results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
-
-            # Portifolio rolling beta
-            p_beta = figure(title="Portifolio rolling beta",
-                            x_axis_type="datetime",
-                            x_axis_label='timestep',
-                            y_axis_label='beta',
-                            plot_width=800, plot_height=200,
-                            tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                            toolbar_location="above"
-                            )
-            config_fig(p_beta)
-
-            results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
-
-            # Rolling Drawdown
-            p_dd = figure(title="Portifolio rolling drawdown",
-                          x_axis_type="datetime",
-                          x_axis_label='timestep',
-                          y_axis_label='drawdown',
-                          plot_width=800, plot_height=200,
-                          tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                          toolbar_location="above"
-                          )
-            config_fig(p_dd)
-
-            results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
-
-            # Portifolio Sharpe ratio
-            p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
-                              x_axis_type="datetime",
-                              x_axis_label='timestep',
-                              y_axis_label='Sharpe ratio',
-                              plot_width=800, plot_height=200,
-                              tools='crosshair,hover,reset,wheel_zoom,pan,box_zoom',
-                              toolbar_location="above"
-                              )
-            config_fig(p_sharpe)
-
-            results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
-
-            handles['results'] = results
-
-            print("################### > Portifolio Performance Analysis < ###################\n")
-            print(
-                "Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
-            print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
-                                                                         ec.sharpe_ratio(df.benchmark_returns)))
-            print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
-                                                                         ec.omega_ratio(df.benchmark_returns)))
-            print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
-                                                                         ec.max_drawdown(df.benchmark_returns)))
-
-            # Handles dict
-            if p_rsi:
-                handles['all'] = show(
-                    column(p_candle, p_volume, p_rsi, p_val, p_pos, p_ret, p_sharpe, p_dd, p_alpha, p_beta),
-                    notebook_handle=True)
-            else:
-                handles['all'] = show(
-                    column(p_candle, p_volume, p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta),
-                    notebook_handle=True)
-        else:
-            if p_rsi:
-                handles['all'] = show(column(p_candle, p_volume, p_rsi), notebook_handle=True)
-            else:
-                handles['all'] = show(column(p_candle, p_volume), notebook_handle=True)
-
-        return handles
-
-    def plot_results(self, df):
-        def config_fig(fig):
-            fig.background_fill_color = "black"
-            fig.background_fill_alpha = 0.5
-            fig.border_fill_color = "#232323"
-            fig.outline_line_color = "#232323"
-            fig.title.text_color = "whitesmoke"
-            fig.xaxis.axis_label_text_color = "whitesmoke"
-            fig.yaxis.axis_label_text_color = "whitesmoke"
-            fig.yaxis.major_label_text_color = "whitesmoke"
-            fig.xaxis.major_label_orientation = np.pi / 4
-            fig.grid.grid_line_alpha = 0.3
-
-        df = df.astype(np.float64)
-        # Results figures
-        results = {}
-
-        # Position
-        p_pos = figure(title="Position over time",
-                       x_axis_type="datetime",
-                       x_axis_label='timestep',
-                       y_axis_label='position',
-                       plot_width=800, plot_height=400,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                       toolbar_location="above"
-                       )
-        config_fig(p_pos)
-
-        palettes = inferno(len(self._get_df_symbols()))
-
-        for i, symbol in enumerate(self._get_df_symbols()):
-            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol, 'position'], color=palettes[i], legend=symbol)
-
-        # Portifolio and benchmark values
-        p_val = figure(title="Portifolio / Benchmark Value",
-                       x_axis_type="datetime",
-                       x_axis_label='timestep',
-                       y_axis_label='position',
-                       plot_width=800, plot_height=400,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                       toolbar_location="above"
-                       )
-        config_fig(p_val)
-
-        results['portval'] = p_val.line(df.index, df.portval, color='green')
-        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
-
-        # Portifolio and benchmark returns
-        p_ret = figure(title="Portifolio / Benchmark Returns",
-                       x_axis_type="datetime",
-                       x_axis_label='timestep',
-                       y_axis_label='Returns',
-                       plot_width=800, plot_height=200,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                       toolbar_location="above"
-                       )
-        config_fig(p_ret)
-
-        results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
-        results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
-        
-        p_hist = figure(title="Portifolio Value Pct Change Distribution",
-                        x_axis_label='Pct Change',
-                        y_axis_label='frequency',
-                        plot_width=800, plot_height=300,
-                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                        toolbar_location="above"
-                        )
-        config_fig(p_hist)
-
-        hist, edges = np.histogram(df.returns, density=True, bins=100)
-
-        p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
-                    fill_color="#036564", line_color="#033649")
-
-        # Portifolio rolling alpha
-        p_alpha = figure(title="Portifolio rolling alpha",
-                         x_axis_type="datetime",
-                         x_axis_label='timestep',
-                         y_axis_label='alpha',
-                         plot_width=800, plot_height=200,
-                         tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                         toolbar_location="above"
-                         )
-        config_fig(p_alpha)
-
-        results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
-
-        # Portifolio rolling beta
-        p_beta = figure(title="Portifolio rolling beta",
-                        x_axis_type="datetime",
-                        x_axis_label='timestep',
-                        y_axis_label='beta',
-                        plot_width=800, plot_height=200,
-                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                        toolbar_location="above"
-                        )
-        config_fig(p_beta)
-
-        results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
-
-        # Rolling Drawdown
-        p_dd = figure(title="Portifolio rolling drawdown",
-                      x_axis_type="datetime",
-                      x_axis_label='timestep',
-                      y_axis_label='drawdown',
-                      plot_width=800, plot_height=200,
-                      tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                      toolbar_location="above"
-                      )
-        config_fig(p_dd)
-
-        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
-
-        # Portifolio Sharpe ratio
-        p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
-                          x_axis_type="datetime",
-                          x_axis_label='timestep',
-                          y_axis_label='Sharpe ratio',
-                          plot_width=800, plot_height=200,
-                          tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
-                          toolbar_location="above"
-                          )
-        config_fig(p_sharpe)
-
-        results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
-
-        print("################### > Portifolio Performance Analysis < ###################\n")
-        print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
-        print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
-                                                                     ec.sharpe_ratio(df.benchmark_returns)))
-        print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
-                                                                     ec.omega_ratio(df.benchmark_returns)))
-        print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
-                                                                     ec.max_drawdown(df.benchmark_returns)))
-
-        results['handle'] = show(column(p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta), notebook_handle=True)
-
-        return results
-
-    def _get_results(self, window=30):
-        """
-        Calculate arbiter desired actions statistics
-        :return:
-        """
-
-        self.results = self.df.iloc[self.offset + 1:].copy()
-
-        self.results['portval'] = self.results['fiat', 'amount']
-        self.results['benchmark'] = convert_to.decimal('0e-8')
-        self.results['returns'] = convert_to.decimal(np.nan)
-        self.results['benchmark_returns'] = convert_to.decimal(np.nan)
-        self.results['alpha'] = convert_to.decimal(np.nan)
-        self.results['beta'] = convert_to.decimal(np.nan)
-        self.results['drawdown'] = convert_to.decimal(np.nan)
-        self.results['sharpe'] = convert_to.decimal(np.nan)
-
-        for symbol in self._get_df_symbols(no_fiat=True):
-            self.results[symbol + '_portval'] = self.results[symbol, 'close'] * self.results[symbol, 'amount']
-            self.results['portval'] = self.results['portval'] + self.results[symbol + '_portval']
-
-        # self.results['benchmark'] = self.results['btcusd', 'close'] * self._get_init_fiat() / self.df.at[
-        #                             self.results.index[self.offset], ('btcusd', 'close')] - \
-        #                             self._get_tax('btcusd') * self._get_init_fiat() / self.results.at[
-        #                             self.results.index[self.offset], ('btcusd', 'close')]
-
-        # Calculate benchmark portifolio, just equaly distribute money over all the assets
-        for symbol in self._get_df_symbols(no_fiat=True):
-            self.results[symbol+'_benchmark'] = (1 - self._get_tax(symbol)) * self.results[symbol, 'close'] * \
-                                        self._get_init_fiat() / (self.results.at[self.results.index[0],
-                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
-            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
-
-        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
-        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
-        self.results['alpha'] = ec.utils.roll(self.results.returns,
-                                              self.results.benchmark_returns,
-                                              function=ec.alpha_aligned,
-                                              window=window,
-                                              risk_free=0.001
-                                              )
-        self.results['beta'] = ec.utils.roll(self.results.returns,
-                                             self.results.benchmark_returns,
-                                             function=ec.beta_aligned,
-                                             window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
-
-        return self.results
-
-    # TODO: \/ ############### REWORK ################# \/
-
-    def render(self, mode='human', close=False):
-        return self._render(close=close)
-
-    def _render(self, mode='human', close=False):
-        if close:
-            return
-        if mode == 'human':
-            print("""\n>> Step: {0}, \
-                     \n   Timestamp: {1}, \
-                     \n   Crypto Price: {2}, \
-                     \n   Fiat allocation: {3}, \
-                     \n   Previous position: {4}, \
-                     \n   New position (Action): {5}, \
-                     \n   Portifolio dolar value: {6}""".format(self.step_idx,
-                                                                self.df.index[self.step_idx],
-                                                                self._get_obs(last_price=True),
-                                                                str(self._get_fiat()),
-                                                                str(self._get_prev_portifolio_posit()),
-                                                                str(self._get_portifolio_posit()),
-                                                                str(self._calc_step_total_portval())))
-        if mode == 'print':
-            pass
-
-        else:
-            raise TypeError
