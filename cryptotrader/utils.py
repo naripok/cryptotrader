@@ -118,11 +118,9 @@ class convert_to(object):
                 return Decimal(data).quantize(Decimal('1e-8'))
         except InvalidOperation:
             if abs(data) > Decimal('1e15'):
-                print("Numeric overflow in convert_to.decimal:", data)
-                raise InvalidOperation
+                raise InvalidOperation("Numeric overflow in convert_to.decimal")
             elif data == np.nan or math.nan:
-                print("NaN encountered in convert_to.decimal:", data)
-                raise InvalidOperation
+                raise InvalidOperation("NaN encountered in convert_to.decimal")
 
 
 def write(_socket, msg, flags=0, block=True):
