@@ -244,7 +244,9 @@ class MomentumTrader(APrioriAgent):
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
+                    action = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1] / \
+                                                 obs[symbol].close.rolling(self.std_args[0], min_periods=1,
+                                                                                             center=True).std().iat[-1]
 
                 else:
                     action = np.float64(df['position'].iat[-1])
