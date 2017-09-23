@@ -78,12 +78,78 @@ def get_historical(file, freq, start=None, end=None):
     return out.applymap(convert_to.decimal)
 
 
-class Apocalipse(Env):
-    '''
-    The end and the beginning, the revelation of a new life
-    '''
+class OnlineEnvironment(Env):
+    """
+    Online environment for automated trading strategies
+    """
 
-    # TODO: \/ ################ TEST ############################### \/
+    # TODO: \/ ################ REWORKING NOW ###################### \/
+
+    # def _rebalance_online_portifolio(self, action, timestamp, timeout):
+    #
+    #     order = self._parse_order(action, symbol)
+    #
+    #     if order and isinstance(order, tuple):
+    #         # Send order to exchange
+    #         response = self._place_order(*order, timeout)
+    #
+    #         # Update variables with new exchange state
+    #         self._set_online_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
+    #         self._set_online_fiat(self._get_exchange_fiat(symbol),  timestamp)
+    #     else:
+    #
+    #         response = False
+    #         self._set_online_crypto(self._get_online_crypto(symbol), symbol, timestamp)
+    #         self._set_online_fiat(self._get_online_fiat(symbol), timestamp)
+    #
+    #     # TODO: VALIDATE
+    #     # Update online position
+    #     self._set_online_posit(self._get_online_posit(symbol), symbol, timestamp)
+    #
+    #     return response
+
+    def __init__(self, db=None, name=None, seed=42):
+
+        try:
+            assert isinstance(name, str)
+            self.name = name
+        except AssertionError:
+            print("Must enter environment name")
+            raise ValueError
+
+        self._seed(seed)
+
+        if not os.path.exists('./online_logs'):
+            os.makedirs('./online_logs')
+        self.logger = Logger(self.name, './online_logs/')
+
+        self.crypto = {}
+        self.fiat = None
+        self.online_crypto = {}
+        self.online_fiat = None
+        self.prev_posit = {}
+        self.posit = {}
+        self.prev_val = np.nan
+        self.tax = {}
+        self.symbols = ['fiat']
+
+        self.status = None
+        self.epsilon = 1e-8
+        self.step_idx = None
+        self.obs_steps = 0
+        self.session_begin_time = None
+        self.last_reward = 0.0
+        self.last_action = np.zeros(0)
+
+        # Data input
+        # Gets data table from database server
+        self.db = db
+        self.tables = {}
+        self.dfs = {}
+        self.df = None
+
+        self.logger.info(self.name + " Apocalipse initialization",
+                         "Apocalipse Initialized!\nONLINE MODE: False\n")
 
     def _order_done(self, response):
         """
@@ -101,7 +167,7 @@ class Apocalipse(Env):
                     else:
                         return False
         except Exception as e:
-            self.logger.error(Apocalipse._order_done, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._order_done, self.parse_error(e))
             self._send_email(self.name + "step error:", self.parse_error(e))
             return False
 
@@ -169,7 +235,7 @@ class Apocalipse(Env):
                            "Crypto Price: %f\nOrder Volume: %f\nTimestamp: %s" % (
                                price, amount, str(pd.to_datetime(datetime.utcnow())))
 
-            self.logger.info(Apocalipse._parse_order, order_report)
+            self.logger.info(TrainingEnvironment._parse_order, order_report)
 
             with localcontext() as ctx:
                 ctx.rounding = ROUND_DOWN
@@ -177,7 +243,7 @@ class Apocalipse(Env):
                 return price.quantize(Decimal('1e-2')), amount.quantize(Decimal('1e-6')), side, symbol
 
         except Exception as e:
-            self.logger.error(Apocalipse._parse_order, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._parse_order, self.parse_error(e))
             self._send_email("PARSE ORDER ERROR", self.parse_error(e))
 
     def _place_order(self, price, amount, side, symbol, timeout):
@@ -210,7 +276,7 @@ class Apocalipse(Env):
             assert symbol in self._get_df_symbols(no_fiat=True)
             assert isinstance(timeout, float) or isinstance(timeout, int)
 
-            self.logger.info(Apocalipse._place_order,
+            self.logger.info(TrainingEnvironment._place_order,
                              "Placing order:\nPrice: %f\nVolume: %f\nSide: %s\nSymbol: %s" % (
                                  price, amount, side, symbol
                              ))
@@ -221,7 +287,7 @@ class Apocalipse(Env):
                 response = self.tapi.sell_limit_order(amount, price, base=base, quote=quote)
             else:
                 self.status['OnlineActionError'] += 1
-                self.logger.error(Apocalipse._place_order, self.name + " order error: Invalid order side.")
+                self.logger.error(TrainingEnvironment._place_order, self.name + " order error: Invalid order side.")
                 self._send_email(self.name + " ORDER ERROR", "Invalid order side.")
                 return False
 
@@ -239,21 +305,21 @@ class Apocalipse(Env):
                                 else:
                                     if self._order_done(response):
                                         executed = True
-                                        self.logger.info(Apocalipse._place_order, self.name + \
+                                        self.logger.info(TrainingEnvironment._place_order, self.name + \
                                                          " order executed: %s" % (str(response)))
                                         self._send_email(self.name + " ORDER EXECUTED",
                                                          "Order executed: %s" % (str(response)))
                             else:
                                 if self._order_done(response):
                                     executed = True
-                                    self.logger.info(Apocalipse._place_order,
+                                    self.logger.info(TrainingEnvironment._place_order,
                                                      self.name + " order executed: %s" % (str(response)))
                                     self._send_email(self.name + " ORDER EXECUTED",
                                                      "Order executed: %s" % (str(response)))
                                 else:
                                     # Order is gone, log and exit
                                     self.status['OnlineActionError'] += 1
-                                    self.logger.error(Apocalipse._place_order,
+                                    self.logger.error(TrainingEnvironment._place_order,
                                                       self.name + " order error: Order is not open nor executed," + \
                                                       "trying to cancel: %s" % (str(response)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -262,7 +328,7 @@ class Apocalipse(Env):
 
                                     cancel_response = self.tapi.cancel_order(response['id'])
 
-                                    self.logger.error(Apocalipse._place_order,
+                                    self.logger.error(TrainingEnvironment._place_order,
                                                       self.name + " order error: Order cancel response: %s" % (
                                                           str(cancel_response)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -270,25 +336,25 @@ class Apocalipse(Env):
                                     return executed
                         else:
                             # Cancel order
-                            self.logger.info(Apocalipse._place_order,
+                            self.logger.info(TrainingEnvironment._place_order,
                                              self.name + " order timed out: %s" % (str(response)))
                             try:
 
                                 cancel_response = self.tapi.cancel_order(response['id'])
                                 if cancel_response:
                                     order_timeout = True
-                                    self.logger.info(Apocalipse._place_order,
+                                    self.logger.info(TrainingEnvironment._place_order,
                                                      self.name + " timed out order canceled: %s" % (str(response)))
                                 else:
                                     while not cancel_response:
-                                        self.logger.info(Apocalipse._place_order, self.name + \
+                                        self.logger.info(TrainingEnvironment._place_order, self.name + \
                                                          " cancel order not executed, retrying: %s" % (
                                                          str(response)))
                                         cancel_response = self.tapi.cancel_order(response['id'])
                                         sleep(1)
                                     else:
                                         order_timeout = True
-                                        self.logger.info(Apocalipse._place_order,
+                                        self.logger.info(TrainingEnvironment._place_order,
                                                          self.name + " timed out order canceled: %s" % (
                                                          str(response)))
 
@@ -296,7 +362,7 @@ class Apocalipse(Env):
                                 sleep(2)
                                 if self._order_done(response):
                                     executed = True
-                                    self.logger.info(Apocalipse._place_order,
+                                    self.logger.info(TrainingEnvironment._place_order,
                                                      self.name + " order timed out " + \
                                                      "but got executed before cancel signal." + \
                                                      " Exchange response: %s" % (str(response)))
@@ -304,7 +370,7 @@ class Apocalipse(Env):
                                                      "Order timed out but got " + \
                                                      "executed before cancel signal: %s" % (str(response)))
                                 else:
-                                    self.logger.error(Apocalipse._place_order,
+                                    self.logger.error(TrainingEnvironment._place_order,
                                                       self.name + " order error: Order cancel response: %s" % (
                                                           self.parse_error(e)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -313,7 +379,7 @@ class Apocalipse(Env):
 
                     else:
                         self.status['OnlineActionError'] += 1
-                        self.logger.error(Apocalipse._place_order, self.name + \
+                        self.logger.error(TrainingEnvironment._place_order, self.name + \
                                           " order error: Invalid open orders response: %s" % (str(open_orders)))
                         self._send_email(self.name + " ORDER ERROR",
                                          "Invalid open orders response: %s" % (str(open_orders)))
@@ -323,252 +389,142 @@ class Apocalipse(Env):
                     return executed
 
         except Exception as e:
-            self.logger.error(Apocalipse._place_order, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._place_order, self.parse_error(e))
             self._send_email(self.name + " ORDER ERROR", self.parse_error(e))
             return False
         finally:
             pass
 
-    # TODO: \/ ################ REWORKING NOW ###################### \/
+            ## Online Methods
+            # Setters
 
-    # def _rebalance_online_portifolio(self, action, timestamp, timeout):
-    #
-    #     order = self._parse_order(action, symbol)
-    #
-    #     if order and isinstance(order, tuple):
-    #         # Send order to exchange
-    #         response = self._place_order(*order, timeout)
-    #
-    #         # Update variables with new exchange state
-    #         self._set_online_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
-    #         self._set_online_fiat(self._get_exchange_fiat(symbol),  timestamp)
-    #     else:
-    #
-    #         response = False
-    #         self._set_online_crypto(self._get_online_crypto(symbol), symbol, timestamp)
-    #         self._set_online_fiat(self._get_online_fiat(symbol), timestamp)
-    #
-    #     # TODO: VALIDATE
-    #     # Update online position
-    #     self._set_online_posit(self._get_online_posit(symbol), symbol, timestamp)
-    #
-    #     return response
-
-
-    ## TODO: \/ ############### REWORKED, VALIDATE ##################\/
-
-
-    def __init__(self, db=None, name=None, seed=42):
-
+    def set_online(self, online, tapi=None, trading_freq=5):
         try:
-            assert isinstance(name, str)
-            self.name = name
-        except AssertionError:
-            print("Must enter environment name")
-            raise ValueError
+            assert isinstance(online, bool)
+            self.online = online
+            self.session_begin_time = None
 
-        self._seed(seed)
+            # self._get_obs_space()
 
-        # Environment variables
-        self.online = False
+            if online:
+                assert isinstance(tapi, Trading)
+                assert trading_freq >= 1
 
-        if not os.path.exists('./logs'):
-            os.makedirs('./logs')
-        self.logger = Logger(self.name, './logs/')
+                # self.make_df()
+                self.online_fiat = None
+                self.online_crypto = {}
+                self.online_prev_posit = {}
+                self.online_posit = {}
+                self.online_portifolio_posit = {}
 
-        self.crypto = {}
-        self.fiat = None
-        self.online_crypto = {}
-        self.online_fiat = None
-        self.prev_posit = {}
-        self.posit = {}
-        self.prev_online_posit = {}
-        self.online_posit = {}
-        self.prev_val = np.nan
-        self.prev_online_val = np.nan
-        self.init_crypto = {}
-        self.init_fiat = None
-        self.tax = {}
-        self.symbols = ['fiat']
+                for symbol in self._get_df_symbols(no_fiat=True):
+                    self.online_crypto[symbol] = Decimal('NaN')
+                    self.online_prev_posit[symbol] = Decimal('NaN')
+                    self.online_posit[symbol] = Decimal('NaN')
 
-        self.order_type = None
+                    self.df[symbol, 'online_prev_position'] = convert_to.decimal(np.nan)
+                    self.df[symbol, 'online_position'] = convert_to.decimal(np.nan)
+                    self.df[symbol, 'online_amount'] = convert_to.decimal(np.nan)
 
-        self.status = None
-        self.np_random = None
-        self._is_training = False
-        self.epsilon = 1e-8
-        self.step_idx = None
-        self.global_step = 0
-        self.obs_steps = 0
-        self.offset = 0
-        self.session_begin_time = None
-        self.last_reward = 0.0
-        self.last_action = np.zeros(0)
+                self.df['fiat', 'online_fiat'] = convert_to.decimal(np.nan)
 
-        # Data input
-        # Gets data table from database server
-        self.db = db
-        self.tables = {}
-        self.dfs = {}
-        self.df = None
+                self.tapi = tapi
 
-        self.logger.info(self.name + " Apocalipse initialization",
-                         "Apocalipse Initialized!\nONLINE MODE: False\n")
+                timestamp = self.df.index[-1]
 
-    # Setters
-    def add_table(self, number=None, name=None):
+                for symbol in self._get_df_symbols(no_fiat=True):
+                    amount = self._get_exchange_crypto(symbol)
+                    self._set_crypto(amount, symbol, timestamp)
+                    self._set_online_crypto(amount, symbol, timestamp)
+
+                fiat = self._get_exchange_fiat('btcusd')
+                self._set_fiat(fiat, timestamp)
+                self._set_online_fiat(fiat, timestamp)
+
+                for symbol in self._get_df_symbols(no_fiat=True):
+                    posit = self._get_exchange_posit(symbol)
+                    self._set_prev_posit(posit, symbol, timestamp)
+                    self._set_posit(posit, symbol, timestamp)
+                    self._set_prev_online_posit(posit, symbol, timestamp)
+                    self._set_online_posit(posit, symbol, timestamp)
+                    self.set_tax(convert_to.decimal(self._get_balance(symbol)['fee']) /
+                                 convert_to.decimal('100.0'), symbol)
+
+                    assert isinstance(self._get_online_posit(symbol), Decimal)
+
+                self.session_begin_time = timestamp
+
+                assert isinstance(self._get_ticker(), dict)
+                assert isinstance(self._get_online_portval(), Decimal)
+
+                self.logger.info(TrainingEnvironment.set_online, "Apocalipse setup to ONLINE MODE!")
+
+                print(
+                    ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ONLINE MODE ON <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+                print(
+                    "############################################# DISCLAIMER ############################################")
+                print(
+                    "## In online mode, the steps will be performed on the real exchange environment, with real values! ##")
+                print(
+                    "## This software comes as is and with no guarantees of any kind. USE AT YOUR OWN RISK!!!!!         ##")
+                print(
+                    "#####################################################################################################")
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment.set_online, self.parse_error(e))
+
+    def _set_online_fiat(self, fiat, timestamp):
+        """
+        Save online fiat volume to Apocalipse instance dataframe
+        :param fiat: float: volume to save
+        :param timestamp: pandas Timestamp: Timestamp index to save crypto to
+        :return:
+        """
+        # TODO: VALIDATE
         try:
+            assert self.online
             try:
-                assert isinstance(self.db, pm.database.Database)
+                assert isinstance(fiat, Decimal)
             except AssertionError:
-                print("db must be a pymongo database instance")
-                raise ValueError
+                if isinstance(fiat, float):
+                    fiat = convert_to.decimal(fiat)
+                else:
+                    raise AssertionError
+            assert isinstance(timestamp, pd.Timestamp)
+            assert fiat >= Decimal('0.0')
 
-            col_names = self.db.collection_names()
-            col_names_str = ""
-            for i, n in enumerate(col_names):
-                col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
-
-            welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
-                          "Select from db a table to trade on:\n" + col_names_str
-
-            if isinstance(number, int):
-                table_n = number
-            elif isinstance(name, str):
-                table_n = name
-            else:
-                print(welcome_str)
-
-                table_n = input("Enter a table number or name:")
-            if isinstance(table_n, int):
-                table = self.db[col_names[int(table_n)]]
-                self.logger.info(Apocalipse.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
-
-            if isinstance(table_n, str):
-                table = self.db[table_n]
-                self.logger.info(Apocalipse.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (table_n))
-
-            if table_n == '':
-                print("You must enter a table number or name!")
-                raise ValueError
-
-            assert isinstance(table, pm.collection.Collection)
-            assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
-
-            symbol = self._get_table_symbol(table)
-            self.tables[symbol] = table
-
-        except AssertionError:
-            self.logger.error(Apocalipse.add_table, "Table error. Please, enter a valid table number.")
-            raise ValueError
+            self.online_fiat = fiat
+            self.df.at[timestamp, ('fiat', 'online_fiat')] = fiat
         except Exception as e:
-            if debug:
-                self.logger.error(Apocalipse.add_table, self.parse_error(e))
-            else:
-                self.logger.error(Apocalipse.add_table, "Wrong table.")
-                raise ValueError
+            self.logger.error(TrainingEnvironment._set_online_fiat, self.parse_error(e))
 
-    def clear_dfs(self):
-        if hasattr(self, 'dfs'):
-            del self.dfs
-        self.dfs = {}
-
-    def add_df(self, df=None, symbol=None, steps=5):
+    def _set_online_crypto(self, amount, symbol, timestamp):
+        """
+        Save online crypto volume to Apocalipse instance dataframe
+        :param crypto: float: volume to save
+        :param timestamp: pandas Timestamp: Timestamp index to save crypto to
+        :return:
+        """
+        # TODO: VALIDATE
         try:
-            assert isinstance(self.freq, int) and self.freq >=1
+            assert self.online
+            try:
+                assert isinstance(amount, Decimal)
+            except AssertionError:
+                if isinstance(amount, float):
+                    amount = convert_to.decimal(amount)
+                else:
+                    raise AssertionError
+            assert isinstance(timestamp, pd.Timestamp)
 
-            assert isinstance(steps, int) and steps >= 3
-            if isinstance(df, pd.core.frame.DataFrame):
-                for col in df.columns:
-                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
-                    'wrong dataframe formatation'
-                self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
-            else:
-                assert symbol in [s for s in self.tables.keys()]
-                assert isinstance(self.tables[symbol], pm.collection.Collection)
+            assert amount >= Decimal('0.0')
 
-                try:
-                    assert steps >= 3
-                except AssertionError:
-                    print("Observation steps must be greater than 3")
-                    return False
-                self.dfs[symbol] = self._get_obs(symbol=symbol, steps=steps, freq=self.freq)
-
-            assert isinstance(self.dfs[symbol], pd.core.frame.DataFrame)
-
-            self.dfs[symbol]['prev_position'] = np.nan
-            self.dfs[symbol]['position'] = np.nan
-            self.dfs[symbol]['amount'] = np.nan
-
-            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-8).applymap(convert_to.decimal)
-
-            assert self.dfs[symbol].columns.all() in ['open', 'high', 'low', 'close', 'volume', 'prev_position',
-                                                      'position', 'amount']
-
+            self.online_crypto[symbol] = amount
+            self.df.at[timestamp, (symbol, 'online_amount')] = amount
         except Exception as e:
-            self.logger.error(Apocalipse.add_df, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._set_online_crypto, self.parse_error(e))
 
-    def add_symbol(self, symbol):
-        assert isinstance(symbol, str)
-        self.symbols.append(symbol)
-        if symbol not in [k for k in self.dfs.keys()]:
-            self.add_df(symbol=symbol, steps=int(self.obs_steps * 5))
-        self.make_df()
-        self._set_posit(convert_to.decimal('0.0'), symbol, self.df.index[0])
-
-    def make_df(self):
-        self.df = pd.concat(self.dfs, axis=1)
-        assert isinstance(self.df, pd.core.frame.DataFrame)
-        self.df['fiat', 'prev_position'] = convert_to.decimal(np.nan)
-        self.df['fiat', 'position'] = convert_to.decimal(np.nan)
-        self.df['fiat', 'amount'] = convert_to.decimal(np.nan)
-        # self.clear_dfs()
-        self.set_observation_space()
-        try:
-            assert self.df.shape[0] >= self.obs_steps
-        except AssertionError:
-            self.logger.error(Apocalipse.make_df, "Trying to make dataframe with less observations than obs_steps.")
-
-    def set_init_fiat(self, fiat):
-        assert fiat >= 0.0
-        self.init_fiat = convert_to.decimal(fiat)
-
-    def set_init_crypto(self, amount, symbol):
-        assert amount >= 0.0
-        assert symbol in self._get_df_symbols()
-        self.init_crypto[symbol] = convert_to.decimal(amount)
-
-    def _set_fiat(self, fiat, timestamp):
-        try:
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert isinstance(fiat, Decimal), 'fiat is not decimal'
-
-            if fiat < convert_to.decimal('0E-8'):
-                self.status['ValueError'] += 1
-                self.logger.error(Apocalipse._set_fiat, "Fiat value error: Negative value")
-            self.fiat = fiat
-            self.df.loc[timestamp, ('fiat', 'amount')] = fiat
-        except Exception as e:
-            self.logger.error(Apocalipse._set_fiat, self.parse_error(e))
-
-    def _set_crypto(self, amount, symbol, timestamp):
-        try:
-            # assert symbol in self._get_df_symbols(no_fiat=True) # taken out for speed
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert isinstance(amount, Decimal)
-            if amount < 0.0:
-                self.status['ValueError'] += 1
-                self.logger.error(Apocalipse._set_crypto, "Crypto value error: Negative value")
-
-            self.crypto[symbol] = amount
-            self.df.loc[timestamp, (symbol, 'amount')] = amount
-
-        except Exception as e:
-            self.logger.error(Apocalipse._set_crypto, self.parse_error(e))
-
-    def _set_posit(self, posit, symbol, timestamp):
+    def _set_online_posit(self, posit, symbol, timestamp):
         # TODO: VALIDATE
         try:
             try:
@@ -578,19 +534,17 @@ class Apocalipse(Env):
                     posit = convert_to.decimal(posit)
                 else:
                     raise AssertionError
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            assert  convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
-            self.posit[symbol] = posit
-            self.df.loc[timestamp, (symbol, 'position')] = posit
+            assert isinstance(timestamp, pd.Timestamp)
 
-        except AssertionError:
-            self.status['ValueError'] += 1
-            self.logger.error(Apocalipse._set_posit, "Invalid previous position value.")
+            assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
+
+            self.online_posit[symbol] = posit
+            self.df.at[timestamp, (symbol, 'online_position')] = posit
 
         except Exception as e:
-            self.logger.error(Apocalipse._set_posit, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._set_online_posit, self.parse_error(e))
 
-    def _set_prev_posit(self, posit, symbol, timestamp):
+    def _set_prev_online_posit(self, posit, symbol, timestamp):
         try:
             try:
                 assert isinstance(posit, Decimal)
@@ -599,72 +553,24 @@ class Apocalipse(Env):
                     posit = convert_to.decimal(posit)
                 else:
                     raise AssertionError
-            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
-            # try:
-            #     assert 0.0 <= posit <= 1.0, posit
-            # except AssertionError:
-            #     posit = np.clip(np.array([posit]), a_min=0.0, a_max=1.0)[0]
-            #     self.status['ValueError'] += 1
-            #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
-            assert convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
-            self.prev_posit[symbol] = posit
-            self.df.loc[timestamp, (symbol, 'prev_position')] = posit
+            assert isinstance(timestamp, pd.Timestamp)
 
-        except AssertionError:
-            self.status['ValueError'] += 1
-            self.logger.error(Apocalipse._set_prev_posit, "Invalid previous position value.")
+            assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
+
+            self.online_prev_posit[symbol] = posit
+            self.df.at[timestamp, (symbol, 'online_prev_position')] = posit
 
         except Exception as e:
-            self.logger.error(Apocalipse._set_prev_posit, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._set_prev_online_posit, self.parse_error(e))
 
-    def _save_prev_portval(self):
-        try:
-            portval = self._calc_step_total_portval()
-            assert portval >= 0.0
-            self.prev_val = portval
-        except Exception as e:
-            self.logger.error(Apocalipse._save_prev_portval, self.parse_error(e))
+    def _save_prev_online_portfolio_posit(self, timestamp):
+        assert self.online
+        for symbol in self._get_df_symbols(no_fiat=True):
+            self._set_prev_online_posit(self._get_online_posit(symbol), symbol, timestamp)
 
-    def _save_prev_portifolio_posit(self, timestamp):
-        for symbol in self._get_df_symbols():
-            self._set_prev_posit(self._get_posit(symbol), symbol, timestamp)
-
-    def set_action_space(self):
-        # Action space
-        self.action_space = Box(0., 1., len(self._get_df_symbols()))
-        self.logger.info(Apocalipse.set_action_space, "Setting environment with %d symbols." % (len(self._get_df_symbols())))
-
-    def set_observation_space(self):
-        # Observation space:
-        obs_space = []
-        # OPEN, HIGH, LOW, CLOSE
-        for _ in range(4):
-            obs_space.append(Box(0.0, 1e9, 1))
-        # VOLUME
-        obs_space.append(Box(0.0, 1e12, 1))
-        # POSITION
-        obs_space.append(Box(0.0, 1.0, 1))
-
-        self.observation_space = Tuple(obs_space)
-
-    def set_obs_steps(self, steps):
-        assert isinstance(steps, int) and steps >= 3
-        self.obs_steps = steps
-        self.step_idx = steps
-        self.offset = steps
-
-    def set_freq(self, freq):
-        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
-        self.freq = freq
-
-    def set_tax(self, tax, symbol):
-        assert 0.0 <= tax <= 1.0
-        assert symbol in self._get_df_symbols()
-        self.tax[symbol] = convert_to.decimal(tax)
-
-    def set_training_stage(self, train):
-        assert isinstance(train, bool)
-        self._is_training = train
+    def _save_prev_online_portval(self):
+        assert self._get_online_portval() >= 0.0
+        self.prev_online_val = self._get_online_portval()
 
     # TODO VALIDATE _set_obs
     def _set_obs(self, obs):
@@ -698,26 +604,38 @@ class Apocalipse(Env):
             #     self.df[symbol] = self.df[symbol].sort_index()
 
         except Exception as e:
-            self.logger.error(Apocalipse._set_obs, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._set_obs, self.parse_error(e))
         finally:
             pass
 
     def set_order_type(self, order_type):
         self.order_type = order_type
 
-    def _save_df_to_db(self, name):
-        self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
-
     # Getters
-    def _get_df_symbols(self, no_fiat=False):
-        if no_fiat:
-            return [s for s in self.df.columns.levels[0] if s is not 'fiat']
-        else:
-            return [s for s in self.df.columns.levels[0]]
+    def _get_ticker(self, last_price=False):
+        """
+        Get updated ticker data from exchange
+        :param last_price:
+        :return:
+        """
+        try:
+            assert self.online
 
-    @staticmethod
-    def _get_table_symbol(table):
-        return table.full_name.split('.')[1].split('_')[2]
+            obs = self.tapi.ticker_hour()
+
+            if last_price:
+                return convert_to.decimal(obs['last'])
+            else:
+                return obs
+
+        except IndexError:
+            return False
+        except Exception as e:
+            self.status['OnlineValueError'] += 1
+            self.logger.error(TrainingEnvironment._get_ticker, self.parse_error(e))
+            return False
+        finally:
+            pass
 
     def get_obs_all(self):
         obs_dict = []
@@ -821,8 +739,496 @@ class Apocalipse(Env):
             return obs
 
         except Exception as e:
-            self.logger.error(Apocalipse._get_obs, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._get_obs, self.parse_error(e))
             return False
+
+    def _get_order_type(self):
+        return self.order_type
+
+    def _get_online_fiat(self):
+        assert self.online and self.online_fiat >= 0.0
+        return self.online_fiat
+
+    def _get_online_crypto(self, symbol):
+        assert symbol in [s for s in self.online_crypto.keys()]
+        assert self.online and self.online_crypto[symbol] >= 0.0
+        return self.online_crypto[symbol]
+
+    def _get_online_portval(self):
+        try:
+            assert self.online
+            online_portval = convert_to.decimal('0.0')
+
+            for symbol in self._get_df_symbols(no_fiat=True):
+                val = self._get_online_crypto(symbol) * convert_to.decimal(self._get_obs(symbol, last_price=True))
+                assert val >= 0.0
+                online_portval += val
+
+            online_portval += self._get_online_fiat()
+
+            return online_portval
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_online_portval, self.parse_error(e))
+            return False
+
+    def _get_prev_online_portval(self):
+        assert self.online and self.prev_online_val >= 0.0
+        return self.prev_online_val
+
+    def _get_online_posit(self, symbol):
+        try:
+            assert self.online
+            assert self.online_posit[symbol] <= 1.0
+            return self.online_posit[symbol]
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_online_posit, self.parse_error(e))
+            return False
+
+    def _get_prev_online_posit(self, symbol):
+        assert self.online
+        return self.online_prev_posit[symbol]
+
+    # Exchange getter (make requests)
+    def _get_exchange_fiat(self, symbol):
+        try:
+            assert self.online
+            base, quote = symbol[:3], symbol[3:]
+            balance = self.tapi.account_balance(base=base, quote=quote)
+            return convert_to.decimal(balance[quote + '_balance'])
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_exchange_fiat, self.parse_error(e))
+            return False
+
+    def _get_exchange_crypto(self, symbol):
+        try:
+            assert self.online
+            base, quote = symbol[:3], symbol[3:]
+            balance = self.tapi.account_balance(base=base, quote=quote)
+            return convert_to.decimal(balance[base + '_balance'])
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_exchange_crypto, self.parse_error(e))
+            return False
+
+    def _get_exchange_portval(self):
+        # TODO: VALIDATE
+        try:
+            assert self.online
+
+            portval = Decimal('0.0')
+            for symbol in self._get_df_symbols(no_fiat=True):
+                base, quote = symbol[:3], symbol[3:]
+                ticker = self.tapi.ticker_hour(base=base, quote=quote)
+                balance = self.tapi.account_balance(base=base, quote=quote)
+                portval += convert_to.decimal(balance[base + '_balance']) * \
+                           convert_to.decimal(ticker['last']) + \
+                           convert_to.decimal(balance[quote + '_balance'])
+
+            return portval
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_exchange_portval, self.parse_error(e))
+            return False
+
+    def _get_exchange_posit(self, symbol):
+        # TODO: VALIDATE
+        try:
+            assert self.online
+
+            base, quote = symbol[:3], symbol[3:]
+
+            if symbol in self._get_df_symbols(no_fiat=True):
+                balance = self.tapi.account_balance(base=base, quote=quote)
+                ticker = self.tapi.ticker_hour(base=base, quote=quote)
+
+                return  convert_to.decimal(balance[base + '_balance']) * \
+                            convert_to.decimal(ticker['last']) / \
+                            self._get_exchange_portval()
+
+            elif symbol == 'fiat':
+
+                balance = self.tapi.account_balance(base='btc', quote='usd')
+
+                return  convert_to.decimal(balance['usd_balance']) / self._get_exchange_portval()
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_exchange_posit, self.parse_error(e))
+            return False
+
+    def _get_exchange_portifolio_posit(self):
+        portifolio = []
+        for symbol in self._get_df_symbols():
+            portifolio.append(self._get_exchange_posit(symbol))
+        return np.array(portifolio)
+
+    def _get_balance(self, symbol):
+        try:
+            assert self.online
+            base, quote = symbol[:3], symbol[3:]
+            balance = self.tapi.account_balance(base=base, quote=quote)
+            assert isinstance(balance, dict)
+            return balance
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._get_balance, self.parse_error(e))
+            return False
+
+    def _rebalance_online_portifolio(self):
+        pass # TODO _REBALANCE_ONLINE_PORTIFOLIO
+
+    def _get_online_results(self):
+        """
+        Calculate online operation statistics
+        :return:
+        """
+        self.online_results = self.df.copy()
+        self.online_results['portval'] = convert_to.decimal(np.nan)
+        self.online_results['benchmark'] = convert_to.decimal(np.nan)
+        self.online_results['returns'] = convert_to.decimal(np.nan)
+        self.online_results['benchmark_returns'] = convert_to.decimal(np.nan)
+        self.online_results['alpha'] = convert_to.decimal(np.nan)
+        self.online_results['beta'] = convert_to.decimal(np.nan)
+        self.online_results['drawdown'] = convert_to.decimal(np.nan)
+        self.online_results['sharpe'] = convert_to.decimal(np.nan)
+
+        self.online_results['portval'] = self.df.online_crypto * self.df.close + self.df.online_fiat
+        self.online_results['benchmark'] = self.df.close * self._get_init_fiat() / self.df.loc[self.session_begin_time].close - \
+                                    self._get_tax() * self._get_init_fiat() / self.df.loc[self.session_begin_time].close
+        self.online_results['returns'] = pd.to_numeric(self.online_results.portval).diff().fillna(1e-8)
+        self.online_results['benchmark_returns'] = pd.to_numeric(self.online_results.benchmark).diff().fillna(1e-8)
+        self.online_results['alpha'] = ec.utils.roll(self.online_results.returns,
+                                              self.online_results.benchmark_returns,
+                                              function=ec.alpha_aligned,
+                                              risk_free=0.001,
+                                              window=30)
+        self.online_results['beta'] = ec.utils.roll(self.online_results.returns,
+                                             self.online_results.benchmark_returns,
+                                             function=ec.beta_aligned,
+                                             window=30)
+        self.online_results['drawdown'] = ec.roll_max_drawdown(self.online_results.returns, window=3)
+        self.online_results['sharpe'] = ec.roll_sharpe_ratio(self.online_results.returns, window=3, risk_free=0.001)
+
+    def _reset_status(self):
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+
+    def _seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+
+class TrainingEnvironment(Env):
+    '''
+    The end and the beginning, the revelation of a new life
+    '''
+    def __init__(self, db=None, name=None, seed=42):
+
+        try:
+            assert isinstance(name, str)
+            self.name = name
+        except AssertionError:
+            print("Must enter environment name")
+            raise ValueError
+
+        self._seed(seed)
+
+        if not os.path.exists('./logs'):
+            os.makedirs('./logs')
+        self.logger = Logger(self.name, './logs/')
+
+        self.crypto = {}
+        self.fiat = None
+        self.prev_posit = {}
+        self.posit = {}
+        self.prev_val = np.nan
+        self.init_crypto = {}
+        self.init_fiat = None
+        self.tax = {}
+        self.symbols = ['fiat']
+
+        self.status = None
+        self.np_random = None
+        self._is_training = False
+        self.epsilon = 1e-8
+        self.step_idx = None
+        self.global_step = 0
+        self.obs_steps = 0
+        self.offset = 0
+        self.last_reward = 0.0
+        self.last_action = np.zeros(0)
+
+        # Data input
+        # Gets data table from database server
+        self.db = db
+        self.tables = {}
+        self.dfs = {}
+        self.df = None
+
+        self.logger.info(self.name + " Training Environment initialization",
+                         "Training Environment Initialized!")
+
+    # Setters
+    def add_table(self, number=None, name=None):
+        try:
+            try:
+                assert isinstance(self.db, pm.database.Database)
+            except AssertionError:
+                print("db must be a pymongo database instance")
+                raise ValueError
+
+            col_names = self.db.collection_names()
+            col_names_str = ""
+            for i, n in enumerate(col_names):
+                col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
+
+            welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
+                          "Select from db a table to trade on:\n" + col_names_str
+
+            if isinstance(number, int):
+                table_n = number
+            elif isinstance(name, str):
+                table_n = name
+            else:
+                print(welcome_str)
+
+                table_n = input("Enter a table number or name:")
+            if isinstance(table_n, int):
+                table = self.db[col_names[int(table_n)]]
+                self.logger.info(TrainingEnvironment.add_table,
+                                 "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
+
+            if isinstance(table_n, str):
+                table = self.db[table_n]
+                self.logger.info(TrainingEnvironment.add_table,
+                                 "Initializing Apocalipse instance with table %s" % (table_n))
+
+            if table_n == '':
+                print("You must enter a table number or name!")
+                raise ValueError
+
+            assert isinstance(table, pm.collection.Collection)
+            assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
+
+            symbol = self._get_table_symbol(table)
+            self.tables[symbol] = table
+
+        except AssertionError:
+            self.logger.error(TrainingEnvironment.add_table, "Table error. Please, enter a valid table number.")
+            raise ValueError
+        except Exception as e:
+            if debug:
+                self.logger.error(TrainingEnvironment.add_table, self.parse_error(e))
+            else:
+                self.logger.error(TrainingEnvironment.add_table, "Wrong table.")
+                raise ValueError
+
+    def clear_dfs(self):
+        if hasattr(self, 'dfs'):
+            del self.dfs
+        self.dfs = {}
+
+    def add_df(self, df=None, symbol=None, steps=5):
+        try:
+            assert isinstance(self.freq, int) and self.freq >=1
+
+            assert isinstance(steps, int) and steps >= 3
+            if isinstance(df, pd.core.frame.DataFrame):
+                for col in df.columns:
+                    assert col in ['open', 'high', 'low', 'close', 'volume', 'prev_position', 'position', 'amount'], \
+                    'wrong dataframe formatation'
+                self.dfs[symbol] = df.ffill().fillna(1e-8).applymap(convert_to.decimal)
+            else:
+                assert symbol in [s for s in self.tables.keys()]
+                assert isinstance(self.tables[symbol], pm.collection.Collection)
+
+                try:
+                    assert steps >= 3
+                except AssertionError:
+                    print("Observation steps must be greater than 3")
+                    return False
+                self.dfs[symbol] = self._get_obs(symbol=symbol, steps=steps, freq=self.freq)
+
+            assert isinstance(self.dfs[symbol], pd.core.frame.DataFrame)
+
+            self.dfs[symbol]['prev_position'] = np.nan
+            self.dfs[symbol]['position'] = np.nan
+            self.dfs[symbol]['amount'] = np.nan
+
+            self.dfs[symbol] = self.dfs[symbol].ffill().fillna(1e-8).applymap(convert_to.decimal)
+
+            assert self.dfs[symbol].columns.all() in ['open', 'high', 'low', 'close', 'volume', 'prev_position',
+                                                      'position', 'amount']
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment.add_df, self.parse_error(e))
+
+    def add_symbol(self, symbol):
+        assert isinstance(symbol, str)
+        self.symbols.append(symbol)
+        if symbol not in [k for k in self.dfs.keys()]:
+            self.add_df(symbol=symbol, steps=int(self.obs_steps * 5))
+        self.make_df()
+        self._set_posit(convert_to.decimal('0.0'), symbol, self.df.index[0])
+
+    def make_df(self):
+        self.df = pd.concat(self.dfs, axis=1)
+        assert isinstance(self.df, pd.core.frame.DataFrame)
+        self.df['fiat', 'prev_position'] = convert_to.decimal(np.nan)
+        self.df['fiat', 'position'] = convert_to.decimal(np.nan)
+        self.df['fiat', 'amount'] = convert_to.decimal(np.nan)
+        # self.clear_dfs()
+        self.set_observation_space()
+        try:
+            assert self.df.shape[0] >= self.obs_steps
+        except AssertionError:
+            self.logger.error(TrainingEnvironment.make_df, "Trying to make dataframe with less observations than obs_steps.")
+
+    def set_init_fiat(self, fiat):
+        assert fiat >= 0.0
+        self.init_fiat = convert_to.decimal(fiat)
+
+    def set_init_crypto(self, amount, symbol):
+        assert amount >= 0.0
+        assert symbol in self._get_df_symbols()
+        self.init_crypto[symbol] = convert_to.decimal(amount)
+
+    def _set_fiat(self, fiat, timestamp):
+        try:
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert isinstance(fiat, Decimal), 'fiat is not decimal'
+
+            if fiat < convert_to.decimal('0E-8'):
+                self.status['ValueError'] += 1
+                self.logger.error(TrainingEnvironment._set_fiat, "Fiat value error: Negative value")
+            self.fiat = fiat
+            self.df.loc[timestamp, ('fiat', 'amount')] = fiat
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_fiat, self.parse_error(e))
+
+    def _set_crypto(self, amount, symbol, timestamp):
+        try:
+            # assert symbol in self._get_df_symbols(no_fiat=True) # taken out for speed
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert isinstance(amount, Decimal)
+            if amount < 0.0:
+                self.status['ValueError'] += 1
+                self.logger.error(TrainingEnvironment._set_crypto, "Crypto value error: Negative value")
+
+            self.crypto[symbol] = amount
+            self.df.loc[timestamp, (symbol, 'amount')] = amount
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_crypto, self.parse_error(e))
+
+    def _set_posit(self, posit, symbol, timestamp):
+        # TODO: VALIDATE
+        try:
+            try:
+                assert isinstance(posit, Decimal)
+            except AssertionError:
+                if isinstance(posit, float):
+                    posit = convert_to.decimal(posit)
+                else:
+                    raise AssertionError
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            assert  convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
+            self.posit[symbol] = posit
+            self.df.loc[timestamp, (symbol, 'position')] = posit
+
+        except AssertionError:
+            self.status['ValueError'] += 1
+            self.logger.error(TrainingEnvironment._set_posit, "Invalid previous position value.")
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_posit, self.parse_error(e))
+
+    def _set_prev_posit(self, posit, symbol, timestamp):
+        try:
+            try:
+                assert isinstance(posit, Decimal)
+            except AssertionError:
+                if isinstance(posit, float):
+                    posit = convert_to.decimal(posit)
+                else:
+                    raise AssertionError
+            # assert isinstance(timestamp, pd.Timestamp) # taken out for speed
+            # try:
+            #     assert 0.0 <= posit <= 1.0, posit
+            # except AssertionError:
+            #     posit = np.clip(np.array([posit]), a_min=0.0, a_max=1.0)[0]
+            #     self.status['ValueError'] += 1
+            #     self.logger.error(Apocalipse._set_prev_posit, "Value error: Position out of range")
+            assert convert_to.decimal('0E-8') <= posit <= convert_to.decimal('1.0'), posit
+            self.prev_posit[symbol] = posit
+            self.df.loc[timestamp, (symbol, 'prev_position')] = posit
+
+        except AssertionError:
+            self.status['ValueError'] += 1
+            self.logger.error(TrainingEnvironment._set_prev_posit, "Invalid previous position value.")
+
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._set_prev_posit, self.parse_error(e))
+
+    def _save_prev_portval(self):
+        try:
+            portval = self._calc_step_total_portval()
+            assert portval >= 0.0
+            self.prev_val = portval
+        except Exception as e:
+            self.logger.error(TrainingEnvironment._save_prev_portval, self.parse_error(e))
+
+    def _save_prev_portifolio_posit(self, timestamp):
+        for symbol in self._get_df_symbols():
+            self._set_prev_posit(self._get_posit(symbol), symbol, timestamp)
+
+    def set_action_space(self):
+        # Action space
+        self.action_space = Box(0., 1., len(self._get_df_symbols()))
+        self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self._get_df_symbols())))
+
+    def set_observation_space(self):
+        # Observation space:
+        obs_space = []
+        # OPEN, HIGH, LOW, CLOSE
+        for _ in range(4):
+            obs_space.append(Box(0.0, 1e9, 1))
+        # VOLUME
+        obs_space.append(Box(0.0, 1e12, 1))
+        # POSITION
+        obs_space.append(Box(0.0, 1.0, 1))
+
+        self.observation_space = Tuple(obs_space)
+
+    def set_obs_steps(self, steps):
+        assert isinstance(steps, int) and steps >= 3
+        self.obs_steps = steps
+        self.step_idx = steps
+        self.offset = steps
+
+    def set_freq(self, freq):
+        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
+        self.freq = freq
+
+    def set_tax(self, tax, symbol):
+        assert 0.0 <= tax <= 1.0
+        assert symbol in self._get_df_symbols()
+        self.tax[symbol] = convert_to.decimal(tax)
+
+    def set_training_stage(self, train):
+        assert isinstance(train, bool)
+        self._is_training = train
+
+    def _save_df_to_db(self, name):
+        self.db[name].insert_one(self.df.applymap(convert_to.decimal128).to_dict(orient='split'))
+
+    # Getters
+    def _get_df_symbols(self, no_fiat=False):
+        if no_fiat:
+            return [s for s in self.df.columns.levels[0] if s is not 'fiat']
+        else:
+            return [s for s in self.df.columns.levels[0]]
+
+    @staticmethod
+    def _get_table_symbol(table):
+        return table.full_name.split('.')[1].split('_')[2]
 
     def get_step_obs_all(self):
         obs_list = []
@@ -873,10 +1279,10 @@ class Apocalipse(Env):
                     return obs
 
         except IndexError as e:
-            self.logger.error(Apocalipse._get_step_obs, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
             return False
         except Exception as e:
-            self.logger.error(Apocalipse._get_step_obs, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._get_step_obs, self.parse_error(e))
             return False
 
     def _get_fiat(self):
@@ -939,12 +1345,6 @@ class Apocalipse(Env):
     def _calc_step_total_portval(self):
         portval = convert_to.decimal('0.0')
 
-        # if self.online: # TODO FIX THIS
-        #     for symbol in self._get_df_symbols(no_fiat=True):
-        #         portval += self._get_crypto(symbol) * self._get_step_obs(symbol, last_price=True)
-        #     portval += self._get_fiat()
-        #
-        # else:
         for symbol in self._get_df_symbols(no_fiat=True):
             portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
         portval += self._get_fiat()
@@ -994,378 +1394,35 @@ class Apocalipse(Env):
             try:
                 assert obs.shape[0] > 0
             except AssertionError:
-                self.logger.info(Apocalipse._get_historical_data,
+                self.logger.info(TrainingEnvironment._get_historical_data,
                                  "There is no data for this time period within the data server.")
                 obs = False
 
             return obs
 
         except Exception as e:
-            self.logger.error(Apocalipse._get_historical_data, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._get_historical_data, self.parse_error(e))
             return False
 
     def _get_timestamp_now(self):
         return pd.to_datetime(datetime.now() + timedelta(hours=3))  # timezone
 
-    ## Online Methods
-    # Setters
-    def set_online(self, online, tapi=None, trading_freq=5):
-        try:
-            assert isinstance(online, bool)
-            self.online = online
-            self.session_begin_time = None
-
-            # self._get_obs_space()
-
-            if online:
-                assert isinstance(tapi, Trading)
-                assert trading_freq >= 1
-
-                # self.make_df()
-                self.online_fiat = None
-                self.online_crypto = {}
-                self.online_prev_posit = {}
-                self.online_posit = {}
-                self.online_portifolio_posit = {}
-
-                for symbol in self._get_df_symbols(no_fiat=True):
-                    self.online_crypto[symbol] = Decimal('NaN')
-                    self.online_prev_posit[symbol] = Decimal('NaN')
-                    self.online_posit[symbol] = Decimal('NaN')
-
-                    self.df[symbol, 'online_prev_position'] = convert_to.decimal(np.nan)
-                    self.df[symbol, 'online_position'] = convert_to.decimal(np.nan)
-                    self.df[symbol, 'online_amount'] = convert_to.decimal(np.nan)
-
-                self.df['fiat', 'online_fiat'] = convert_to.decimal(np.nan)
-
-                self.tapi = tapi
-
-                timestamp = self.df.index[-1]
-
-                for symbol in self._get_df_symbols(no_fiat=True):
-                    amount = self._get_exchange_crypto(symbol)
-                    self._set_crypto(amount, symbol, timestamp)
-                    self._set_online_crypto(amount, symbol, timestamp)
-
-                fiat = self._get_exchange_fiat('btcusd')
-                self._set_fiat(fiat, timestamp)
-                self._set_online_fiat(fiat, timestamp)
-
-                for symbol in self._get_df_symbols(no_fiat=True):
-                    posit = self._get_exchange_posit(symbol)
-                    self._set_prev_posit(posit, symbol, timestamp)
-                    self._set_posit(posit, symbol, timestamp)
-                    self._set_prev_online_posit(posit, symbol, timestamp)
-                    self._set_online_posit(posit, symbol, timestamp)
-                    self.set_tax(convert_to.decimal(self._get_balance(symbol)['fee']) /
-                                 convert_to.decimal('100.0'), symbol)
-
-                    assert isinstance(self._get_online_posit(symbol), Decimal)
-
-                self.session_begin_time = timestamp
-
-                assert isinstance(self._get_ticker(), dict)
-                assert isinstance(self._get_online_portval(), Decimal)
-
-                self.logger.info(Apocalipse.set_online, "Apocalipse setup to ONLINE MODE!")
-
-                print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ONLINE MODE ON <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-                print("############################################# DISCLAIMER ############################################")
-                print("## In online mode, the steps will be performed on the real exchange environment, with real values! ##")
-                print("## This software comes as is and with no guarantees of any kind. USE AT YOUR OWN RISK!!!!!         ##")
-                print("#####################################################################################################")
-
-        except Exception as e:
-            self.logger.error(Apocalipse.set_online, self.parse_error(e))
-
-    def _set_online_fiat(self, fiat, timestamp):
-        """
-        Save online fiat volume to Apocalipse instance dataframe
-        :param fiat: float: volume to save
-        :param timestamp: pandas Timestamp: Timestamp index to save crypto to
-        :return:
-        """
-        # TODO: VALIDATE
-        try:
-            assert self.online
-            try:
-                assert isinstance(fiat, Decimal)
-            except AssertionError:
-                if isinstance(fiat, float):
-                    fiat = convert_to.decimal(fiat)
-                else:
-                    raise AssertionError
-            assert isinstance(timestamp, pd.Timestamp)
-            assert fiat >= Decimal('0.0')
-
-            self.online_fiat = fiat
-            self.df.at[timestamp, ('fiat', 'online_fiat')] = fiat
-        except Exception as e:
-            self.logger.error(Apocalipse._set_online_fiat, self.parse_error(e))
-
-    def _set_online_crypto(self, amount, symbol, timestamp):
-        """
-        Save online crypto volume to Apocalipse instance dataframe
-        :param crypto: float: volume to save
-        :param timestamp: pandas Timestamp: Timestamp index to save crypto to
-        :return:
-        """
-        # TODO: VALIDATE
-        try:
-            assert self.online
-            try:
-                assert isinstance(amount, Decimal)
-            except AssertionError:
-                if isinstance(amount, float):
-                    amount = convert_to.decimal(amount)
-                else:
-                    raise AssertionError
-            assert isinstance(timestamp, pd.Timestamp)
-
-            assert amount >= Decimal('0.0')
-
-            self.online_crypto[symbol] = amount
-            self.df.at[timestamp, (symbol, 'online_amount')] = amount
-        except Exception as e:
-            self.logger.error(Apocalipse._set_online_crypto, self.parse_error(e))
-
-    def _set_online_posit(self, posit, symbol, timestamp):
-        # TODO: VALIDATE
-        try:
-            try:
-                assert isinstance(posit, Decimal)
-            except AssertionError:
-                if isinstance(posit, float):
-                    posit = convert_to.decimal(posit)
-                else:
-                    raise AssertionError
-            assert isinstance(timestamp, pd.Timestamp)
-
-            assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
-
-            self.online_posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'online_position')] = posit
-
-        except Exception as e:
-            self.logger.error(Apocalipse._set_online_posit, self.parse_error(e))
-
-    def _set_prev_online_posit(self, posit, symbol, timestamp):
-        try:
-            try:
-                assert isinstance(posit, Decimal)
-            except AssertionError:
-                if isinstance(posit, float):
-                    posit = convert_to.decimal(posit)
-                else:
-                    raise AssertionError
-            assert isinstance(timestamp, pd.Timestamp)
-
-            assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
-
-            self.online_prev_posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'online_prev_position')] = posit
-
-        except Exception as e:
-            self.logger.error(Apocalipse._set_prev_online_posit, self.parse_error(e))
-
-    def _save_prev_online_portfolio_posit(self, timestamp):
-        assert self.online
-        for symbol in self._get_df_symbols(no_fiat=True):
-            self._set_prev_online_posit(self._get_online_posit(symbol), symbol, timestamp)
-
-    def _save_prev_online_portval(self):
-        assert self._get_online_portval() >= 0.0
-        self.prev_online_val = self._get_online_portval()
-
-
-    # Getters
-    def _get_ticker(self, last_price=False):
-        """
-        Get updated ticker data from exchange
-        :param last_price:
-        :return:
-        """
-        try:
-            assert self.online
-
-            obs = self.tapi.ticker_hour()
-
-            if last_price:
-                return convert_to.decimal(obs['last'])
-            else:
-                return obs
-
-        except IndexError:
-            return False
-        except Exception as e:
-            self.status['OnlineValueError'] += 1
-            self.logger.error(Apocalipse._get_ticker, self.parse_error(e))
-            return False
-        finally:
-            pass
-
-    def _get_order_type(self):
-        return self.order_type
-
-    def _get_online_fiat(self):
-        assert self.online and self.online_fiat >= 0.0
-        return self.online_fiat
-
-    def _get_online_crypto(self, symbol):
-        assert symbol in [s for s in self.online_crypto.keys()]
-        assert self.online and self.online_crypto[symbol] >= 0.0
-        return self.online_crypto[symbol]
-
-    def _get_online_portval(self):
-        try:
-            assert self.online
-            online_portval = convert_to.decimal('0.0')
-
-            for symbol in self._get_df_symbols(no_fiat=True):
-                val = self._get_online_crypto(symbol) * convert_to.decimal(self._get_obs(symbol, last_price=True))
-                assert val >= 0.0
-                online_portval += val
-
-            online_portval += self._get_online_fiat()
-
-            return online_portval
-        except Exception as e:
-            self.logger.error(Apocalipse._get_online_portval, self.parse_error(e))
-            return False
-
-    def _get_prev_online_portval(self):
-        assert self.online and self.prev_online_val >= 0.0
-        return self.prev_online_val
-
-    def _get_online_posit(self, symbol):
-        try:
-            assert self.online
-            assert self.online_posit[symbol] <= 1.0
-            return self.online_posit[symbol]
-        except Exception as e:
-            self.logger.error(Apocalipse._get_online_posit, self.parse_error(e))
-            return False
-
-    def _get_prev_online_posit(self, symbol):
-        assert self.online
-        return self.online_prev_posit[symbol]
-
-
-    # Exchange getter (make requests)
-    def _get_exchange_fiat(self, symbol):
-        try:
-            assert self.online
-            base, quote = symbol[:3], symbol[3:]
-            balance = self.tapi.account_balance(base=base, quote=quote)
-            return convert_to.decimal(balance[quote + '_balance'])
-
-        except Exception as e:
-            self.logger.error(Apocalipse._get_exchange_fiat, self.parse_error(e))
-            return False
-
-    def _get_exchange_crypto(self, symbol):
-        try:
-            assert self.online
-            base, quote = symbol[:3], symbol[3:]
-            balance = self.tapi.account_balance(base=base, quote=quote)
-            return convert_to.decimal(balance[base + '_balance'])
-
-        except Exception as e:
-            self.logger.error(Apocalipse._get_exchange_crypto, self.parse_error(e))
-            return False
-
-    def _get_exchange_portval(self):
-        # TODO: VALIDATE
-        try:
-            assert self.online
-
-            portval = Decimal('0.0')
-            for symbol in self._get_df_symbols(no_fiat=True):
-                base, quote = symbol[:3], symbol[3:]
-                ticker = self.tapi.ticker_hour(base=base, quote=quote)
-                balance = self.tapi.account_balance(base=base, quote=quote)
-                portval += convert_to.decimal(balance[base + '_balance']) * \
-                           convert_to.decimal(ticker['last']) + \
-                           convert_to.decimal(balance[quote + '_balance'])
-
-            return portval
-        except Exception as e:
-            self.logger.error(Apocalipse._get_exchange_portval, self.parse_error(e))
-            return False
-
-    def _get_exchange_posit(self, symbol):
-        # TODO: VALIDATE
-        try:
-            assert self.online
-
-            base, quote = symbol[:3], symbol[3:]
-
-            if symbol in self._get_df_symbols(no_fiat=True):
-                balance = self.tapi.account_balance(base=base, quote=quote)
-                ticker = self.tapi.ticker_hour(base=base, quote=quote)
-
-                return  convert_to.decimal(balance[base + '_balance']) * \
-                            convert_to.decimal(ticker['last']) / \
-                            self._get_exchange_portval()
-
-            elif symbol == 'fiat':
-
-                balance = self.tapi.account_balance(base='btc', quote='usd')
-
-                return  convert_to.decimal(balance['usd_balance']) / self._get_exchange_portval()
-
-        except Exception as e:
-            self.logger.error(Apocalipse._get_exchange_posit, self.parse_error(e))
-            return False
-
-    def _get_exchange_portifolio_posit(self):
-        portifolio = []
-        for symbol in self._get_df_symbols():
-            portifolio.append(self._get_exchange_posit(symbol))
-        return np.array(portifolio)
-
-    def _get_balance(self, symbol):
-        try:
-            assert self.online
-            base, quote = symbol[:3], symbol[3:]
-            balance = self.tapi.account_balance(base=base, quote=quote)
-            assert isinstance(balance, dict)
-            return balance
-        except Exception as e:
-            self.logger.error(Apocalipse._get_balance, self.parse_error(e))
-            return False
-
-
     ## Environment methos
     def _get_reward(self, type='absolute return'):
         if type == 'absolute return':
-            if self.online:
-                return self._get_online_portval() - self._get_prev_online_portval()
-            else:
-                return self._calc_step_total_portval() - self._get_prev_portval()
+            return self._calc_step_total_portval() - self._get_prev_portval()
 
         elif type == 'percent change':
-            if self.online:
-                prev_online_portval = self._get_prev_online_portval()
-                if prev_online_portval > convert_to.decimal('0.0'):
-                    return (self._get_online_portval() - self._get_prev_online_portval()) / prev_online_portval
-                else:
-                    return (self._get_online_portval() - self._get_prev_online_portval())
+            prev_portval = self._get_prev_portval()
+            if prev_portval > convert_to.decimal('0.0'):
+                return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
             else:
-                prev_portval = self._get_prev_portval()
-                if prev_portval > convert_to.decimal('0.0'):
-                    return (self._calc_step_total_portval() - self._get_prev_portval()) / prev_portval
-                else:
-                    return (self._calc_step_total_portval() - self._get_prev_portval())
+                return (self._calc_step_total_portval() - self._get_prev_portval())
 
         elif type == 'sharpe ratio':
             # TODO: IMPLEMENT SHARPE REWARD
             raise NotImplementedError
-            if self.online:
-                return self._get_online_portval() - self._get_prev_online_portval()
-            else:
-                return self._calc_step_total_portval() - self._get_prev_portval()
+            return self._calc_step_total_portval() - self._get_prev_portval()
 
         else:
             raise NotImplementedError
@@ -1400,10 +1457,6 @@ class Apocalipse(Env):
                 self.status['ActionError'] += 1
                 # self.logger.error(Apocalipse._assert_action, "Action out of range")
 
-            if self.online:
-                self.status['OnlineActionError'] += 1
-                self._send_email(self.name + " STEP ERROR", "ACTION OUT OF RANGE")
-
             action /= action.sum()
             try:
                 assert action.sum() == convert_to.decimal('1.0')
@@ -1425,8 +1478,7 @@ class Apocalipse(Env):
         self._set_fiat(self._get_init_fiat(), self.df.index[self.step_idx])
 
     def _reset_status(self):
-        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False,
-                       'OnlineActionError': False, 'OnlineValueError': False}
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -1515,9 +1567,6 @@ class Apocalipse(Env):
                             self._calc_step_total_portval(), symbol, timestamp)
         self._set_posit(self._get_fiat() / self._calc_step_total_portval(), 'fiat', timestamp)
 
-    def _rebalance_online_portifolio(self):
-        pass # TODO _REBALANCE_ONLINE_PORTIFOLIO
-
     def reset(self, reset_funds=True, reset_results=False, reset_global_step=False):
         """
         Resets environment and returns a initial observation
@@ -1579,7 +1628,7 @@ class Apocalipse(Env):
         try:
             assert self.df[symbol].shape[0] > self.obs_steps
         except AssertionError:
-            self.logger.error(Apocalipse._reset, "Calling reset with steps <= obs_steps")
+            self.logger.error(TrainingEnvironment._reset, "Calling reset with steps <= obs_steps")
             raise ValueError
 
         # set offset
@@ -1607,10 +1656,7 @@ class Apocalipse(Env):
         # return self._get_step_obs(symbol, self.obs_steps)
 
     def step(self, action):
-        if self.online:
-            return self._step(self.get_obs_all(), action)
-        else:
-            return self._step(self.get_step_obs_all(), action)
+        return self._step(self.get_step_obs_all(), action)
 
     def _step(self, observation, action, reward_type='percent change', timeout=10):
         # TODO: VALIDATE
@@ -1627,36 +1673,23 @@ class Apocalipse(Env):
             self.last_action = action
 
             # Get step timestamp
-            if self.online:
-                # Save step observation to dataframe
-                self._set_obs(observation)
-                timestamp = self.df.index[-1]
-            else:
-                timestamp = self.df.index[self.step_idx]
+            timestamp = self.df.index[self.step_idx]
 
             # Save previous val and position
             self._save_prev_portval()
             self._save_prev_portifolio_posit(timestamp)
 
-            ## ONLINE STEP
-            if self.online:
-                assert isinstance(timeout, float) or isinstance(timeout, int)
-                # Parse order for exchange action
-                done = self._rebalance_online_portifolio(action, timestamp, timeout)
-                self.step_idx = self.df.shape[0] - 1
-                new_obs = self.get_obs_all()
+            self._simulate_trade(action, timestamp)
+
+            # Update step counter and environment observation
+            if self.step_idx < self.df.shape[0] - 1:
+                self.step_idx += 1
+                done = False
             else:
-                self._simulate_trade(action, timestamp)
+                self.status['OOD'] = True
+                done = True
 
-                # Update step counter and environment observation
-                if self.step_idx < self.df.shape[0] - 1:
-                    self.step_idx += 1
-                    done = False
-                else:
-                    self.status['OOD'] = True
-                    done = True
-
-                new_obs = self.get_step_obs_all()
+            new_obs = self.get_step_obs_all()
 
             # Calculate step reward
             self.last_reward = self._get_reward(reward_type)
@@ -1671,11 +1704,10 @@ class Apocalipse(Env):
             return new_obs, np.float32(self.last_reward), done, self.status
 
         except Exception as e:
-            self.logger.error(Apocalipse._step, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._step, self.parse_error(e))
             self._send_email(self.name + "step error:", self.parse_error(e))
 
             return False, False, True, self.status
-
 
     # Helper methods
     def parse_error(self, e):
@@ -1694,9 +1726,9 @@ class Apocalipse(Env):
             assert isinstance(email, str) and isinstance(psw, str)
             self.email = email
             self.psw = psw
-            self.logger.info(Apocalipse.set_email, "Email report address set to: %s" % (self.email))
+            self.logger.info(TrainingEnvironment.set_email, "Email report address set to: %s" % (self.email))
         except Exception as e:
-            self.logger.error(Apocalipse.set_email, self.parse_error(e))
+            self.logger.error(TrainingEnvironment.set_email, self.parse_error(e))
 
     def _send_email(self, subject, body):
         try:
@@ -1721,7 +1753,7 @@ class Apocalipse(Env):
             server.close()
 
         except Exception as e:
-            self.logger.error(Apocalipse._send_email, self.parse_error(e))
+            self.logger.error(TrainingEnvironment._send_email, self.parse_error(e))
         finally:
             pass
 
@@ -2235,35 +2267,3 @@ class Apocalipse(Env):
 
         else:
             raise TypeError
-
-    def _get_online_results(self):
-        """
-        Calculate online operation statistics
-        :return:
-        """
-        self.online_results = self.df.copy()
-        self.online_results['portval'] = convert_to.decimal(np.nan)
-        self.online_results['benchmark'] = convert_to.decimal(np.nan)
-        self.online_results['returns'] = convert_to.decimal(np.nan)
-        self.online_results['benchmark_returns'] = convert_to.decimal(np.nan)
-        self.online_results['alpha'] = convert_to.decimal(np.nan)
-        self.online_results['beta'] = convert_to.decimal(np.nan)
-        self.online_results['drawdown'] = convert_to.decimal(np.nan)
-        self.online_results['sharpe'] = convert_to.decimal(np.nan)
-
-        self.online_results['portval'] = self.df.online_crypto * self.df.close + self.df.online_fiat
-        self.online_results['benchmark'] = self.df.close * self._get_init_fiat() / self.df.loc[self.session_begin_time].close - \
-                                    self._get_tax() * self._get_init_fiat() / self.df.loc[self.session_begin_time].close
-        self.online_results['returns'] = pd.to_numeric(self.online_results.portval).diff().fillna(1e-8)
-        self.online_results['benchmark_returns'] = pd.to_numeric(self.online_results.benchmark).diff().fillna(1e-8)
-        self.online_results['alpha'] = ec.utils.roll(self.online_results.returns,
-                                              self.online_results.benchmark_returns,
-                                              function=ec.alpha_aligned,
-                                              risk_free=0.001,
-                                              window=30)
-        self.online_results['beta'] = ec.utils.roll(self.online_results.returns,
-                                             self.online_results.benchmark_returns,
-                                             function=ec.beta_aligned,
-                                             window=30)
-        self.online_results['drawdown'] = ec.roll_max_drawdown(self.online_results.returns, window=3)
-        self.online_results['sharpe'] = ec.roll_sharpe_ratio(self.online_results.returns, window=3, risk_free=0.001)

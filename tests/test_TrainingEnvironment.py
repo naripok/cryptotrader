@@ -8,7 +8,7 @@ import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
 
-from cryptotrader.envs.driver import Apocalipse
+from cryptotrader.envs.driver import TrainingEnvironment
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
 from cryptotrader.spaces import Box, Tuple
@@ -16,14 +16,17 @@ import numpy as np
 import pandas as pd
 from decimal import Decimal
 
+
 @pytest.fixture
 def fresh_env():
-    yield Apocalipse(name='env_test')
+    yield TrainingEnvironment(name='env_test')
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
+
 
 @pytest.fixture
 def keys():
     return ['btcusd', 'ltcusd', 'xrpusd', 'ethusd', 'etcusd', 'xmrusd', 'zecusd', 'iotusd', 'bchusd', 'dshusd', 'stcusd']
+
 
 @pytest.fixture
 def dfs(n_assets=4, freq=5):
@@ -36,9 +39,11 @@ def dfs(n_assets=4, freq=5):
 
     return dfs
 
+
 # Tests
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
+
 
 @given(freq=st.one_of(st.integers(), st.floats()))
 def test_set_freq(fresh_env, freq):
@@ -48,6 +53,7 @@ def test_set_freq(fresh_env, freq):
     else:
         with pytest.raises(AssertionError):
             fresh_env.set_freq(freq)
+
 
 @given(obs_steps=st.one_of(st.integers(), st.floats()))
 def test_set_obs_steps(fresh_env, obs_steps):
@@ -60,11 +66,13 @@ def test_set_obs_steps(fresh_env, obs_steps):
         with pytest.raises(AssertionError):
             fresh_env.set_obs_steps(obs_steps)
 
+
 def test_set_training_stage(fresh_env):
     fresh_env.set_training_stage(True)
     assert fresh_env._is_training == True
     fresh_env.set_training_stage(False)
     assert fresh_env._is_training == False
+
 
 def test_set_observation_space(fresh_env):
     fresh_env.set_observation_space()
@@ -73,11 +81,12 @@ def test_set_observation_space(fresh_env):
     for space in fresh_env.observation_space.spaces:
         assert isinstance(space, Box)
 
+
 @pytest.mark.incremental
 class Test_env_setup(object):
     @classmethod
     def setup_class(cls):
-        cls.env = Apocalipse(name='test_env_setup')
+        cls.env = TrainingEnvironment(name='test_env_setup')
         cls.env.set_freq(5)
         cls.env.set_obs_steps(5)
 
@@ -197,14 +206,14 @@ class Test_env_setup(object):
 class Test_env_step(object):
     @classmethod
     def setup_class(cls):
-        cls.env = Apocalipse(name='test_env_setup')
+        cls.env = TrainingEnvironment(name='test_env_setup')
         cls.env.set_freq(5)
         cls.env.set_obs_steps(5)
         for i in range(len(dfs())):
             cls.env.add_df(df=dfs()[i], symbol=keys()[i])
             cls.env.add_symbol(symbol=keys()[i])
             cls.env.set_init_crypto(1E8, keys()[i])
-            cls.env.set_tax(0.25, keys()[i])
+            cls.env.set_tax(0.0025, keys()[i])
         cls.env.set_init_fiat(1E8)
 
         cls.env._reset_status()
@@ -254,7 +263,7 @@ class Test_env_step(object):
 
     @given(arrays(dtype=np.float32,
                   shape=(5,),
-                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=-1e8)))
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
     @settings(max_examples=20)
     def test__simulate_trade(self, action):
         action = array_softmax(action)
@@ -267,14 +276,20 @@ class Test_env_step(object):
                 (np.float32(self.env.df[symbol].get_value(timestamp, 'position')), action[i], symbol)
 
         # Assert amount
-        # for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
-        #     assert self.env.df[symbol].get_value(timestamp, 'amount') - \
-        #             convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
-        #             self.env.df[symbol].get_value(timestamp, 'close') <= convert_to.decimal('1E-1'), \
-        #             (self.env.df[symbol].get_value(timestamp, 'amount'),
-        #              convert_to.decimal(action[i]) * self.env._calc_step_total_portval() / \
-        #              self.env.df[symbol].get_value(timestamp, 'close'))
+        for i, symbol in enumerate(self.env._get_df_symbols(no_fiat=True)):
+            assert self.env.df[symbol].get_value(timestamp, 'amount') - \
+                   self.env.df[symbol].get_value(timestamp, 'position') * self.env._calc_step_total_portval() / \
+                    self.env.df[symbol].get_value(timestamp, 'close') <= convert_to.decimal('1E-1'), \
+                    (self.env.df[symbol].get_value(timestamp, 'amount'),
+                     self.env.df[symbol].get_value(timestamp, 'position') * self.env._calc_step_total_portval() / \
+                     self.env.df[symbol].get_value(timestamp, 'close'))
 
+    @given(arrays(dtype=np.float32,
+                  shape=(5,),
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
+    @settings(max_examples=20)
+    def test__step(self, action):
+        pass
 
 
 if __name__ == '__main__':

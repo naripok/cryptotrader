@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from time import time
 
-from .driver import Apocalipse, get_historical
+from .driver import TrainingEnvironment, get_historical
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
 from ..utils import convert_to
 
@@ -195,7 +195,7 @@ def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, 
         dfs = make_dfs(0, files, demo=True, freq=freq)
 
     ## ENVIRONMENT INITIALIZATION
-    env = Apocalipse(name='toy_env', seed=seed)
+    env = TrainingEnvironment(name='toy_env', seed=seed)
     # Set environment options
     env.set_freq(freq)
     env.set_obs_steps(obs_steps)
