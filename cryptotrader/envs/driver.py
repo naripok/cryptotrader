@@ -78,7 +78,7 @@ def get_historical(file, freq, start=None, end=None):
     return out.applymap(convert_to.decimal)
 
 
-class OnlineEnvironment(Env):
+class TradingEnvironment(Env):
     """
     Online environment for automated trading strategies
     """
@@ -119,6 +119,8 @@ class OnlineEnvironment(Env):
 
         self._seed(seed)
 
+        self.online = False
+
         if not os.path.exists('./online_logs'):
             os.makedirs('./online_logs')
         self.logger = Logger(self.name, './online_logs/')
@@ -148,8 +150,8 @@ class OnlineEnvironment(Env):
         self.dfs = {}
         self.df = None
 
-        self.logger.info(self.name + " Apocalipse initialization",
-                         "Apocalipse Initialized!\nONLINE MODE: False\n")
+        self.logger.info("Online Trading Environment initialization",
+                         "Trading Environment Initialized!\nONLINE MODE: False\n")
 
     def _order_done(self, response):
         """
@@ -167,7 +169,7 @@ class OnlineEnvironment(Env):
                     else:
                         return False
         except Exception as e:
-            self.logger.error(TrainingEnvironment._order_done, self.parse_error(e))
+            self.logger.error(TradingEnvironment._order_done, self.parse_error(e))
             self._send_email(self.name + "step error:", self.parse_error(e))
             return False
 
@@ -235,7 +237,7 @@ class OnlineEnvironment(Env):
                            "Crypto Price: %f\nOrder Volume: %f\nTimestamp: %s" % (
                                price, amount, str(pd.to_datetime(datetime.utcnow())))
 
-            self.logger.info(TrainingEnvironment._parse_order, order_report)
+            self.logger.info(TradingEnvironment._parse_order, order_report)
 
             with localcontext() as ctx:
                 ctx.rounding = ROUND_DOWN
@@ -243,7 +245,7 @@ class OnlineEnvironment(Env):
                 return price.quantize(Decimal('1e-2')), amount.quantize(Decimal('1e-6')), side, symbol
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._parse_order, self.parse_error(e))
+            self.logger.error(TradingEnvironment._parse_order, self.parse_error(e))
             self._send_email("PARSE ORDER ERROR", self.parse_error(e))
 
     def _place_order(self, price, amount, side, symbol, timeout):
@@ -276,7 +278,7 @@ class OnlineEnvironment(Env):
             assert symbol in self._get_df_symbols(no_fiat=True)
             assert isinstance(timeout, float) or isinstance(timeout, int)
 
-            self.logger.info(TrainingEnvironment._place_order,
+            self.logger.info(TradingEnvironment._place_order,
                              "Placing order:\nPrice: %f\nVolume: %f\nSide: %s\nSymbol: %s" % (
                                  price, amount, side, symbol
                              ))
@@ -287,7 +289,7 @@ class OnlineEnvironment(Env):
                 response = self.tapi.sell_limit_order(amount, price, base=base, quote=quote)
             else:
                 self.status['OnlineActionError'] += 1
-                self.logger.error(TrainingEnvironment._place_order, self.name + " order error: Invalid order side.")
+                self.logger.error(TradingEnvironment._place_order, self.name + " order error: Invalid order side.")
                 self._send_email(self.name + " ORDER ERROR", "Invalid order side.")
                 return False
 
@@ -305,21 +307,21 @@ class OnlineEnvironment(Env):
                                 else:
                                     if self._order_done(response):
                                         executed = True
-                                        self.logger.info(TrainingEnvironment._place_order, self.name + \
+                                        self.logger.info(TradingEnvironment._place_order, self.name + \
                                                          " order executed: %s" % (str(response)))
                                         self._send_email(self.name + " ORDER EXECUTED",
                                                          "Order executed: %s" % (str(response)))
                             else:
                                 if self._order_done(response):
                                     executed = True
-                                    self.logger.info(TrainingEnvironment._place_order,
+                                    self.logger.info(TradingEnvironment._place_order,
                                                      self.name + " order executed: %s" % (str(response)))
                                     self._send_email(self.name + " ORDER EXECUTED",
                                                      "Order executed: %s" % (str(response)))
                                 else:
                                     # Order is gone, log and exit
                                     self.status['OnlineActionError'] += 1
-                                    self.logger.error(TrainingEnvironment._place_order,
+                                    self.logger.error(TradingEnvironment._place_order,
                                                       self.name + " order error: Order is not open nor executed," + \
                                                       "trying to cancel: %s" % (str(response)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -328,7 +330,7 @@ class OnlineEnvironment(Env):
 
                                     cancel_response = self.tapi.cancel_order(response['id'])
 
-                                    self.logger.error(TrainingEnvironment._place_order,
+                                    self.logger.error(TradingEnvironment._place_order,
                                                       self.name + " order error: Order cancel response: %s" % (
                                                           str(cancel_response)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -336,25 +338,25 @@ class OnlineEnvironment(Env):
                                     return executed
                         else:
                             # Cancel order
-                            self.logger.info(TrainingEnvironment._place_order,
+                            self.logger.info(TradingEnvironment._place_order,
                                              self.name + " order timed out: %s" % (str(response)))
                             try:
 
                                 cancel_response = self.tapi.cancel_order(response['id'])
                                 if cancel_response:
                                     order_timeout = True
-                                    self.logger.info(TrainingEnvironment._place_order,
+                                    self.logger.info(TradingEnvironment._place_order,
                                                      self.name + " timed out order canceled: %s" % (str(response)))
                                 else:
                                     while not cancel_response:
-                                        self.logger.info(TrainingEnvironment._place_order, self.name + \
+                                        self.logger.info(TradingEnvironment._place_order, self.name + \
                                                          " cancel order not executed, retrying: %s" % (
                                                          str(response)))
                                         cancel_response = self.tapi.cancel_order(response['id'])
                                         sleep(1)
                                     else:
                                         order_timeout = True
-                                        self.logger.info(TrainingEnvironment._place_order,
+                                        self.logger.info(TradingEnvironment._place_order,
                                                          self.name + " timed out order canceled: %s" % (
                                                          str(response)))
 
@@ -362,7 +364,7 @@ class OnlineEnvironment(Env):
                                 sleep(2)
                                 if self._order_done(response):
                                     executed = True
-                                    self.logger.info(TrainingEnvironment._place_order,
+                                    self.logger.info(TradingEnvironment._place_order,
                                                      self.name + " order timed out " + \
                                                      "but got executed before cancel signal." + \
                                                      " Exchange response: %s" % (str(response)))
@@ -370,7 +372,7 @@ class OnlineEnvironment(Env):
                                                      "Order timed out but got " + \
                                                      "executed before cancel signal: %s" % (str(response)))
                                 else:
-                                    self.logger.error(TrainingEnvironment._place_order,
+                                    self.logger.error(TradingEnvironment._place_order,
                                                       self.name + " order error: Order cancel response: %s" % (
                                                           self.parse_error(e)))
                                     self._send_email(self.name + " ORDER ERROR",
@@ -379,7 +381,7 @@ class OnlineEnvironment(Env):
 
                     else:
                         self.status['OnlineActionError'] += 1
-                        self.logger.error(TrainingEnvironment._place_order, self.name + \
+                        self.logger.error(TradingEnvironment._place_order, self.name + \
                                           " order error: Invalid open orders response: %s" % (str(open_orders)))
                         self._send_email(self.name + " ORDER ERROR",
                                          "Invalid open orders response: %s" % (str(open_orders)))
@@ -389,7 +391,7 @@ class OnlineEnvironment(Env):
                     return executed
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._place_order, self.parse_error(e))
+            self.logger.error(TradingEnvironment._place_order, self.parse_error(e))
             self._send_email(self.name + " ORDER ERROR", self.parse_error(e))
             return False
         finally:
@@ -457,7 +459,7 @@ class OnlineEnvironment(Env):
                 assert isinstance(self._get_ticker(), dict)
                 assert isinstance(self._get_online_portval(), Decimal)
 
-                self.logger.info(TrainingEnvironment.set_online, "Apocalipse setup to ONLINE MODE!")
+                self.logger.info(TradingEnvironment.set_online, "Trading Environment setup to ONLINE MODE!")
 
                 print(
                     ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ONLINE MODE ON <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
@@ -471,7 +473,7 @@ class OnlineEnvironment(Env):
                     "#####################################################################################################")
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment.set_online, self.parse_error(e))
+            self.logger.error(TradingEnvironment.set_online, self.parse_error(e))
 
     def _set_online_fiat(self, fiat, timestamp):
         """
@@ -496,7 +498,7 @@ class OnlineEnvironment(Env):
             self.online_fiat = fiat
             self.df.at[timestamp, ('fiat', 'online_fiat')] = fiat
         except Exception as e:
-            self.logger.error(TrainingEnvironment._set_online_fiat, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_online_fiat, self.parse_error(e))
 
     def _set_online_crypto(self, amount, symbol, timestamp):
         """
@@ -522,7 +524,7 @@ class OnlineEnvironment(Env):
             self.online_crypto[symbol] = amount
             self.df.at[timestamp, (symbol, 'online_amount')] = amount
         except Exception as e:
-            self.logger.error(TrainingEnvironment._set_online_crypto, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_online_crypto, self.parse_error(e))
 
     def _set_online_posit(self, posit, symbol, timestamp):
         # TODO: VALIDATE
@@ -542,7 +544,7 @@ class OnlineEnvironment(Env):
             self.df.at[timestamp, (symbol, 'online_position')] = posit
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._set_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_online_posit, self.parse_error(e))
 
     def _set_prev_online_posit(self, posit, symbol, timestamp):
         try:
@@ -561,7 +563,7 @@ class OnlineEnvironment(Env):
             self.df.at[timestamp, (symbol, 'online_prev_position')] = posit
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._set_prev_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_prev_online_posit, self.parse_error(e))
 
     def _save_prev_online_portfolio_posit(self, timestamp):
         assert self.online
@@ -604,7 +606,7 @@ class OnlineEnvironment(Env):
             #     self.df[symbol] = self.df[symbol].sort_index()
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._set_obs, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_obs, self.parse_error(e))
         finally:
             pass
 
@@ -632,7 +634,7 @@ class OnlineEnvironment(Env):
             return False
         except Exception as e:
             self.status['OnlineValueError'] += 1
-            self.logger.error(TrainingEnvironment._get_ticker, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_ticker, self.parse_error(e))
             return False
         finally:
             pass
@@ -739,7 +741,7 @@ class OnlineEnvironment(Env):
             return obs
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_obs, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_obs, self.parse_error(e))
             return False
 
     def _get_order_type(self):
@@ -768,7 +770,7 @@ class OnlineEnvironment(Env):
 
             return online_portval
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_online_portval, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_online_portval, self.parse_error(e))
             return False
 
     def _get_prev_online_portval(self):
@@ -781,7 +783,7 @@ class OnlineEnvironment(Env):
             assert self.online_posit[symbol] <= 1.0
             return self.online_posit[symbol]
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_online_posit, self.parse_error(e))
             return False
 
     def _get_prev_online_posit(self, symbol):
@@ -797,7 +799,7 @@ class OnlineEnvironment(Env):
             return convert_to.decimal(balance[quote + '_balance'])
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_exchange_fiat, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_exchange_fiat, self.parse_error(e))
             return False
 
     def _get_exchange_crypto(self, symbol):
@@ -808,7 +810,7 @@ class OnlineEnvironment(Env):
             return convert_to.decimal(balance[base + '_balance'])
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_exchange_crypto, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_exchange_crypto, self.parse_error(e))
             return False
 
     def _get_exchange_portval(self):
@@ -827,7 +829,7 @@ class OnlineEnvironment(Env):
 
             return portval
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_exchange_portval, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_exchange_portval, self.parse_error(e))
             return False
 
     def _get_exchange_posit(self, symbol):
@@ -852,7 +854,7 @@ class OnlineEnvironment(Env):
                 return  convert_to.decimal(balance['usd_balance']) / self._get_exchange_portval()
 
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_exchange_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_exchange_posit, self.parse_error(e))
             return False
 
     def _get_exchange_portifolio_posit(self):
@@ -869,7 +871,7 @@ class OnlineEnvironment(Env):
             assert isinstance(balance, dict)
             return balance
         except Exception as e:
-            self.logger.error(TrainingEnvironment._get_balance, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_balance, self.parse_error(e))
             return False
 
     def _rebalance_online_portifolio(self):
@@ -913,6 +915,53 @@ class OnlineEnvironment(Env):
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
+
+    def set_email(self, email, psw):
+        """
+        Set Gmail address and password for log keeping
+        :param email: str: Gmail address
+        :param psw: str: account password
+        :return:
+        """
+        try:
+            assert isinstance(email, str) and isinstance(psw, str)
+            self.email = email
+            self.psw = psw
+            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (self.email))
+        except Exception as e:
+            self.logger.error(TradingEnvironment.set_email, self.parse_error(e))
+
+    def _send_email(self, subject, body):
+        try:
+            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
+                   isinstance(subject, str) and isinstance(body, str)
+            gmail_user = self.email
+            gmail_pwd = self.psw
+            FROM = self.email
+            TO = self.email if type(self.email) is list else [self.email]
+            SUBJECT = subject
+            TEXT = body
+
+            # Prepare actual message
+            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_user, gmail_pwd)
+            server.sendmail(FROM, TO, message)
+            server.close()
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment._send_email, self.parse_error(e))
+        finally:
+            pass
+
+    def parse_error(self, e):
+        error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
+            e.__traceback__.tb_lineno) + ': ' + str(e)
+        return error_msg
 
 
 class TrainingEnvironment(Env):
@@ -962,7 +1011,7 @@ class TrainingEnvironment(Env):
         self.dfs = {}
         self.df = None
 
-        self.logger.info(self.name + " Training Environment initialization",
+        self.logger.info("Training Environment initialization",
                          "Training Environment Initialized!")
 
     # Setters
