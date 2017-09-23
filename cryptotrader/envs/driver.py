@@ -10,7 +10,7 @@ import os
 import smtplib
 from datetime import datetime, timedelta
 from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP, Decimal
-from time import sleep
+from time import sleep, time
 import pandas as pd
 import empyrical as ec
 import pymongo as pm
@@ -24,6 +24,7 @@ from .. import seeding
 from ..core import Env
 from ..spaces import *
 from ..utils import Logger, convert_to
+from .utils import *
 
 
 # Decimal precision
@@ -31,52 +32,6 @@ getcontext().prec = 32
 
 # Debug flag
 debug = True
-
-
-def get_historical(file, freq, start=None, end=None):
-    """
-    Gets historical data from csv file
-
-    :param file: path to csv file
-    :param freq: sample frequency
-    :param start: start date
-    :param end: end date
-    :return: sampled pandas DataFrame
-    """
-
-    assert freq >= 1
-    freq = "%dmin" % (freq)
-
-    if isinstance(file, pd.core.frame.DataFrame):
-        df = file
-    else:
-        df = pd.read_csv(file)
-        df['Timestamp'] = pd.to_datetime(df.Timestamp, infer_datetime_format=True, unit='s')
-        df.set_index('Timestamp', drop=True, inplace=True)
-    if start:
-        df = df.drop(df.loc[:start].index)
-    if end:
-        df = df.drop(df.loc[end:].index)
-    try:
-        df = df.drop(['Volume_(Currency)', 'Weighted_Price'], axis=1)
-        df = df.rename({'Volume_(BTC)': 'volume'})
-    except:
-        pass
-    df.columns = ['open', 'high', 'low', 'close', 'volume']
-
-    df.ffill(inplace=True)
-    df.fillna(1e-8, inplace=True)
-
-    index = df.resample(freq).first().index
-    out = pd.DataFrame(index=index)
-    out['open'] = df.resample(freq).first().open
-    out['high'] = df.resample(freq).max().high
-    out['low'] = df.resample(freq).min().low
-    out['close'] = df.resample(freq).last().close
-    out['volume'] = df.resample(freq).sum().volume
-
-    return out.applymap(convert_to.decimal)
-
 
 class TrainingEnvironment(Env):
     '''
@@ -1146,7 +1101,7 @@ class TradingEnvironment(Env):
 
     # TODO: \/ ################ REWORKING NOW ###################### \/
 
-    # def _rebalance_online_portifolio(self, action, timestamp, timeout):
+    # def _rebalance_portifolio(self, action, timestamp, timeout):
     #
     #     order = self._parse_order(action, symbol)
     #
@@ -1155,17 +1110,17 @@ class TradingEnvironment(Env):
     #         response = self._place_order(*order, timeout)
     #
     #         # Update variables with new exchange state
-    #         self._set_online_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
-    #         self._set_online_fiat(self._get_exchange_fiat(symbol),  timestamp)
+    #         self._set_crypto(self._get_exchange_crypto(symbol), symbol, timestamp)
+    #         self._set_fiat(self._get_exchange_fiat(symbol),  timestamp)
     #     else:
     #
     #         response = False
-    #         self._set_online_crypto(self._get_online_crypto(symbol), symbol, timestamp)
-    #         self._set_online_fiat(self._get_online_fiat(symbol), timestamp)
+    #         self._set_crypto(self._get_crypto(symbol), symbol, timestamp)
+    #         self._set_fiat(self._get_fiat(symbol), timestamp)
     #
     #     # TODO: VALIDATE
     #     # Update online position
-    #     self._set_online_posit(self._get_online_posit(symbol), symbol, timestamp)
+    #     self._set_posit(self._get_posit(symbol), symbol, timestamp)
     #
     #     return response
 
@@ -1188,8 +1143,6 @@ class TradingEnvironment(Env):
 
         self.crypto = {}
         self.fiat = None
-        self.online_crypto = {}
-        self.online_fiat = None
         self.prev_posit = {}
         self.posit = {}
         self.prev_val = np.nan
@@ -1213,6 +1166,7 @@ class TradingEnvironment(Env):
 
         self.logger.info("Online Trading Environment initialization",
                          "Trading Environment Initialized!\nONLINE MODE: False\n")
+
 
     def _order_done(self, response):
         """
@@ -1259,11 +1213,11 @@ class TradingEnvironment(Env):
             with localcontext() as ctx:
                 ctx.rounding = ROUND_DOWN
 
-                online_portval = convert_to.decimal(balance[base + '_balance']) * \
+                portval = convert_to.decimal(balance[base + '_balance']) * \
                                  convert_to.decimal(ticker['bid']) + convert_to.decimal(balance[quote + '_balance'])
 
-            online_posit = convert_to.decimal('1.0') - convert_to.decimal(
-                balance[quote + '_balance']) / online_portval
+            posit = convert_to.decimal('1.0') - convert_to.decimal(
+                balance[quote + '_balance']) / portval
 
             with localcontext() as ctx:
                 ctx.rounding = ROUND_UP
@@ -1271,22 +1225,22 @@ class TradingEnvironment(Env):
                 fee = convert_to.decimal('1.0') - convert_to.decimal(balance['fee']) / convert_to.decimal('100.0')
 
             # Calculate position change
-            posit_change = convert_to.decimal(action[0]) - online_posit
+            posit_change = convert_to.decimal(action[0]) - posit
 
             assert -1.0 <= posit_change <= 1.0
 
             # Get price, amount and side for order placing
-            if posit_change < 0.0 and abs(posit_change * online_portval) > 5:
+            if posit_change < 0.0 and abs(posit_change * portval) > 5:
                 side = 'sell'
                 price = convert_to.decimal(ticker['bid']) - convert_to.decimal('1e-2')
                 amount = convert_to.decimal(
-                    abs(posit_change * online_portval / (price * convert_to.decimal(1.005))))
+                    abs(posit_change * portval / (price * convert_to.decimal(1.005))))
 
-            elif posit_change > 0.0 and abs(posit_change * online_portval) > 5:
+            elif posit_change > 0.0 and abs(posit_change * portval) > 5:
                 side = 'buy'
                 price = convert_to.decimal(ticker['ask']) + convert_to.decimal('1e-2')
                 amount = convert_to.decimal(
-                    abs(fee * posit_change * online_portval / (price * convert_to.decimal(1.005))))
+                    abs(fee * posit_change * portval / (price * convert_to.decimal(1.005))))
 
             else:
                 return False
@@ -1474,22 +1428,22 @@ class TradingEnvironment(Env):
                 assert trading_freq >= 1
 
                 # self.make_df()
-                self.online_fiat = None
-                self.online_crypto = {}
-                self.online_prev_posit = {}
-                self.online_posit = {}
-                self.online_portifolio_posit = {}
+                self.fiat = None
+                self.crypto = {}
+                self.prev_posit = {}
+                self.posit = {}
+                self.portifolio_posit = {}
 
                 for symbol in self._get_df_symbols(no_fiat=True):
-                    self.online_crypto[symbol] = Decimal('NaN')
-                    self.online_prev_posit[symbol] = Decimal('NaN')
-                    self.online_posit[symbol] = Decimal('NaN')
+                    self.crypto[symbol] = Decimal('NaN')
+                    self.prev_posit[symbol] = Decimal('NaN')
+                    self.posit[symbol] = Decimal('NaN')
 
-                    self.df[symbol, 'online_prev_position'] = convert_to.decimal(np.nan)
-                    self.df[symbol, 'online_position'] = convert_to.decimal(np.nan)
-                    self.df[symbol, 'online_amount'] = convert_to.decimal(np.nan)
+                    self.df[symbol, 'prev_position'] = convert_to.decimal(np.nan)
+                    self.df[symbol, 'position'] = convert_to.decimal(np.nan)
+                    self.df[symbol, 'amount'] = convert_to.decimal(np.nan)
 
-                self.df['fiat', 'online_fiat'] = convert_to.decimal(np.nan)
+                self.df['fiat', 'fiat'] = convert_to.decimal(np.nan)
 
                 self.tapi = tapi
 
@@ -1498,27 +1452,27 @@ class TradingEnvironment(Env):
                 for symbol in self._get_df_symbols(no_fiat=True):
                     amount = self._get_exchange_crypto(symbol)
                     self._set_crypto(amount, symbol, timestamp)
-                    self._set_online_crypto(amount, symbol, timestamp)
+                    self._set_crypto(amount, symbol, timestamp)
 
                 fiat = self._get_exchange_fiat('btcusd')
                 self._set_fiat(fiat, timestamp)
-                self._set_online_fiat(fiat, timestamp)
+                self._set_fiat(fiat, timestamp)
 
                 for symbol in self._get_df_symbols(no_fiat=True):
                     posit = self._get_exchange_posit(symbol)
                     self._set_prev_posit(posit, symbol, timestamp)
                     self._set_posit(posit, symbol, timestamp)
-                    self._set_prev_online_posit(posit, symbol, timestamp)
-                    self._set_online_posit(posit, symbol, timestamp)
+                    self._set_prev_posit(posit, symbol, timestamp)
+                    self._set_posit(posit, symbol, timestamp)
                     self.set_tax(convert_to.decimal(self._get_balance(symbol)['fee']) /
                                  convert_to.decimal('100.0'), symbol)
 
-                    assert isinstance(self._get_online_posit(symbol), Decimal)
+                    assert isinstance(self._get_posit(symbol), Decimal)
 
                 self.session_begin_time = timestamp
 
                 assert isinstance(self._get_ticker(), dict)
-                assert isinstance(self._get_online_portval(), Decimal)
+                assert isinstance(self._get_portval(), Decimal)
 
                 self.logger.info(TradingEnvironment.set_online, "Trading Environment setup to ONLINE MODE!")
 
@@ -1536,7 +1490,11 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.set_online, self.parse_error(e))
 
-    def _set_online_fiat(self, fiat, timestamp):
+    def set_freq(self, freq):
+        assert isinstance(freq, int) and freq >= 1, "frequency must be a integer >= 1"
+        self.freq = freq
+
+    def _set_fiat(self, fiat, timestamp):
         """
         Save online fiat volume to Apocalipse instance dataframe
         :param fiat: float: volume to save
@@ -1556,12 +1514,12 @@ class TradingEnvironment(Env):
             assert isinstance(timestamp, pd.Timestamp)
             assert fiat >= Decimal('0.0')
 
-            self.online_fiat = fiat
-            self.df.at[timestamp, ('fiat', 'online_fiat')] = fiat
+            self.fiat = fiat
+            self.df.at[timestamp, ('fiat', 'fiat')] = fiat
         except Exception as e:
-            self.logger.error(TradingEnvironment._set_online_fiat, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_fiat, self.parse_error(e))
 
-    def _set_online_crypto(self, amount, symbol, timestamp):
+    def _set_crypto(self, amount, symbol, timestamp):
         """
         Save online crypto volume to Apocalipse instance dataframe
         :param crypto: float: volume to save
@@ -1582,12 +1540,12 @@ class TradingEnvironment(Env):
 
             assert amount >= Decimal('0.0')
 
-            self.online_crypto[symbol] = amount
-            self.df.at[timestamp, (symbol, 'online_amount')] = amount
+            self.crypto[symbol] = amount
+            self.df.at[timestamp, (symbol, 'amount')] = amount
         except Exception as e:
-            self.logger.error(TradingEnvironment._set_online_crypto, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_crypto, self.parse_error(e))
 
-    def _set_online_posit(self, posit, symbol, timestamp):
+    def _set_posit(self, posit, symbol, timestamp):
         # TODO: VALIDATE
         try:
             try:
@@ -1601,13 +1559,13 @@ class TradingEnvironment(Env):
 
             assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
 
-            self.online_posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'online_position')] = posit
+            self.posit[symbol] = posit
+            self.df.at[timestamp, (symbol, 'position')] = posit
 
         except Exception as e:
-            self.logger.error(TradingEnvironment._set_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_posit, self.parse_error(e))
 
-    def _set_prev_online_posit(self, posit, symbol, timestamp):
+    def _set_prev_posit(self, posit, symbol, timestamp):
         try:
             try:
                 assert isinstance(posit, Decimal)
@@ -1620,20 +1578,20 @@ class TradingEnvironment(Env):
 
             assert convert_to.decimal('0.0') <= posit <= convert_to.decimal('1.0')
 
-            self.online_prev_posit[symbol] = posit
-            self.df.at[timestamp, (symbol, 'online_prev_position')] = posit
+            self.prev_posit[symbol] = posit
+            self.df.at[timestamp, (symbol, 'prev_position')] = posit
 
         except Exception as e:
-            self.logger.error(TradingEnvironment._set_prev_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._set_prev_posit, self.parse_error(e))
 
-    def _save_prev_online_portfolio_posit(self, timestamp):
+    def _save_prev_portfolio_posit(self, timestamp):
         assert self.online
         for symbol in self._get_df_symbols(no_fiat=True):
-            self._set_prev_online_posit(self._get_online_posit(symbol), symbol, timestamp)
+            self._set_prev_posit(self._get_posit(symbol), symbol, timestamp)
 
-    def _save_prev_online_portval(self):
-        assert self._get_online_portval() >= 0.0
-        self.prev_online_val = self._get_online_portval()
+    def _save_prev_portval(self):
+        assert self._get_portval() >= 0.0
+        self.prev_val = self._get_portval()
 
     # TODO VALIDATE _set_obs
     def _set_obs(self, obs):
@@ -1733,7 +1691,7 @@ class TradingEnvironment(Env):
 
                 data = [[item['data'][0][i] for i in range(len(item) - 2)] + [item['data'][0][2]] for item in cursor]
 
-                obs = self.sample_trades(pd.DataFrame(data=data,
+                obs = sample_trades(pd.DataFrame(data=data,
                                             columns=columns).set_index('trades_date_time', drop=True), "%dmin" % (freq))
 
             else:
@@ -1755,7 +1713,7 @@ class TradingEnvironment(Env):
                     data = [[item['data'][0][i] for i in range(len(item) - 2)] + [item['data'][0][2]] for item in cursor]
 
                     try:
-                        obs = self.sample_trades(pd.DataFrame(data=data, columns=columns).set_index('trades_date_time',
+                        obs = sample_trades(pd.DataFrame(data=data, columns=columns).set_index('trades_date_time',
                                                                     drop=True), "%dmin" % (freq))[-steps:]
 
                     except TypeError:
@@ -1774,10 +1732,10 @@ class TradingEnvironment(Env):
                         if hasattr(self.df, symbol):
                             if isinstance(self.df[symbol], pd.core.frame.DataFrame):
                                 if self.online:
-                                    # if hasattr(self.df, 'online_prev_position'):
-                                    #     obs['prev_position'] = self.df.loc[obs.index, 'online_prev_position']
-                                    if hasattr(self.df[symbol], 'online_position'):
-                                        obs['position'] = self.df.loc[obs.index, (symbol, 'online_position')]
+                                    # if hasattr(self.df, 'prev_position'):
+                                    #     obs['prev_position'] = self.df.loc[obs.index, 'prev_position']
+                                    if hasattr(self.df[symbol], 'position'):
+                                        obs['position'] = self.df.loc[obs.index, (symbol, 'position')]
                                 else:
                                     # Get position
                                     # if hasattr(self.df, 'prev_position'):
@@ -1808,48 +1766,48 @@ class TradingEnvironment(Env):
     def _get_order_type(self):
         return self.order_type
 
-    def _get_online_fiat(self):
-        assert self.online and self.online_fiat >= 0.0
-        return self.online_fiat
+    def _get_fiat(self):
+        assert self.online and self.fiat >= 0.0
+        return self.fiat
 
-    def _get_online_crypto(self, symbol):
-        assert symbol in [s for s in self.online_crypto.keys()]
-        assert self.online and self.online_crypto[symbol] >= 0.0
-        return self.online_crypto[symbol]
+    def _get_crypto(self, symbol):
+        assert symbol in [s for s in self.crypto.keys()]
+        assert self.online and self.crypto[symbol] >= 0.0
+        return self.crypto[symbol]
 
-    def _get_online_portval(self):
+    def _get_portval(self):
         try:
             assert self.online
-            online_portval = convert_to.decimal('0.0')
+            portval = convert_to.decimal('0.0')
 
             for symbol in self._get_df_symbols(no_fiat=True):
-                val = self._get_online_crypto(symbol) * convert_to.decimal(self._get_obs(symbol, last_price=True))
+                val = self._get_crypto(symbol) * convert_to.decimal(self._get_obs(symbol, last_price=True))
                 assert val >= 0.0
-                online_portval += val
+                portval += val
 
-            online_portval += self._get_online_fiat()
+            portval += self._get_fiat()
 
-            return online_portval
+            return portval
         except Exception as e:
-            self.logger.error(TradingEnvironment._get_online_portval, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_portval, self.parse_error(e))
             return False
 
-    def _get_prev_online_portval(self):
-        assert self.online and self.prev_online_val >= 0.0
-        return self.prev_online_val
+    def _get_prev_portval(self):
+        assert self.online and self.prev_val >= 0.0
+        return self.prev_val
 
-    def _get_online_posit(self, symbol):
+    def _get_posit(self, symbol):
         try:
             assert self.online
-            assert self.online_posit[symbol] <= 1.0
-            return self.online_posit[symbol]
+            assert self.posit[symbol] <= 1.0
+            return self.posit[symbol]
         except Exception as e:
-            self.logger.error(TradingEnvironment._get_online_posit, self.parse_error(e))
+            self.logger.error(TradingEnvironment._get_posit, self.parse_error(e))
             return False
 
-    def _get_prev_online_posit(self, symbol):
+    def _get_prev_posit(self, symbol):
         assert self.online
-        return self.online_prev_posit[symbol]
+        return self.prev_posit[symbol]
 
     # Exchange getter (make requests)
     def _get_exchange_fiat(self, symbol):
@@ -1935,40 +1893,40 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment._get_balance, self.parse_error(e))
             return False
 
-    def _rebalance_online_portifolio(self):
-        pass # TODO _REBALANCE_ONLINE_PORTIFOLIO
+    def _rebalance_portifolio(self):
+        pass # TODO _REBALANCE_PORTIFOLIO
 
-    def _get_online_results(self):
+    def _get_results(self):
         """
         Calculate online operation statistics
         :return:
         """
-        self.online_results = self.df.copy()
-        self.online_results['portval'] = convert_to.decimal(np.nan)
-        self.online_results['benchmark'] = convert_to.decimal(np.nan)
-        self.online_results['returns'] = convert_to.decimal(np.nan)
-        self.online_results['benchmark_returns'] = convert_to.decimal(np.nan)
-        self.online_results['alpha'] = convert_to.decimal(np.nan)
-        self.online_results['beta'] = convert_to.decimal(np.nan)
-        self.online_results['drawdown'] = convert_to.decimal(np.nan)
-        self.online_results['sharpe'] = convert_to.decimal(np.nan)
+        self.results = self.df.copy()
+        self.results['portval'] = convert_to.decimal(np.nan)
+        self.results['benchmark'] = convert_to.decimal(np.nan)
+        self.results['returns'] = convert_to.decimal(np.nan)
+        self.results['benchmark_returns'] = convert_to.decimal(np.nan)
+        self.results['alpha'] = convert_to.decimal(np.nan)
+        self.results['beta'] = convert_to.decimal(np.nan)
+        self.results['drawdown'] = convert_to.decimal(np.nan)
+        self.results['sharpe'] = convert_to.decimal(np.nan)
 
-        self.online_results['portval'] = self.df.online_crypto * self.df.close + self.df.online_fiat
-        self.online_results['benchmark'] = self.df.close * self._get_init_fiat() / self.df.loc[self.session_begin_time].close - \
+        self.results['portval'] = self.df.crypto * self.df.close + self.df.fiat
+        self.results['benchmark'] = self.df.close * self._get_init_fiat() / self.df.loc[self.session_begin_time].close - \
                                     self._get_tax() * self._get_init_fiat() / self.df.loc[self.session_begin_time].close
-        self.online_results['returns'] = pd.to_numeric(self.online_results.portval).diff().fillna(1e-8)
-        self.online_results['benchmark_returns'] = pd.to_numeric(self.online_results.benchmark).diff().fillna(1e-8)
-        self.online_results['alpha'] = ec.utils.roll(self.online_results.returns,
-                                              self.online_results.benchmark_returns,
+        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
+        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
+        self.results['alpha'] = ec.utils.roll(self.results.returns,
+                                              self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
                                               risk_free=0.001,
                                               window=30)
-        self.online_results['beta'] = ec.utils.roll(self.online_results.returns,
-                                             self.online_results.benchmark_returns,
+        self.results['beta'] = ec.utils.roll(self.results.returns,
+                                             self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=30)
-        self.online_results['drawdown'] = ec.roll_max_drawdown(self.online_results.returns, window=3)
-        self.online_results['sharpe'] = ec.roll_sharpe_ratio(self.online_results.returns, window=3, risk_free=0.001)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=3)
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=3, risk_free=0.001)
 
     def _reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
