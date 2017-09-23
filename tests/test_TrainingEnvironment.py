@@ -7,7 +7,7 @@ import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
-
+from cryptotrader.envs.utils import *
 from cryptotrader.envs.driver import TrainingEnvironment
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
@@ -140,8 +140,7 @@ class Test_env_setup(object):
 
     def test__reset_status(self):
         self.env._reset_status()
-        assert self.env.status == {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False,
-                       'OnlineActionError': False, 'OnlineValueError': False}
+        assert self.env.status == {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
     def test_clear_dfs(self):
         self.env.clear_dfs()

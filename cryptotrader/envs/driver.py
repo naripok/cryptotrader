@@ -11,9 +11,8 @@ import smtplib
 from datetime import datetime, timedelta
 from decimal import getcontext, localcontext, ROUND_DOWN, ROUND_UP, Decimal
 from time import sleep
-
+import pandas as pd
 import empyrical as ec
-
 import pymongo as pm
 from bitstamp.client import Trading
 from bokeh.layouts import column
@@ -24,8 +23,8 @@ from .. import error
 from .. import seeding
 from ..core import Env
 from ..spaces import *
-from ..utils import Logger
-from .utils import *
+from ..utils import Logger, convert_to
+
 
 # Decimal precision
 getcontext().prec = 32
