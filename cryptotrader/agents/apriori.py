@@ -19,6 +19,7 @@ class APrioriAgent(Agent):
 
     def __init__(self):
         super().__init__()
+        self.episilon = 1e-8
 
     def act(self, obs):
         """
@@ -244,8 +245,8 @@ class MomentumTrader(APrioriAgent):
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
-                                                 obs[symbol].close.rolling(self.std_args[0], min_periods=1,
-                                                                                             center=True).std().iat[-1]
+                             (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
+                              self.episilon)
 
                 else:
                     action = np.float64(df['position'].iat[-1])

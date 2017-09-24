@@ -236,63 +236,6 @@ def sample_ohlc(df, freq):
         return out
 
 
-def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42, toy=True, files=None):
-    """
-    Make environment function to be called by each agent thread
-    :param test:
-    :param n_assets:
-    :param obs_steps:
-    :param freq:
-    :param tax:
-    :param init_fiat:
-    :param init_crypto:
-    :param seed:
-    :param toy:
-    :param files:
-    :return:
-    """
-    # Get data
-    gc.collect()
-    np.random.seed(seed)
-
-    if toy:
-        dfs = make_toy_dfs(n_assets, freq)
-    else:
-        dfs = make_dfs(0, files, demo=True, freq=freq)
-
-    ## ENVIRONMENT INITIALIZATION
-    env = TrainingEnvironment(name='toy_env', seed=seed)
-    # Set environment options
-    env.set_freq(freq)
-    env.set_obs_steps(obs_steps)
-
-    keys = ['btcusd', 'ltcusd', 'xrpusd', 'ethusd', 'etcusd', 'xmrusd', 'zecusd', 'iotusd', 'bchusd', 'dshusd', 'stcusd']
-
-    # Add backtest data
-    for i in range(n_assets):
-        env.add_df(df=dfs[i], symbol=keys[i])
-        env.add_symbol(keys[i])
-        env.set_init_crypto(init_crypto, keys[i])
-        env.set_tax(tax, keys[i])
-    del dfs
-
-    env.set_init_fiat(init_fiat)
-
-    # Clean pools
-    env._reset_status()
-    env.clear_dfs()
-
-    if test:
-        env.set_training_stage(False)
-    else:
-        env.set_training_stage(True)
-    env.set_observation_space()
-    env.set_action_space()
-    env.reset(reset_funds=True, reset_results=True)
-
-    return env
-
-
 def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
     """
     Get dataframes from database
