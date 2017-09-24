@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 
+
 class Agent(object):
     """Abstract base class for all implemented agents.
 
