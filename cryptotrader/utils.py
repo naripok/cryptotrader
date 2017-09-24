@@ -126,24 +126,6 @@ class convert_to(object):
                 raise InvalidOperation
 
 
-def sample_trades(df, freq):
-
-    df['trade_px'] = df['trade_px'].ffill()
-    df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
-
-    # TODO FIND OUT WHAT TO DO WITH NANS
-    index = df.resample(freq).first().index
-    out = pd.DataFrame(index=index)
-
-    out['open'] = df['trade_px'].resample(freq).first()
-    out['high'] = df['trade_px'].resample(freq).max()
-    out['low'] = df['trade_px'].resample(freq).min()
-    out['close'] = df['trade_px'].resample(freq).last()
-    out['volume'] = df['trade_volume'].resample(freq).sum()
-
-    return out
-
-
 def convert_and_clean(x):
     x = x.apply(convert_to.decimal)
     f = x.rolling(30, center=True, min_periods=1).mean().apply(convert_to.decimal)
