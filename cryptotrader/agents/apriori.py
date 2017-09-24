@@ -19,7 +19,7 @@ class APrioriAgent(Agent):
 
     def __init__(self):
         super().__init__()
-
+        self.episilon = 1e-8
     def act(self, obs):
         """
         Select action on actual observation
@@ -36,7 +36,6 @@ class APrioriAgent(Agent):
         try:
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.df.shape[0] - 1
-            env.set_online(False)
             env._reset_status()
             obs = env.reset(reset_funds=True, reset_results=True)
             t0 = 0
@@ -245,8 +244,8 @@ class MomentumTrader(APrioriAgent):
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
-                                                 obs[symbol].close.rolling(self.std_args[0], min_periods=1,
-                                                                                             center=True).std().iat[-1]
+                             (obs[symbol].close.rolling(self.std_args[0], min_periods=1,
+                                                                        center=True).std().iat[-1] + self.episilon)
 
                 else:
                     action = np.float64(df['position'].iat[-1])
@@ -272,6 +271,8 @@ class MomentumTrader(APrioriAgent):
             env.set_training_stage(True)
             env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
 
+            @ot.constraints.violations_defaulted(-np.inf)
+            @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
