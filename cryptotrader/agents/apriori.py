@@ -248,6 +248,7 @@ class MomentumTrader(APrioriAgent):
                              (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
                               self.episilon)
 
+
                 else:
                     action = np.float64(df['position'].iat[-1])
 
@@ -272,6 +273,8 @@ class MomentumTrader(APrioriAgent):
             env.set_training_stage(True)
             env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
 
+            @ot.constraints.violations_defaulted(-np.inf)
+            @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
