@@ -519,3 +519,64 @@ class PAMR(APrioriAgent):
             tmax = (tmpsum + s[m - 1] - 1) / m
 
         return np.maximum(y - tmax, 0.)
+
+    def set_params(self, **kwargs):
+        self.ma_span = kwargs['sensitivity']
+        # self.C = kwargs['C']
+
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None, n_workers=1):
+        try:
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            i = 0
+            t0 = time()
+            env._reset_status()
+            env.set_training_stage(True)
+            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+
+            def find_hp(**kwargs):
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                self.set_params(**kwargs)
+
+                batch_reward = []
+                for batch in range(batch_size):
+                    # run test on the main process
+                    r = self.test(env,
+                                    nb_episodes=1,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    verbose=False)
+
+                    batch_reward.append(r)
+
+                i += 1
+                if verbose:
+                    t0 += time()
+                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                        nb_steps,
+                                                                        sum(batch_reward),
+                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
+                          end="\r")
+
+                return sum(batch_reward)
+
+            opt_params, info, _ = ot.maximize(find_hp,
+                                              num_evals=nb_steps,
+                                              sensitivity=[0, 1],
+                                              # C=[50, 5000],
+                                              )
+
+            self.set_params(**opt_params)
+            env.set_training_stage(False)
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user.")
+
