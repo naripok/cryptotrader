@@ -27,7 +27,6 @@ config = {
                          'optunity',
                          'ta-lib',
                          'empyrical',
-                         'bitstampclient'
                          ],
 	'packages': find_packages(),
 	'scripts': [],
