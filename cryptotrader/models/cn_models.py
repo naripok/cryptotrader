@@ -68,10 +68,8 @@ class ProcessObs(chainer.Link):
     """
     Observations preprocessing / feature extraction layer
     """
-    def __init__(self, input_shape):
+    def __init__(self):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
         self.out_channels = 3
 
         with self.init_scope():
@@ -80,6 +78,9 @@ class ProcessObs(chainer.Link):
     def __call__(self, x):
         xp = chainer.cuda.get_array_module(x)
         obs = []
+
+        self.n_cols = int(x.shape[-1])
+        self.n_pairs = int((self.n_cols - 1) / 6)
 
         indexes = [i for i in range(self.n_cols - 1) if i % 6 == 0]
         for j in range(self.n_pairs):
@@ -144,11 +145,10 @@ class VisionModel(chainer.Chain):
     """
     Write me
     """
-    def __init__(self, input_shape, vn_number, pn_number):
+    def __init__(self, timesteps, vn_number, pn_number):
         super().__init__()
-        timesteps, in_channels = input_shape
         with self.init_scope():
-            self.obs = ProcessObs((timesteps,in_channels))
+            self.obs = ProcessObs()
             self.filt1 = ConvBlock(3, vn_number, (1, 3), (0, 1))
             self.filt2 = ConvBlock(3, vn_number, (1, 5), (0, 2))
             self.filt3 = ConvBlock(3, vn_number, (1, 7), (0, 3))
@@ -165,13 +165,10 @@ class EIIE(chainer.Chain):
     """
     Write me
     """
-    def __init__(self, input_shape, vn_number, pn_number):
+    def __init__(self, timesteps, vn_number, pn_number):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
-
         with self.init_scope():
-            self.vision = VisionModel(input_shape, vn_number, pn_number)
+            self.vision = VisionModel(timesteps, vn_number, pn_number)
             # self.portvec = PortifolioVector(input_shape)
             self.conv = L.Convolution2D(pn_number, 1, 1, 1, nobias=False, initialW=LeCunNormal())
             # self.cashbias = CashBias()
