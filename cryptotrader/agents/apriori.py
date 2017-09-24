@@ -6,7 +6,8 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-
+from copy import deepcopy
+from multiprocessing import Pool
 
 class APrioriAgent(Agent):
     """
@@ -261,9 +262,9 @@ class MomentumTrader(APrioriAgent):
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
 
-    def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None):
+            nb_max_episode_steps=None, n_workers=1):
         try:
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.df.shape[0] - env.obs_steps
@@ -286,27 +287,31 @@ class MomentumTrader(APrioriAgent):
 
                 # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
-                # run test on the main process
-                r = self.test(env,
-                                nb_episodes=1,
-                                action_repetition=action_repetition,
-                                callbacks=callbacks,
-                                visualize=visualize,
-                                nb_max_episode_steps=nb_max_episode_steps,
-                                nb_max_start_steps=nb_max_start_steps,
-                                start_step_policy=start_step_policy,
-                                verbose=False)
+                batch_reward = []
+                for batch in range(batch_size):
+                    # run test on the main process
+                    r = self.test(env,
+                                    nb_episodes=1,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    verbose=False)
+
+                    batch_reward.append(r)
 
                 i += 1
                 if verbose:
                     t0 += time()
                     print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                         nb_steps,
-                                                                        r,
+                                                                        sum(batch_reward),
                                                                         str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
                           end="\r")
 
-                return r
+                return sum(batch_reward)
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
