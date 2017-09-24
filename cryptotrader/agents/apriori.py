@@ -193,7 +193,7 @@ class EqualyDistributedTrader(APrioriAgent):
         action[-1] = 0
         return array_normalize(action)
 
-
+    
 class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
@@ -436,3 +436,87 @@ class MesaMomentumTrader(APrioriAgent):
 
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user.")
+
+
+class PAMR(APrioriAgent):
+    """
+    Passive aggressive mean reversion strategy for portfolio selection.
+
+    Reference:
+        B. Li, P. Zhao, S. C.H. Hoi, and V. Gopalkrishnan.
+        Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
+        https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
+    """
+
+    def __init__(self, epsilon=0.5, C=500, variant='PAMR'):
+        """
+        :param epsilon: float: Sensitivity parameter. Lower is more sensitive.
+        :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
+        :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
+        :
+        """
+        super().__init__()
+        self.epsilon = epsilon
+        self.C = C
+        self.variant = variant
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        nonlocal step
+        if step == 1:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            price_relative = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
+            last_b = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
+                df = obs[symbol].astype(np.float64).copy()
+                price_relative[key] = (df.close.iat[-2] - df.close.iat[-1]) / df.close.iat[-2]
+                last_b[key] = np.float64(df['position'].iat[-1])
+        return self.update(last_b, price_relative, self.epsilon, self.C)
+
+    def update(self, b, x, eps, C):
+        """ Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portifolio. """
+        x_mean = np.mean(x)
+        le = max(0., np.dot(b, x) - eps)
+
+        if self.variant == 'PAMR':
+            lam = le / np.linalg.norm(x - x_mean) ** 2
+        elif self.variant == 'PAMR1':
+            lam = min(C, le / np.linalg.norm(x - x_mean) ** 2)
+        elif self.variant == 'PAMR2':
+            lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / C)
+
+        # limit lambda to avoid numerical problems
+        lam = min(100000, lam)
+
+        # update portfolio
+        b = b - lam * (x - x_mean)
+
+        # project it onto simplex
+        return self.simplex_proj(b)
+
+    def simplex_proj(self, y):
+        """ Projection of y onto simplex. """
+        m = len(y)
+        bget = False
+
+        s = sorted(y, reverse=True)
+        tmpsum = 0.
+
+        for ii in range(m - 1):
+            tmpsum = tmpsum + s[ii]
+            tmax = (tmpsum - 1) / (ii + 1);
+            if tmax >= s[ii + 1]:
+                bget = True
+                break
+
+        if not bget:
+            tmax = (tmpsum + s[m - 1] - 1) / m
+
+        return np.maximum(y - tmax, 0.)
