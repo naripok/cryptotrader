@@ -7,7 +7,6 @@ import zmq
 import msgpack
 
 import numpy as np
-import pandas as pd
 from bson import Decimal128
 import math
 
@@ -22,7 +21,7 @@ class Logger(object):
         """
         Initialise the logger
         """
-        Logger.logger = logging.getLogger('Cryptocoin arbiter agent logging file')
+        Logger.logger = logging.getLogger(name)
         Logger.logger.setLevel(logging.ERROR)
         Logger.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s \n%(message)s\n')
@@ -119,36 +118,9 @@ class convert_to(object):
                 return Decimal(data).quantize(Decimal('1e-8'))
         except InvalidOperation:
             if abs(data) > Decimal('1e15'):
-                print("Numeric overflow in convert_to.decimal:", data)
-                raise InvalidOperation
+                raise InvalidOperation("Numeric overflow in convert_to.decimal")
             elif data == np.nan or math.nan:
-                print("NaN encountered in convert_to.decimal:", data)
-                raise InvalidOperation
-
-
-def sample_trades(df, freq):
-
-    df['trade_px'] = df['trade_px'].ffill()
-    df['trade_volume'] = df['trade_volume'].fillna(convert_to.decimal('1e-8'))
-
-    # TODO FIND OUT WHAT TO DO WITH NANS
-    index = df.resample(freq).first().index
-    out = pd.DataFrame(index=index)
-
-    out['open'] = df['trade_px'].resample(freq).first()
-    out['high'] = df['trade_px'].resample(freq).max()
-    out['low'] = df['trade_px'].resample(freq).min()
-    out['close'] = df['trade_px'].resample(freq).last()
-    out['volume'] = df['trade_volume'].resample(freq).sum()
-
-    return out
-
-
-def convert_and_clean(x):
-    x = x.apply(convert_to.decimal)
-    f = x.rolling(30, center=True, min_periods=1).mean().apply(convert_to.decimal)
-    x = x.apply(lambda x: x if x.is_finite() else np.nan)
-    return x.combine_first(f)
+                raise InvalidOperation("NaN encountered in convert_to.decimal")
 
 
 def write(_socket, msg, flags=0, block=True):
