@@ -5,7 +5,13 @@ author: Fernando H'.' Canteruccio, José Olímpio Mendes
 date: 17/07/2017
 """
 
-# import gc
+from .. import error
+from .. import seeding
+from ..core import Env
+from ..spaces import *
+from ..utils import Logger
+from .utils import *
+
 import os
 import smtplib
 from datetime import datetime, timedelta
@@ -19,20 +25,12 @@ from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 
-from .. import error
-from .. import seeding
-from ..core import Env
-from ..spaces import *
-from ..utils import Logger, convert_to
-from .utils import *
-
 
 # Decimal precision
 getcontext().prec = 32
 
 # Debug flag
 debug = True
-
 
 
 def make_env(test, n_assets, obs_steps=100, freq=30, tax=0.0025, init_fiat=100, init_crypto=0.0, seed=42, toy=True, files=None):
@@ -143,59 +141,59 @@ class TrainingEnvironment(Env):
                          "Training Environment Initialized!")
 
     # Setters
-    def add_table(self, number=None, name=None):
-        try:
-            try:
-                assert isinstance(self.db, pm.database.Database)
-            except AssertionError:
-                print("db must be a pymongo database instance")
-                raise ValueError
-
-            col_names = self.db.collection_names()
-            col_names_str = ""
-            for i, n in enumerate(col_names):
-                col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
-
-            welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
-                          "Select from db a table to trade on:\n" + col_names_str
-
-            if isinstance(number, int):
-                table_n = number
-            elif isinstance(name, str):
-                table_n = name
-            else:
-                print(welcome_str)
-
-                table_n = input("Enter a table number or name:")
-            if isinstance(table_n, int):
-                table = self.db[col_names[int(table_n)]]
-                self.logger.info(TrainingEnvironment.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
-
-            if isinstance(table_n, str):
-                table = self.db[table_n]
-                self.logger.info(TrainingEnvironment.add_table,
-                                 "Initializing Apocalipse instance with table %s" % (table_n))
-
-            if table_n == '':
-                print("You must enter a table number or name!")
-                raise ValueError
-
-            assert isinstance(table, pm.collection.Collection)
-            assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
-
-            symbol = self._get_table_symbol(table)
-            self.tables[symbol] = table
-
-        except AssertionError:
-            self.logger.error(TrainingEnvironment.add_table, "Table error. Please, enter a valid table number.")
-            raise ValueError
-        except Exception as e:
-            if debug:
-                self.logger.error(TrainingEnvironment.add_table, self.parse_error(e))
-            else:
-                self.logger.error(TrainingEnvironment.add_table, "Wrong table.")
-                raise ValueError
+    # def add_table(self, number=None, name=None):
+    #     try:
+    #         try:
+    #             assert isinstance(self.db, pm.database.Database)
+    #         except AssertionError:
+    #             print("db must be a pymongo database instance")
+    #             raise ValueError
+    #
+    #         col_names = self.db.collection_names()
+    #         col_names_str = ""
+    #         for i, n in enumerate(col_names):
+    #             col_names_str += "Table %d: %s, Count: %d\n" % (i, n, self.db[n].count())
+    #
+    #         welcome_str = "Welcome to the Apocalipse trading environment!\n"+\
+    #                       "Select from db a table to trade on:\n" + col_names_str
+    #
+    #         if isinstance(number, int):
+    #             table_n = number
+    #         elif isinstance(name, str):
+    #             table_n = name
+    #         else:
+    #             print(welcome_str)
+    #
+    #             table_n = input("Enter a table number or name:")
+    #         if isinstance(table_n, int):
+    #             table = self.db[col_names[int(table_n)]]
+    #             self.logger.info(TrainingEnvironment.add_table,
+    #                              "Initializing Apocalipse instance with table %s" % (col_names[int(table_n)]))
+    #
+    #         if isinstance(table_n, str):
+    #             table = self.db[table_n]
+    #             self.logger.info(TrainingEnvironment.add_table,
+    #                              "Initializing Apocalipse instance with table %s" % (table_n))
+    #
+    #         if table_n == '':
+    #             print("You must enter a table number or name!")
+    #             raise ValueError
+    #
+    #         assert isinstance(table, pm.collection.Collection)
+    #         assert table.find_one()['columns'] == ['trade_px', 'trade_volume', 'trades_date_time']
+    #
+    #         symbol = self._get_table_symbol(table)
+    #         self.tables[symbol] = table
+    #
+    #     except AssertionError:
+    #         self.logger.error(TrainingEnvironment.add_table, "Table error. Please, enter a valid table number.")
+    #         raise ValueError
+    #     except Exception as e:
+    #         if debug:
+    #             self.logger.error(TrainingEnvironment.add_table, self.parse_error(e))
+    #         else:
+    #             self.logger.error(TrainingEnvironment.add_table, "Wrong table.")
+    #             raise ValueError
 
     def clear_dfs(self):
         if hasattr(self, 'dfs'):
@@ -1153,7 +1151,7 @@ class TrainingEnvironment(Env):
             raise TypeError
 
 
-class TradingEnvironment(Env):
+class OLDTradingEnvironment(Env):
     """
     Online environment for automated trading strategies
     """

@@ -6,8 +6,6 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-from copy import deepcopy
-from multiprocessing import Pool
 
 class APrioriAgent(Agent):
     """
@@ -580,3 +578,7 @@ class PAMR(APrioriAgent):
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user.")
 
+
+class FibonacciTrader(APrioriAgent):
+    def init(self):
+        pass
