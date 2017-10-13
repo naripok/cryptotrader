@@ -7,7 +7,6 @@ import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
-from cryptotrader.envs.utils import *
 from cryptotrader.envs.driver import TrainingEnvironment
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
 from cryptotrader.utils import convert_to, array_normalize, array_softmax

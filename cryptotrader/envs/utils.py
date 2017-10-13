@@ -274,12 +274,6 @@ def get_dfs_from_db(conn, exchange, start=None, end=None, freq='1min'):
         index = df.resample(freq).first().index
         out = pd.DataFrame(index=index)
 
-        def convert_and_clean(x):
-            x = x.apply(convert_to.decimal)
-            f = x.rolling(30, center=True, min_periods=1).mean().apply(convert_to.decimal)
-            x = x.apply(lambda x: x if x.is_finite() else np.nan)
-            return x.combine_first(f)
-
         out['open'] = convert_and_clean(df['rate'].resample(freq).first())
         out['high'] = convert_and_clean(df['rate'].resample(freq).max())
         out['low'] = convert_and_clean(df['rate'].resample(freq).min())
