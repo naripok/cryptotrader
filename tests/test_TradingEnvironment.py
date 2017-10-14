@@ -9526,7 +9526,7 @@ class Test_env_setup(object):
 
     def test_add_pairs(self):
         self.env.add_pairs("USDT_BTC")
-        assert "USDT_BTC" in self.env.symbols
+        assert "USDT_BTC" in self.env.pairs
 
     @given(value=st.integers(max_value=1000))
     def test_obs_steps(self, value):
@@ -9548,7 +9548,7 @@ class Test_env_setup(object):
 
 def test_get_symbol_history(ready_env):
     env = ready_env
-    df = env.get_symbol_history("USDT_BTC")
+    df = env.get_pair_history("USDT_BTC")
     assert isinstance(df, pd.DataFrame)
     assert df.shape[0] == env.obs_steps
     assert df.index.freqstr == '%dT' % env.freq
@@ -9559,7 +9559,7 @@ def test_get_history(ready_env):
     assert isinstance(df, pd.DataFrame)
     assert df.shape[0] == env.obs_steps
     assert df.index.freqstr == '%dT' % env.freq
-    assert set(df.columns.levels[0]) == set(env.symbols)
+    assert set(df.columns.levels[0]) == set(env.pairs)
 
 def test_get_ohlc(ready_env):
     env = ready_env
@@ -9582,8 +9582,30 @@ def test_get_balance(ready_env):
 
     assert set(balance.keys()).issubset(portifolio)
 
+def test_fiat(fresh_env):
+    env = fresh_env
 
+    with pytest.raises(AssertionError):
+        env.fiat = "USDT"
 
+    env.add_pairs("USDT_BTC")
+    env.fiat = "USDT"
+    assert env.fiat == Decimal('0.00000000')
+
+def test_crypto(fresh_env):
+    env = fresh_env
+
+    with pytest.raises(AssertionError):
+        env.crypto = []
+        env.crypto = 0
+        env.crypto = '0'
+
+    balance = env.get_balance()
+    env.crypto = balance
+    for symbol, value in env.crypto.items():
+        assert value == balance[symbol]
+        assert symbol in env.symbols
+        assert env._fiat['symbol'] not in env.crypto.keys()
 
 if __name__ == '__main__':
     pytest.main()

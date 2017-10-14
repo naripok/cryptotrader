@@ -28,10 +28,10 @@ class TradingEnvironment(Env):
         self._freq = None
 
         # Portifolio info
-        self.crypto = {}
-        self.fiat = None
+        self._crypto = {}
+        self._fiat = {}
         self.tax = {}
-        self.symbols = []
+        self.pairs = []
 
         self.obs_df = None
         self.action_df = None
@@ -66,7 +66,7 @@ class TradingEnvironment(Env):
         for arg in args:
             if isinstance(arg, str):
                 if set(arg.split('_')).issubset(universe.keys()):
-                    self.symbols.append(arg)
+                    self.pairs.append(arg)
                 else:
                     self.logger.error(TradingEnvironment.add_pairs, "Symbol not found on exchange currencies.")
 
@@ -77,16 +77,52 @@ class TradingEnvironment(Env):
                 for item in arg:
                     if set(item.split('_')).issubset(universe.keys()):
                         if isinstance(item, str):
-                            self.symbols.append(item)
+                            self.pairs.append(item)
                         else:
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
+    @property
+    def symbols(self):
+        symbols = []
+        for pair in self.pairs:
+            symbol = pair.split('_')
+            for s in symbol:
+                symbols.append(s)
+
+        return set(symbols)
+
+    @property
+    def fiat(self):
+        try:
+            return self._fiat['amount']
+        except KeyError:
+            self.logger.error(TradingEnvironment.fiat, "You must specify a fiat symbol first.")
+
+    @fiat.setter
+    def fiat(self, symbol):
+        assert symbol in self.symbols, "Fiat symbol not in symbols."
+
+        self._fiat['symbol'] = symbol
+        self._fiat['amount'] = convert_to.decimal(self.get_balance()[symbol])
+
+    @property
+    def crypto(self):
+        return self._crypto
+
+    @crypto.setter
+    def crypto(self, values):
+        assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
+        for symbol, value in values.items():
+            if symbol not in self._fiat['symbol']:
+                self._crypto[symbol] = value
+
+
     ## Data feed methods
-    # TODO WRITE TEST
-    def get_symbol_trades(self, symbol):
+    def get_pair_trades(self, pair):
+        # TODO WRITE TEST
         try:
             # Pool data from exchage
-            data = self.tapi.marketTradeHist(symbol)
+            data = self.tapi.marketTradeHist(pair)
             df = pd.DataFrame.from_records(data)
 
             # Get more data from exchange until have enough to make obs_steps rows
@@ -94,7 +130,7 @@ class TradingEnvironment(Env):
                     timedelta(minutes=self.freq * self.obs_steps) < \
                     datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
 
-                market_data = self.tapi.marketTradeHist(symbol, end=datetime.timestamp(
+                market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
                     datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - timedelta(hours=3)))
 
                 df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
@@ -110,12 +146,12 @@ class TradingEnvironment(Env):
             return df
 
         except Exception as e:
-            self.logger.error(TradingEnvironment.get_symbol_trades, self.parse_error(e))
+            self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
             return False
 
-    # TODO WRITE TEST
-    def get_ohlc_from_trades(self, symbol):
-        df = self.get_symbol_trades(symbol)
+    def get_ohlc_from_trades(self, pair):
+        # TODO WRITE TEST
+        df = self.get_pair_trades(pair)
 
         freq = "%dmin" % self.freq
 
@@ -136,11 +172,11 @@ class TradingEnvironment(Env):
 
         return out
 
-    # TODO WRITE TEST
     def get_ohlc(self, symbol):
+        # TODO WRITE TEST
         ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
                                               start=datetime.timestamp(datetime.utcnow() -
-                                              timedelta(hours=3, minutes=self.freq * self.obs_steps))
+                                              timedelta(hours=3, minutes=self.freq * self.obs_steps + 1))
                                              ) #datetime.timestamp(datetime.utcnow()))
 
         ohlc_df = pd.DataFrame.from_records(ohlc_data)
@@ -150,15 +186,15 @@ class TradingEnvironment(Env):
 
         return ohlc_df[['open','high','low','close','volume']].asfreq("%dT" % self.freq).apply(convert_and_clean)
 
-    def get_symbol_history(self, symbol):
+    def get_pair_history(self, pair):
         """
         Pools symbol's trade data from exchange
         """
         try:
             if self.freq < 5:
-                df = self.get_ohlc_from_trades(symbol)
+                df = self.get_ohlc_from_trades(pair)
             else:
-                df = self.get_ohlc(symbol)
+                df = self.get_ohlc(pair)
 
             # If df is large enough, return
             if df.shape[0] >= self.obs_steps:
@@ -166,19 +202,19 @@ class TradingEnvironment(Env):
 
             # Else, get more data and append
             else:
-                raise ValueError("Dataframe is to small.")
+                raise ValueError("Dataframe is to small. Shape: %s" % str(df.shape))
 
         except Exception as e:
-            self.logger.error(TradingEnvironment.get_symbol_history, self.parse_error(e))
+            self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
             return False
 
     def get_history(self):
         try:
             obs_list = []
             keys = []
-            for symbol in self.symbols:
+            for symbol in self.pairs:
                 keys.append(symbol)
-                obs_list.append(self.get_symbol_history(symbol))
+                obs_list.append(self.get_pair_history(symbol))
 
             return pd.concat(obs_list, keys=keys, axis=1)
 
@@ -190,18 +226,9 @@ class TradingEnvironment(Env):
         try:
             balance = self.tapi.returnBalances()
 
-            portifolio = []
-            for pair in self.symbols:
-                symbol = pair.split('_')
-                for s in symbol:
-                    portifolio.append(s)
-
-            portifolio = set(portifolio)
-
             filtered_balance = {}
-            for symbol in portifolio:
-                if symbol is not 'fiat':
-                    filtered_balance[symbol] = balance[symbol]
+            for symbol in self.symbols:
+                filtered_balance[symbol] = balance[symbol]
 
             return filtered_balance
 
@@ -209,10 +236,20 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
 
-    ## Trading methods
+    # ## Trading methods
+    # def _calc_total_portval(self):
+    #     portval = convert_to.decimal('0.0')
+    #
+    #     for symbol in self.pairs:
+    #         if symbol is
+    #         portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
+    #     portval += self._get_fiat()
+    #
+    #     return portval
 
-    # TODO WRITE TEST
+
     def _assert_action(self, action):
+        # TODO WRITE TEST
         try:
             for posit in action:
                 if not isinstance(posit, Decimal):
