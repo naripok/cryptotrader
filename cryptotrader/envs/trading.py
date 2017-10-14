@@ -52,7 +52,7 @@ class TradingEnvironment(Env):
     def freq(self, value):
         assert isinstance(value, int) and value >= 1,\
             "Frequency must be a integer >= 1."
-        self._freq = value
+        self._freq = "%dmin" % value
 
     def add_pairs(self, *args):
 
@@ -79,21 +79,49 @@ class TradingEnvironment(Env):
     # TODO
     def get_symbol_history(self, symbol):
         try:
+            # Pool data from exchage
             data = self.tapi.marketTradeHist(symbol)
             df = pd.DataFrame.from_records(data)
 
-            while datetime.strptime(df.date[0],"%Y-%m-%d %H:%M:%S") + \
-                    timedelta(minutes=self.freq * self.obs_steps) >= datetime.strptime(df.date[-1],"%Y-%m-%d %H:%M:%S"):
+            # Get more data from exchange until have enough to make obs_steps rows
+            while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
+                    timedelta(minutes=30 * 300) < datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+                market_data = self.tapi.marketTradeHist('USDT_BTC', end=datetime.timestamp(
+                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - \
+                    timedelta(hours=3)))
 
+                df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
+                appended = False
+                i = 0
+                while not appended:
+                    try:
+                        df = df.append(df2.iloc[i:], verify_integrity=True)
+                        appended = True
+                    except ValueError:
+                        i += 1
+
+            df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
+            df['amount'] = df['amount'].apply(convert_to.decimal)
+            df.index = df.date.apply(pd.to_datetime)
+
+            # TODO REMOVE NANS
+            index = df.resample(self.freq).first().index
+            out = pd.DataFrame(index=index)
+
+            out['open'] = convert_and_clean(df['rate'].resample(self.freq).first())
+            out['high'] = convert_and_clean(df['rate'].resample(self.freq).max())
+            out['low'] = convert_and_clean(df['rate'].resample(self.freq).min())
+            out['close'] = convert_and_clean(df['rate'].resample(self.freq).last())
+            out['volume'] = convert_and_clean(df['amount'].resample(self.freq).sum())
 
             # If df is large enough, return
-            if df.shape[0] >= self.obs_steps:
-                return df[::-1].iloc[-self.obs_steps:]
+            if out.shape[0] >= self.obs_steps:
+                return out.iloc[-self.obs_steps:]
 
             # Else, get more data and append
             else:
+                raise ValueError("Dataframe is to small.")
 
-                return df
         except Exception as e:
             self.logger.error(TradingEnvironment.get_symbol_history, self.parse_error(e))
             return False
