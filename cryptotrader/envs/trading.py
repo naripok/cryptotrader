@@ -27,7 +27,7 @@ class TradingEnvironment(Env):
         self.crypto = {}
         self.fiat = None
         self.tax = {}
-        self.symbols = ['fiat']
+        self.symbols = []
 
         self.df = None
 
@@ -52,7 +52,7 @@ class TradingEnvironment(Env):
     def freq(self, value):
         assert isinstance(value, int) and value >= 1,\
             "Frequency must be a integer >= 1."
-        self._freq = "%dmin" % value
+        self._freq = value
 
     def add_pairs(self, *args):
 
@@ -78,6 +78,9 @@ class TradingEnvironment(Env):
 
     # TODO
     def get_symbol_history(self, symbol):
+        """
+        Pools symbol's trade data from exchange
+        """
         try:
             # Pool data from exchage
             data = self.tapi.marketTradeHist(symbol)
@@ -85,8 +88,8 @@ class TradingEnvironment(Env):
 
             # Get more data from exchange until have enough to make obs_steps rows
             while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
-                    timedelta(minutes=30 * 300) < datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
-                market_data = self.tapi.marketTradeHist('USDT_BTC', end=datetime.timestamp(
+                    timedelta(minutes=self.freq * self.obs_steps) < datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+                market_data = self.tapi.marketTradeHist(symbol, end=datetime.timestamp(
                     datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - \
                     timedelta(hours=3)))
 
@@ -100,19 +103,22 @@ class TradingEnvironment(Env):
                     except ValueError:
                         i += 1
 
+            freq = "%dmin" % self.freq
+
+            # Sample the trades into OHLC data
             df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
             df['amount'] = df['amount'].apply(convert_to.decimal)
             df.index = df.date.apply(pd.to_datetime)
 
             # TODO REMOVE NANS
-            index = df.resample(self.freq).first().index
+            index = df.resample(freq).first().index
             out = pd.DataFrame(index=index)
 
-            out['open'] = convert_and_clean(df['rate'].resample(self.freq).first())
-            out['high'] = convert_and_clean(df['rate'].resample(self.freq).max())
-            out['low'] = convert_and_clean(df['rate'].resample(self.freq).min())
-            out['close'] = convert_and_clean(df['rate'].resample(self.freq).last())
-            out['volume'] = convert_and_clean(df['amount'].resample(self.freq).sum())
+            out['open'] = convert_and_clean(df['rate'].resample(freq).first())
+            out['high'] = convert_and_clean(df['rate'].resample(freq).max())
+            out['low'] = convert_and_clean(df['rate'].resample(freq).min())
+            out['close'] = convert_and_clean(df['rate'].resample(freq).last())
+            out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
 
             # If df is large enough, return
             if out.shape[0] >= self.obs_steps:
@@ -127,7 +133,13 @@ class TradingEnvironment(Env):
             return False
 
     def get_history(self):
-        pass
+        obs_list = []
+        keys = []
+        for symbol in self.symbols:
+            keys.append(symbol)
+            obs_list.append(self.get_symbol_history(symbol))
+
+        return pd.concat(obs_list, keys=keys, axis=1)
 
     def _reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}

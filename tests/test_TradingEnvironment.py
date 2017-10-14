@@ -8967,11 +8967,19 @@ def fresh_env():
     yield TradingEnvironment(tapi=tapi, name='env_test')
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
+@pytest.fixture
+def ready_env():
+    env = TradingEnvironment(tapi=tapi, name='env_test')
+    env.obs_steps= 5
+    env.freq = 5
+    env.add_pairs("USDT_BTC", "USDT_ETH")
+    yield env
+    shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
+
 
 # Tests
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
-
 
 
 class Test_env_setup(object):
@@ -9009,13 +9017,21 @@ class Test_env_setup(object):
             with pytest.raises(AssertionError):
                 self.env.freq = value
 
-    # TODO
-    def test_get_symbol_history(self):
-        usdt_btc_df = self.env.get_symbol_history("USDT_BTC")
 
+def test_get_symbol_history(ready_env):
+    env = ready_env
+    df = env.get_symbol_history("USDT_BTC")
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape[0] == env.obs_steps
+    assert df.index.freqstr == '%dT' % env.freq
 
-    def test_get_history(self):
-        pass
+def test_get_history(ready_env):
+    env = ready_env
+    df = env.get_history()
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape[0] == env.obs_steps
+    assert df.index.freqstr == '%dT' % env.freq
+    assert set(df.columns.levels[0]) == set(env.symbols)
 
 if __name__ == '__main__':
     pytest.main()
