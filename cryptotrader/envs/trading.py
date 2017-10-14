@@ -7,6 +7,10 @@ from .driver import *
 
 
 class TradingEnvironment(Env):
+    """
+    Trading environment base class
+    """
+    ## Setup methods
     def __init__(self, tapi, name):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
@@ -77,6 +81,7 @@ class TradingEnvironment(Env):
                         else:
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
+    ## Data feed methods
     # TODO WRITE TEST
     def get_symbol_trades(self, symbol):
         try:
@@ -143,7 +148,7 @@ class TradingEnvironment(Env):
             lambda x: pd.to_datetime(datetime.strftime(datetime.fromtimestamp(x), "%Y-%m-%d %H:%M:%S")))
         ohlc_df.set_index('date', inplace=True)
 
-        return ohlc_df[['open','high','low','close','volume']].asfreq("%dT" % self.freq)
+        return ohlc_df[['open','high','low','close','volume']].asfreq("%dT" % self.freq).apply(convert_and_clean)
 
     def get_symbol_history(self, symbol):
         """
@@ -180,6 +185,74 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
+
+    def get_balance(self):
+        try:
+            balance = self.tapi.returnBalances()
+
+            portifolio = []
+            for pair in self.symbols:
+                symbol = pair.split('_')
+                for s in symbol:
+                    portifolio.append(s)
+
+            portifolio = set(portifolio)
+
+            filtered_balance = {}
+            for symbol in portifolio:
+                if symbol is not 'fiat':
+                    filtered_balance[symbol] = balance[symbol]
+
+            return filtered_balance
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
+            return False
+
+    ## Trading methods
+
+    # TODO WRITE TEST
+    def _assert_action(self, action):
+        try:
+            for posit in action:
+                if not isinstance(posit, Decimal):
+                    action = convert_to.decimal(np.float64(action))
+
+            try:
+                assert self.action_space.contains(action)
+
+            except AssertionError:
+                # normalize
+                if action.sum() != convert_to.decimal('1.0'):
+                    action /= action.sum()
+                    try:
+                        assert action.sum() == convert_to.decimal('1.0')
+                    except AssertionError:
+                        action[-1] += convert_to.decimal('1.0') - action.sum()
+                        action /= action.sum()
+                        assert action.sum() == convert_to.decimal('1.0')
+
+                # if debug:
+                #     self.logger.error(Apocalipse._assert_action, "Action does not belong to action space")
+
+            assert action.sum() - convert_to.decimal('1.0') < convert_to.decimal('1e-6')
+
+        except AssertionError:
+            if debug:
+                self.status['ActionError'] += 1
+                # self.logger.error(Apocalipse._assert_action, "Action out of range")
+
+            action /= action.sum()
+            try:
+                assert action.sum() == convert_to.decimal('1.0')
+            except AssertionError:
+                action[-1] += convert_to.decimal('1.0') - action.sum()
+                try:
+                    assert action.sum() == convert_to.decimal('1.0')
+                except AssertionError:
+                    action /= action.sum()
+
+        return action
 
     def _reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
