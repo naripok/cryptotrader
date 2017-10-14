@@ -29,7 +29,8 @@ class TradingEnvironment(Env):
         self.tax = {}
         self.symbols = []
 
-        self.df = None
+        self.obs_df = None
+        self.action_df = None
 
         self.logger.info("Trading Environment initialization",
                          "Trading Environment Initialized!")
@@ -76,11 +77,8 @@ class TradingEnvironment(Env):
                         else:
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
-    # TODO
-    def get_symbol_history(self, symbol):
-        """
-        Pools symbol's trade data from exchange
-        """
+    # TODO WRITE TEST
+    def get_symbol_trades(self, symbol):
         try:
             # Pool data from exchage
             data = self.tapi.marketTradeHist(symbol)
@@ -88,10 +86,11 @@ class TradingEnvironment(Env):
 
             # Get more data from exchange until have enough to make obs_steps rows
             while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
-                    timedelta(minutes=self.freq * self.obs_steps) < datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+                    timedelta(minutes=self.freq * self.obs_steps) < \
+                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+
                 market_data = self.tapi.marketTradeHist(symbol, end=datetime.timestamp(
-                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - \
-                    timedelta(hours=3)))
+                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - timedelta(hours=3)))
 
                 df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
                 appended = False
@@ -103,26 +102,62 @@ class TradingEnvironment(Env):
                     except ValueError:
                         i += 1
 
-            freq = "%dmin" % self.freq
+            return df
 
-            # Sample the trades into OHLC data
-            df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
-            df['amount'] = df['amount'].apply(convert_to.decimal)
-            df.index = df.date.apply(pd.to_datetime)
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_symbol_trades, self.parse_error(e))
+            return False
 
-            # TODO REMOVE NANS
-            index = df.resample(freq).first().index
-            out = pd.DataFrame(index=index)
+    # TODO WRITE TEST
+    def get_ohlc_from_trades(self, symbol):
+        df = self.get_symbol_trades(symbol)
 
-            out['open'] = convert_and_clean(df['rate'].resample(freq).first())
-            out['high'] = convert_and_clean(df['rate'].resample(freq).max())
-            out['low'] = convert_and_clean(df['rate'].resample(freq).min())
-            out['close'] = convert_and_clean(df['rate'].resample(freq).last())
-            out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
+        freq = "%dmin" % self.freq
+
+        # Sample the trades into OHLC data
+        df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
+        df['amount'] = df['amount'].apply(convert_to.decimal)
+        df.index = df.date.apply(pd.to_datetime)
+
+        # TODO REMOVE NANS
+        index = df.resample(freq).first().index
+        out = pd.DataFrame(index=index)
+
+        out['open'] = convert_and_clean(df['rate'].resample(freq).first())
+        out['high'] = convert_and_clean(df['rate'].resample(freq).max())
+        out['low'] = convert_and_clean(df['rate'].resample(freq).min())
+        out['close'] = convert_and_clean(df['rate'].resample(freq).last())
+        out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
+
+        return out
+
+    # TODO WRITE TEST
+    def get_ohlc(self, symbol):
+        ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+                                              start=datetime.timestamp(datetime.utcnow() -
+                                              timedelta(hours=3, minutes=self.freq * self.obs_steps))
+                                             ) #datetime.timestamp(datetime.utcnow()))
+
+        ohlc_df = pd.DataFrame.from_records(ohlc_data)
+        ohlc_df['date'] = ohlc_df.date.apply(
+            lambda x: pd.to_datetime(datetime.strftime(datetime.fromtimestamp(x), "%Y-%m-%d %H:%M:%S")))
+        ohlc_df.set_index('date', inplace=True)
+
+        return ohlc_df[['open','high','low','close','volume']].asfreq("%dT" % self.freq)
+
+    def get_symbol_history(self, symbol):
+        """
+        Pools symbol's trade data from exchange
+        """
+        try:
+            if self.freq < 5:
+                df = self.get_ohlc_from_trades(symbol)
+            else:
+                df = self.get_ohlc(symbol)
 
             # If df is large enough, return
-            if out.shape[0] >= self.obs_steps:
-                return out.iloc[-self.obs_steps:]
+            if df.shape[0] >= self.obs_steps:
+                return df.iloc[-self.obs_steps:]
 
             # Else, get more data and append
             else:
@@ -133,13 +168,18 @@ class TradingEnvironment(Env):
             return False
 
     def get_history(self):
-        obs_list = []
-        keys = []
-        for symbol in self.symbols:
-            keys.append(symbol)
-            obs_list.append(self.get_symbol_history(symbol))
+        try:
+            obs_list = []
+            keys = []
+            for symbol in self.symbols:
+                keys.append(symbol)
+                obs_list.append(self.get_symbol_history(symbol))
 
-        return pd.concat(obs_list, keys=keys, axis=1)
+            return pd.concat(obs_list, keys=keys, axis=1)
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
+            return False
 
     def _reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
