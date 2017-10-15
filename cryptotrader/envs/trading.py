@@ -254,7 +254,8 @@ class TradingEnvironment(Env):
 
         return portval
 
-
+    def store_action(self, timestamp, symbol, value):
+        self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
 
     def _assert_action(self, action):
         # TODO WRITE TEST
