@@ -99,11 +99,14 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.fiat, "You must specify a fiat symbol first.")
 
     @fiat.setter
-    def fiat(self, symbol):
-        assert symbol in self.symbols, "Fiat symbol not in symbols."
+    def fiat(self, value):
+        if isinstance(value, str):
+            assert value in self.symbols, "Fiat symbol not in symbols."
 
-        self._fiat['symbol'] = symbol
-        self._fiat['amount'] = convert_to.decimal(self.get_balance()[symbol])
+            self._fiat['symbol'] = value
+            self._fiat['amount'] = convert_to.decimal(self.get_balance()[value])
+        elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
+            self._fiat['amount'] = convert_to.decimal(value)
 
     @property
     def crypto(self):
@@ -114,8 +117,7 @@ class TradingEnvironment(Env):
         assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
         for symbol, value in values.items():
             if symbol not in self._fiat['symbol']:
-                self._crypto[symbol] = value
-
+                self._crypto[symbol] = convert_to.decimal(value)
 
     ## Data feed methods
     def get_pair_trades(self, pair):
@@ -236,16 +238,22 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
 
+    def update_observation(self):
+        self.obs_df = self.get_history()
+
     # ## Trading methods
-    # def _calc_total_portval(self):
-    #     portval = convert_to.decimal('0.0')
-    #
-    #     for symbol in self.pairs:
-    #         if symbol is
-    #         portval += self._get_crypto(symbol) * self._get_step_obs(symbol, step_price=True)
-    #     portval += self._get_fiat()
-    #
-    #     return portval
+    def get_last_price(self, symbol):
+        return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat['symbol'], symbol), 'close'))
+
+    def _calc_total_portval(self):
+        portval = convert_to.decimal('0.0')
+
+        for symbol in self._crypto.keys():
+            portval += self.crypto[symbol] * self.get_last_price(symbol)
+        portval += self.fiat
+
+        return portval
+
 
 
     def _assert_action(self, action):
@@ -291,6 +299,7 @@ class TradingEnvironment(Env):
 
         return action
 
+    # Helper methods
     def _reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 

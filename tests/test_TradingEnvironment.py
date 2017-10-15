@@ -9503,6 +9503,7 @@ def ready_env():
     env.obs_steps = 30
     env.freq = 5
     env.add_pairs("USDT_BTC", "USDT_ETH")
+    env.fiat = "USDT"
     yield env
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
@@ -9546,6 +9547,13 @@ class Test_env_setup(object):
             with pytest.raises(AssertionError):
                 self.env.freq = value
 
+def test_get_ohlc(ready_env):
+    env = ready_env
+    df = env.get_ohlc("USDT_BTC")
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape[0] == env.obs_steps
+    assert df.index.freqstr == '%dT' % env.freq
+
 def test_get_symbol_history(ready_env):
     env = ready_env
     df = env.get_pair_history("USDT_BTC")
@@ -9560,13 +9568,6 @@ def test_get_history(ready_env):
     assert df.shape[0] == env.obs_steps
     assert df.index.freqstr == '%dT' % env.freq
     assert set(df.columns.levels[0]) == set(env.pairs)
-
-def test_get_ohlc(ready_env):
-    env = ready_env
-    df = env.get_ohlc("USDT_BTC")
-    assert isinstance(df, pd.DataFrame)
-    assert df.shape[0] == env.obs_steps
-    assert df.index.freqstr == '%dT' % env.freq
 
 def test_get_balance(ready_env):
     env = ready_env
@@ -9592,6 +9593,17 @@ def test_fiat(fresh_env):
     env.fiat = "USDT"
     assert env.fiat == Decimal('0.00000000')
 
+    env.fiat = 0
+    assert env.fiat == Decimal('0.00000000')
+
+    for i in range(10):
+        env.fiat = i
+        assert env.fiat == Decimal(i)
+
+        value = np.random.rand() * i
+        env.fiat = value
+        assert env.fiat == convert_to.decimal(value)
+
 def test_crypto(fresh_env):
     env = fresh_env
 
@@ -9603,9 +9615,18 @@ def test_crypto(fresh_env):
     balance = env.get_balance()
     env.crypto = balance
     for symbol, value in env.crypto.items():
-        assert value == balance[symbol]
+        assert value == convert_to.decimal(balance[symbol])
         assert symbol in env.symbols
         assert env._fiat['symbol'] not in env.crypto.keys()
+
+def test_get_last_price(ready_env):
+    env = ready_env
+    env.obs_df = env.get_history()
+    price = env.get_last_price("BTC")
+    assert isinstance(price, Decimal)
+    assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
+
+
 
 if __name__ == '__main__':
     pytest.main()
