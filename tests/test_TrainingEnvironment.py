@@ -200,8 +200,6 @@ class Test_env_setup(object):
                            amount.values.all() == convert_to.decimal(init_crypto)
                 for step in range(start, end):
                     self.env.step_idx = step
-                    print(step, self.env.df[symbol].at[self.env.df.index[step], 'position'],
-                           self.env._calc_step_posit(symbol))
                     assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
                            self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
