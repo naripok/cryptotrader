@@ -238,8 +238,19 @@ class TradingEnvironment(Env):
             return filtered_balance
 
         except Exception as e:
-            self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
-            return False
+            self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
+            raise e
+
+    def get_fee(self, fee_type='takerFee'):
+        try:
+            fees = self.tapi.returnFeeInfo()
+
+            assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
+            return convert_to.decimal(fees[fee_type])
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
+            raise e
 
     def update_observation(self):
         self.obs_df = self.get_history()

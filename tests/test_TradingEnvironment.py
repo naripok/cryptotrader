@@ -9489,7 +9489,12 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
  'YIN': '0.00000000',
  'ZEC': '0.00000000',
  'ZRX': '0.00000000',
- 'eTOK': '0.00000000'}})
+ 'eTOK': '0.00000000'},
+                       'returnFeeInfo.return_value': {'makerFee': '0.00150000',
+                                                     'nextTier': '600.00000000',
+                                                     'takerFee': '0.00250000',
+                                                     'thirtyDayVolume': '0.00000000'}
+                       })
 
 
 # Fixtures
@@ -9627,7 +9632,18 @@ def test_get_last_price(ready_env):
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
 
+def test_get_fee(ready_env):
+    env = ready_env
+    fee = env.get_fee()
+    assert isinstance(fee, Decimal)
+    assert fee == Decimal('0.00250000')
 
+    fee = env.get_fee('makerFee')
+    assert isinstance(fee, Decimal)
+    assert fee == Decimal('0.00150000')
+
+    with pytest.raises(AssertionError):
+        fee = env.get_fee('wrong_str')
 
 if __name__ == '__main__':
     pytest.main()
