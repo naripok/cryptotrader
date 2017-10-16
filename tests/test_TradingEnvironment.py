@@ -9491,7 +9491,8 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
  'ZRX': '0.00000000',
  'eTOK': '0.00000000'}})
 
-# FIxtures
+
+# Fixtures
 @pytest.fixture
 def fresh_env():
     yield TradingEnvironment(tapi=tapi, name='env_test')

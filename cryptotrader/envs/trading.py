@@ -34,7 +34,7 @@ class TradingEnvironment(Env):
         self.pairs = []
 
         self.obs_df = None
-        self.action_df = None
+        self.log_df = pd.DataFrame(index=[datetime.utcnow()])
 
         self.logger.info("Trading Environment initialization",
                          "Trading Environment Initialized!")
@@ -65,7 +65,7 @@ class TradingEnvironment(Env):
 
         for arg in args:
             if isinstance(arg, str):
-                if set(arg.split('_')).issubset(universe.keys()):
+                if set(arg.split('_')).issubset(universe):
                     self.pairs.append(arg)
                 else:
                     self.logger.error(TradingEnvironment.add_pairs, "Symbol not found on exchange currencies.")
@@ -75,11 +75,13 @@ class TradingEnvironment(Env):
 
             if isinstance(arg, list):
                 for item in arg:
-                    if set(item.split('_')).issubset(universe.keys()):
+                    if set(item.split('_')).issubset(universe):
                         if isinstance(item, str):
                             self.pairs.append(item)
                         else:
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
+
+        self.log_df = self.log_df.append(pd.DataFrame(columns=self.symbols, index=[datetime.utcnow()]))
 
     @property
     def symbols(self):
@@ -248,14 +250,14 @@ class TradingEnvironment(Env):
     def _calc_total_portval(self):
         portval = convert_to.decimal('0.0')
 
-        for symbol in self._crypto.keys():
+        for symbol in self._crypto:
             portval += self.crypto[symbol] * self.get_last_price(symbol)
         portval += self.fiat
 
         return portval
 
-    def store_action(self, timestamp, symbol, value):
-        self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
+    def store_value(self, timestamp, symbol, value):
+        self.log_df.loc[timestamp, symbol] = convert_to.decimal(value)
 
     def _assert_action(self, action):
         # TODO WRITE TEST

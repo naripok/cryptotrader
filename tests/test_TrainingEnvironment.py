@@ -190,15 +190,20 @@ class Test_env_setup(object):
 
         assert self.env.df.iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].fiat.amount.values.all() == \
                convert_to.decimal(init_fiat)
+
+        start = self.env.step_idx - self.env.obs_steps
+        end = self.env.step_idx
         for symbol in self.env.df.columns.levels[0]:
             if symbol is not 'fiat':
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
                            amount.values.all() == convert_to.decimal(init_crypto)
-                # TODO FIX THIS
-                # for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
-                #     assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
-                #            self.env._calc_step_posit(symbol) <= Decimal('3e-2')
+                for step in range(start, end):
+                    self.env.step_idx = step
+                    print(step, self.env.df[symbol].at[self.env.df.index[step], 'position'],
+                           self.env._calc_step_posit(symbol))
+                    assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
+                           self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
 
 @pytest.mark.incremental
