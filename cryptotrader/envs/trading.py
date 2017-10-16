@@ -188,7 +188,8 @@ class TradingEnvironment(Env):
             lambda x: pd.to_datetime(datetime.strftime(datetime.fromtimestamp(x), "%Y-%m-%d %H:%M:%S")))
         ohlc_df.set_index('date', inplace=True)
 
-        return ohlc_df[['open','high','low','close','volume']].asfreq("%dT" % self.freq).apply(convert_and_clean)
+        return ohlc_df[['open','high','low','close',
+                        'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(columns={'quoteVolume':'volume'})
 
     def get_pair_history(self, pair):
         """
