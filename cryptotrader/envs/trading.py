@@ -256,17 +256,26 @@ class TradingEnvironment(Env):
         self.obs_df = self.get_history()
 
     # ## Trading methods
-    def get_last_price(self, symbol):
-        return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat['symbol'], symbol), 'close'))
+    def get_close_price(self, symbol, timestamp=None):
+        if isinstance(timestamp, pd.Timestamp):
+            return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat['symbol'], symbol), 'close'))
+        elif isinstance(timestamp, str) and timestamp == 'last' or timestamp is None:
+            return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat['symbol'], symbol), 'close'))
 
-    def _calc_total_portval(self):
+    def _calc_total_portval(self, timestamp=None):
         portval = convert_to.decimal('0.0')
 
         for symbol in self._crypto:
-            portval += self.crypto[symbol] * self.get_last_price(symbol)
+            portval += self.crypto[symbol] * self.get_close_price(symbol, timestamp)
         portval += self.fiat
 
         return portval
+
+    def _calc_posit(self, symbol):
+        if symbol not in self._fiat['symbol']:
+            return self.crypto[symbol] * self.get_close_price(symbol) / self._calc_total_portval()
+        else:
+            return self.fiat / self._calc_total_portval()
 
     def store_value(self, timestamp, symbol, value):
         self.log_df.loc[timestamp, symbol] = convert_to.decimal(value)

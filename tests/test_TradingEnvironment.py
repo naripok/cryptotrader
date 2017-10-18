@@ -9510,6 +9510,7 @@ def ready_env():
     env.freq = 5
     env.add_pairs("USDT_BTC", "USDT_ETH")
     env.fiat = "USDT"
+    env.crypto = {"BTC": Decimal('1.00000000'), 'ETH': Decimal('0.50000000')}
     yield env
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
@@ -9625,12 +9626,18 @@ def test_crypto(fresh_env):
         assert symbol in env.symbols
         assert env._fiat['symbol'] not in env.crypto.keys()
 
-def test_get_last_price(ready_env):
+def test_get_close_price(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
-    price = env.get_last_price("BTC")
+    price = env.get_close_price("BTC")
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
+    price = env.get_close_price("BTC", 'last')
+    assert isinstance(price, Decimal)
+    assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
+    price = env.get_close_price("BTC", env.obs_df.index[0])
+    assert isinstance(price, Decimal)
+    assert price == env.obs_df["USDT_BTC"].close.iloc[0]
 
 def test_get_fee(ready_env):
     env = ready_env
@@ -9644,6 +9651,26 @@ def test_get_fee(ready_env):
 
     with pytest.raises(AssertionError):
         fee = env.get_fee('wrong_str')
+
+def test__calc_total_portval(ready_env):
+    env = ready_env
+    env.obs_df = env.get_history()
+    portval = env._calc_total_portval()
+    assert isinstance(portval, Decimal)
+    assert portval >= Decimal('0.00000000')
+
+def test__calc_posit(ready_env):
+    env = ready_env
+    env.obs_df = env.get_history()
+    total_posit = Decimal('0E-8')
+    for symbol in env.symbols:
+        posit = env._calc_posit(symbol)
+        assert isinstance(posit, Decimal)
+        assert Decimal('0.00000000') <= posit <= Decimal('1.00000000')
+        total_posit += posit
+    assert total_posit - Decimal('1.00000000') <= Decimal('1E-3')
+
+
 
 if __name__ == '__main__':
     pytest.main()
