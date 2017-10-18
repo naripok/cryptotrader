@@ -9668,7 +9668,7 @@ def test__calc_posit(ready_env):
         assert isinstance(posit, Decimal)
         assert Decimal('0.00000000') <= posit <= Decimal('1.00000000')
         total_posit += posit
-    assert total_posit - Decimal('1.00000000') <= Decimal('1E-3')
+    assert total_posit - Decimal('1.00000000') <= Decimal('1E-8')
 
 
 
