@@ -9580,15 +9580,15 @@ def test_get_balance(ready_env):
     env = ready_env
     balance = env.get_balance()
 
-    portifolio = []
+    portfolio = []
     for pair in env.symbols:
         symbol = pair.split('_')
         for s in symbol:
-            portifolio.append(s)
+            portfolio.append(s)
 
-    portifolio = set(portifolio)
+    portfolio = set(portfolio)
 
-    assert set(balance.keys()).issubset(portifolio)
+    assert set(balance.keys()).issubset(portfolio)
 
 def test_fiat(fresh_env):
     env = fresh_env
@@ -9616,7 +9616,7 @@ def test_fiat(fresh_env):
 
     timestamp = datetime.utcnow()
     env.fiat = {"USDT": 10, 'timestamp': timestamp}
-    assert env.portifolio_df.get_value(timestamp, "USDT") == 10
+    assert env.portfolio_df.get_value(timestamp, "USDT") == 10
 
 def test_crypto(fresh_env):
     env = fresh_env
@@ -9637,7 +9637,7 @@ def test_crypto(fresh_env):
 
     timestamp = datetime.utcnow()
     env.crypto = {"BTC": 10, 'timestamp': timestamp}
-    assert env.portifolio_df.get_value(timestamp, "BTC") == Decimal('10')
+    assert env.portfolio_df.get_value(timestamp, "BTC") == Decimal('10')
 
 def test_balance(fresh_env):
     env = fresh_env
@@ -9724,7 +9724,7 @@ class Test_env_reset(object):
         obs = self.env.reset()
         assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] == self.env.obs_steps
         assert set(self.env.tax.keys()) == self.env.symbols
-        assert set(self.env.portifolio_df.columns).issuperset(self.env.symbols)
+        assert set(self.env.portfolio_df.columns).issuperset(self.env.symbols)
         assert np.all(obs.values) == np.all(self.env.obs_df.values)
 
 def test_get_reward(ready_env):
@@ -9739,7 +9739,6 @@ def test_get_reward(ready_env):
     env.fiat = Decimal('10')
     r = env.get_reward()
     assert r == Decimal('9.00000000')
-
 
 @pytest.mark.incremental
 class Test_env_step(object):
@@ -9774,7 +9773,7 @@ class Test_env_step(object):
         # Assert amount
         for i, symbol in enumerate(self.env.action_vector):
             if symbol not in self.env._fiat:
-                assert self.env.portifolio_df.get_value(self.env.portifolio_df[symbol].last_valid_index(), symbol) - \
+                assert self.env.portfolio_df.get_value(self.env.portfolio_df[symbol].last_valid_index(), symbol) - \
                        self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \
                         self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
