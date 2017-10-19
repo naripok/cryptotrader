@@ -100,9 +100,10 @@ class TradingEnvironment(Env):
     @property
     def fiat(self):
         try:
-            return self.portifolio_df.get_value(self.portifolio_df.index[-1], self._fiat)
-        except KeyError:
+            return self.portifolio_df.get_value(self.portifolio_df[self._fiat].last_valid_index(), self._fiat)
+        except KeyError as e:
             self.logger.error(TradingEnvironment.fiat, "You must specify a fiat symbol first.")
+            raise e
         except Exception as e:
             self.logger.error(TradingEnvironment.fiat, self.parse_error(e))
             raise e
@@ -119,14 +120,24 @@ class TradingEnvironment(Env):
                 # self.portifolio_df[self._fiat]
             elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
                 self.portifolio_df.loc[datetime.utcnow(), self._fiat] = convert_to.decimal(value)
-                self.portifolio_df.ffill(inplace=True)
+                # self.portifolio_df.ffill(inplace=True)
         except Exception as e:
             self.logger.error(TradingEnvironment.fiat, self.parse_error(e))
             raise e
 
     @property
     def crypto(self):
-        return self.portifolio_df.loc[self.portifolio_df.index[-1], self._crypto].to_dict()
+        try:
+            crypto = {}
+            for symbol in self._crypto:
+                crypto[symbol] = self.portifolio_df.get_value(self.portifolio_df[symbol].last_valid_index(), symbol)
+            return crypto
+        except KeyError as e:
+            self.logger.error(TradingEnvironment.crypto, "No valid value on portifolio dataframe.")
+            raise e
+        except Exception as e:
+            self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
+            raise e
 
     @crypto.setter
     def crypto(self, values):
@@ -136,7 +147,7 @@ class TradingEnvironment(Env):
             for symbol, value in values.items():
                 if symbol not in self._fiat:
                     self.portifolio_df.at[timestamp, symbol] = convert_to.decimal(value)
-            self.portifolio_df.ffill(inplace=True)
+            # self.portifolio_df.ffill(inplace=True)
         except Exception as e:
             self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
             raise e
@@ -152,7 +163,7 @@ class TradingEnvironment(Env):
             timestamp = datetime.utcnow()
             for symbol, value in values.items():
                 self.portifolio_df.loc[timestamp, symbol] = convert_to.decimal(value)
-            self.portifolio_df.ffill(inplace=True)
+            # self.portifolio_df.ffill(inplace=True)
         except Exception as e:
             self.logger.error(TradingEnvironment.balance, self.parse_error(e))
             raise e
@@ -379,7 +390,6 @@ class TradingEnvironment(Env):
         self.log_action(timestamp, 'online', online)
 
     def simulate_trade(self, action, timestamp):
-
         # Assert inputs
         action = self.assert_action(action)
         # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
@@ -392,8 +402,7 @@ class TradingEnvironment(Env):
         # Calculate position change given action
         posit_change = (convert_to.decimal(action) - self.calc_portifolio_vector())[:-1]
 
-        # Get fiat_pool
-        fiat_pool = self.fiat
+        # Get initial portval
         portval = self.calc_total_portval()
 
         # Sell assets first
@@ -409,11 +418,9 @@ class TradingEnvironment(Env):
 
                     fee = portval * change.copy_abs() * self.tax[symbol]
 
-                fiat_pool += portval.fma(change.copy_abs(), -fee)
+                self.fiat = self.fiat + portval.fma(change.copy_abs(), -fee)
 
                 self.crypto = {symbol: crypto_pool}
-
-        self.fiat = fiat_pool
 
         # Uodate prev portval with deduced taxes
         portval = self.calc_total_portval()
@@ -424,18 +431,14 @@ class TradingEnvironment(Env):
 
                 symbol = self.action_vector[i]
 
-                fiat_pool -= portval * change.copy_abs()
+                self.fiat = self.fiat - portval * change.copy_abs()
 
                 # if fiat_pool is negative, deduce it from portval and clip
                 try:
-                    assert fiat_pool >= convert_to.decimal('0E-8')
+                    assert self.fiat >= convert_to.decimal('0E-8')
                 except AssertionError:
-                    portval += fiat_pool
-                    fiat_pool = convert_to.decimal('0E-8')
-                    # if debug:
-                    #     self.status['ValueError'] += 1
-                    #     self.logger.error(Apocalipse._simulate_trade,
-                    #                       "Negative value for fiat pool at trade end." + str(fiat_pool))
+                    portval += self.fiat
+                    self.fiat = convert_to.decimal('0E-8')
 
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
@@ -445,9 +448,6 @@ class TradingEnvironment(Env):
                 crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
 
                 self.crypto = {symbol: crypto_pool}
-
-        # And don't forget to take your change!
-        self.fiat = fiat_pool
 
         # Log executed action
         self.log_action_vector(datetime.utcnow(), self.calc_portifolio_vector(), True)

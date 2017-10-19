@@ -9601,6 +9601,9 @@ def test_fiat(fresh_env):
     env.fiat = "USDT"
     # assert env.fiat == Decimal('0.00000000')
 
+    with pytest.raises(KeyError):
+        env.fiat
+
     env.fiat = 0
     assert env.fiat == Decimal('0.00000000')
 
@@ -9705,6 +9708,44 @@ class Test_env_reset(object):
         assert set(self.env.portifolio_df.columns) == self.env.symbols
         assert np.all(obs.values) == np.all(self.env.obs_df.values)
 
+@pytest.mark.incremental
+class Test_env_step(object):
+    @classmethod
+    def setup_class(cls):
+        cls.env = TradingEnvironment(tapi=tapi, name='env_test')
+        cls.env.obs_steps = 30
+        cls.env.freq = 5
+        cls.env.add_pairs("USDT_BTC", "USDT_ETH")
+        cls.env.fiat = "USDT"
+        cls.env.reset()
+        cls.env.fiat = 100
+
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
+
+    @given(arrays(dtype=np.float32,
+                  shape=(3,),
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
+    @settings(max_examples=50)
+    def test_simulate_trade(self, action):
+        action = array_softmax(action)
+        timestamp = self.env.obs_df.index[-1]
+        self.env.simulate_trade(action, timestamp)
+
+        # Assert position
+        for i, symbol in enumerate(self.env.action_vector):
+            assert self.env.action_df.get_value(timestamp, symbol) - convert_to.decimal(action[i]) <= Decimal('5E-4')
+
+        # Assert amount
+        for i, symbol in enumerate(self.env.action_vector):
+            if symbol not in self.env._fiat:
+                assert self.env.portifolio_df.get_value(self.env.portifolio_df[symbol].last_valid_index(), symbol) - \
+                       self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \
+                        self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
+
+    def test_get_reward(self):
+        pass
 
 
 if __name__ == '__main__':
