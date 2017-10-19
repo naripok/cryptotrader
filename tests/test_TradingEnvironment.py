@@ -9793,7 +9793,6 @@ class Test_env_step(object):
         # Assert reward
         assert isinstance(reward, np.float64)
 
-
         # Assert done
         assert isinstance(done, bool)
 
