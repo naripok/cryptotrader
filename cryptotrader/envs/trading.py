@@ -85,7 +85,7 @@ class TradingEnvironment(Env):
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
         self.portifolio_df = self.portifolio_df.append(pd.DataFrame(columns=self.symbols, index=[datetime.utcnow()]))
-        self.action_df = self.action_df.append(pd.DataFrame(columns=self.symbols, index=[datetime.utcnow()]))
+        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[datetime.utcnow()]))
 
     @property
     def symbols(self):
@@ -277,7 +277,8 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
             raise e
 
-    def get_fee(self, fee_type='takerFee'):
+    def get_fee(self, symbol, fee_type='takerFee'):
+        # TODO MAKE IT UNIVERSAL
         try:
             fees = self.tapi.returnFeeInfo()
 
@@ -313,6 +314,12 @@ class TradingEnvironment(Env):
             return self.crypto[symbol] * self.get_close_price(symbol) / self.calc_total_portval()
         else:
             return self.fiat / self.calc_total_portval()
+
+    def calc_portifolio_vector(self):
+        portifolio = []
+        for symbol in self.action_vector:
+            portifolio.append(self.calc_posit(symbol))
+        return np.array(portifolio)
 
     def assert_action(self, action):
         # TODO WRITE TEST
@@ -361,7 +368,89 @@ class TradingEnvironment(Env):
         return action
 
     def log_action(self, timestamp, symbol, value):
-        self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
+        if symbol == 'online':
+            self.action_df.loc[timestamp, symbol] = value
+        else:
+            self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
+
+    def log_action_vector(self, timestamp, vector, online):
+        for i, symbol in enumerate(self.action_vector):
+            self.log_action(timestamp, symbol, vector[i])
+        self.log_action(timestamp, 'online', online)
+
+    def simulate_trade(self, action, timestamp):
+
+        # Assert inputs
+        action = self.assert_action(action)
+        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
+        #     self.observation_space.contains(observation[symbol])
+        # assert isinstance(timestamp, pd.Timestamp)
+
+        # Log action
+        self.log_action_vector(timestamp, action, False)
+
+        # Calculate position change given action
+        posit_change = (convert_to.decimal(action) - self.calc_portifolio_vector())[:-1]
+
+        # Get fiat_pool
+        fiat_pool = self.fiat
+        portval = self.calc_total_portval()
+
+        # Sell assets first
+        for i, change in enumerate(posit_change):
+            if change < convert_to.decimal('0E-8'):
+
+                symbol = self.action_vector[i]
+
+                crypto_pool = portval * action[i] / self.get_close_price(symbol)
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = portval * change.copy_abs() * self.tax[symbol]
+
+                fiat_pool += portval.fma(change.copy_abs(), -fee)
+
+                self.crypto = {symbol: crypto_pool}
+
+        self.fiat = fiat_pool
+
+        # Uodate prev portval with deduced taxes
+        portval = self.calc_total_portval()
+
+        # Then buy some goods
+        for i, change in enumerate(posit_change):
+            if change > convert_to.decimal('0E-8'):
+
+                symbol = self.action_vector[i]
+
+                fiat_pool -= portval * change.copy_abs()
+
+                # if fiat_pool is negative, deduce it from portval and clip
+                try:
+                    assert fiat_pool >= convert_to.decimal('0E-8')
+                except AssertionError:
+                    portval += fiat_pool
+                    fiat_pool = convert_to.decimal('0E-8')
+                    # if debug:
+                    #     self.status['ValueError'] += 1
+                    #     self.logger.error(Apocalipse._simulate_trade,
+                    #                       "Negative value for fiat pool at trade end." + str(fiat_pool))
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = self.tax[symbol] * portval * change
+
+                crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
+
+                self.crypto = {symbol: crypto_pool}
+
+        # And don't forget to take your change!
+        self.fiat = fiat_pool
+
+        # Log executed action
+        self.log_action_vector(datetime.utcnow(), self.calc_portifolio_vector(), True)
 
     # Env methods
     def set_observation_space(self):
@@ -382,8 +471,29 @@ class TradingEnvironment(Env):
         self.action_space = Box(0., 1., len(self.symbols))
         self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
+    def set_action_vector(self):
+        action_vector = []
+        for pair in self.pairs:
+            action_vector.append(pair.split('_')[1])
+        action_vector.append(self._fiat)
+        self.action_vector = action_vector
+
     def reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+
+    def reset(self):
+        """
+        Setup env with initial values
+        :return:
+        """
+        self.set_observation_space()
+        self.set_action_space()
+        self.balance = self.get_balance()
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+        obs = self.get_observation()
+        self.set_action_vector()
+        return obs
 
     # Helper methods
     def parse_error(self, e):

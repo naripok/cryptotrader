@@ -508,7 +508,7 @@ class TrainingEnvironment(Env):
         else:
             return self._get_fiat() / self._calc_step_total_portval()
 
-    def _calc_step_potifolio_posit(self):
+    def _calc_step_portifolio_posit(self):
         portifolio = []
         for symbol in self._get_df_symbols():
             portifolio.append(self._calc_step_posit(symbol))
@@ -668,7 +668,7 @@ class TrainingEnvironment(Env):
         # assert isinstance(timestamp, pd.Timestamp)
 
         # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self._calc_step_potifolio_posit())[:-1]
+        posit_change = (convert_to.decimal(action) - self._calc_step_portifolio_posit())[:-1]
 
         # Get fiat_pool
         fiat_pool = self._get_fiat()

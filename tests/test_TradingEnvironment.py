@@ -9656,16 +9656,16 @@ def test_get_close_price(ready_env):
 
 def test_get_fee(ready_env):
     env = ready_env
-    fee = env.get_fee()
+    fee = env.get_fee("BTC")
     assert isinstance(fee, Decimal)
     assert fee == Decimal('0.00250000')
 
-    fee = env.get_fee('makerFee')
+    fee = env.get_fee("BTC", "makerFee")
     assert isinstance(fee, Decimal)
     assert fee == Decimal('0.00150000')
 
     with pytest.raises(AssertionError):
-        fee = env.get_fee('wrong_str')
+        fee = env.get_fee("BTC", 'wrong_str')
 
 def test_calc_total_portval(ready_env):
     env = ready_env
@@ -9684,6 +9684,26 @@ def test_calc_posit(ready_env):
         assert Decimal('0.00000000') <= posit <= Decimal('1.00000000')
         total_posit += posit
     assert total_posit - Decimal('1.00000000') <= Decimal('1E-8')
+
+class Test_env_reset(object):
+    @classmethod
+    def setup_class(cls):
+        cls.env = TradingEnvironment(tapi=tapi, name='env_test')
+        cls.env.obs_steps = 30
+        cls.env.freq = 5
+        cls.env.add_pairs("USDT_BTC", "USDT_ETH")
+        cls.env.fiat = "USDT"
+
+    @classmethod
+    def teardown_class(cls):
+        shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
+
+    def test_reset(self):
+        obs = self.env.reset()
+        assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] == self.env.obs_steps
+        assert set(self.env.tax.keys()) == self.env.symbols
+        assert set(self.env.portifolio_df.columns) == self.env.symbols
+        assert np.all(obs.values) == np.all(self.env.obs_df.values)
 
 
 
