@@ -200,6 +200,7 @@ class TradingEnvironment(Env):
     ## Data feed methods
     @property
     def timestamp(self):
+        #TODO FIX FOR DAYLIGHT SAVING TIME
         return datetime.utcnow() - timedelta(hours=2)
 
     def get_pair_trades(self, pair):
@@ -567,14 +568,19 @@ class PaperTradingEnvironment(TradingEnvironment):
 
     def step(self, action):
 
+        # Get reward for previous action
         reward = self.get_reward()
 
+        # Get step timestamp
         timestamp = self.timestamp
 
+        # Simulate portifolio rebalance
         self.simulate_trade(action, timestamp)
 
+        # Calculate new portval
         self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
         done = False
 
+        # Return new observation, reward, done flag and status for debugging
         return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
