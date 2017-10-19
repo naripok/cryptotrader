@@ -15,30 +15,33 @@ class TradingEnvironment(Env):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
-        if not os.path.exists('./logs'):
-            os.makedirs('./logs')
-        self.logger = Logger(self.name, './logs/')
-
+        # Data feed api
         self.tapi = tapi
 
+        # Environment configuration
         self.epsilon = 1e-8
-        self.status = None
-
         self._obs_steps = None
         self._freq = None
-
-        # Portifolio info
         self._crypto = []
         self._fiat = None
         self.tax = {}
         self.pairs = []
 
-        self.obs_df = None
+        # Dataframes
+        self.obs_df = pd.DataFrame(index=[datetime.utcnow()])
         self.portifolio_df = pd.DataFrame(index=[datetime.utcnow()])
+        self.action_df = pd.DataFrame(index=[datetime.utcnow()])
 
+        # Logging and debugging
+        self.status = None
+
+        if not os.path.exists('./logs'):
+            os.makedirs('./logs')
+        self.logger = Logger(self.name, './logs/')
         self.logger.info("Trading Environment initialization",
                          "Trading Environment Initialized!")
 
+    # Env properties
     @property
     def obs_steps(self):
         return self._obs_steps
@@ -82,6 +85,7 @@ class TradingEnvironment(Env):
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
         self.portifolio_df = self.portifolio_df.append(pd.DataFrame(columns=self.symbols, index=[datetime.utcnow()]))
+        self.action_df = self.action_df.append(pd.DataFrame(columns=self.symbols, index=[datetime.utcnow()]))
 
     @property
     def symbols(self):
@@ -122,28 +126,36 @@ class TradingEnvironment(Env):
 
     @property
     def crypto(self):
-        return self.portifolio_df.loc[self.portifolio_df.index[-1], self._crypto]
+        return self.portifolio_df.loc[self.portifolio_df.index[-1], self._crypto].to_dict()
 
     @crypto.setter
     def crypto(self, values):
-        assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
-        timestamp = datetime.utcnow()
-        for symbol, value in values.items():
-            if symbol not in self._fiat:
-                self.portifolio_df.at[timestamp, symbol] = convert_to.decimal(value)
-        self.portifolio_df.ffill(inplace=True)
+        try:
+            assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
+            timestamp = datetime.utcnow()
+            for symbol, value in values.items():
+                if symbol not in self._fiat:
+                    self.portifolio_df.at[timestamp, symbol] = convert_to.decimal(value)
+            self.portifolio_df.ffill(inplace=True)
+        except Exception as e:
+            self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
+            raise e
 
     @property
     def balance(self):
-        return self.portifolio_df.iloc[-1]
+        return self.portifolio_df.iloc[-1].to_dict()
 
     @balance.setter
     def balance(self, values):
-        assert isinstance(values, dict), "Coin value must be a dictionary containing the currencies balance."
-        timestamp = datetime.utcnow()
-        for symbol, value in values.items():
-            self.portifolio_df.at[timestamp, symbol] = convert_to.decimal(value)
-        self.portifolio_df.ffill(inplace=True)
+        try:
+            assert isinstance(values, dict), "Balance must be a dictionary containing the currencies amount."
+            timestamp = datetime.utcnow()
+            for symbol, value in values.items():
+                self.portifolio_df.loc[timestamp, symbol] = convert_to.decimal(value)
+            self.portifolio_df.ffill(inplace=True)
+        except Exception as e:
+            self.logger.error(TradingEnvironment.balance, self.parse_error(e))
+            raise e
 
     ## Data feed methods
     def get_pair_trades(self, pair):
@@ -276,11 +288,8 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
             raise e
 
-    def update_observation(self):
-        self.obs_df = self.get_history()
-
     def get_observation(self):
-        self.update_observation()
+        self.obs_df = self.get_history()
         return self.obs_df
 
     # ## Trading methods
@@ -290,7 +299,7 @@ class TradingEnvironment(Env):
         elif isinstance(timestamp, str) and timestamp == 'last' or timestamp is None:
             return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat, symbol), 'close'))
 
-    def _calc_total_portval(self, timestamp=None):
+    def calc_total_portval(self, timestamp=None):
         portval = convert_to.decimal('0.0')
 
         for symbol in self._crypto:
@@ -299,23 +308,21 @@ class TradingEnvironment(Env):
 
         return portval
 
-    def _calc_posit(self, symbol):
+    def calc_posit(self, symbol):
         if symbol not in self._fiat:
-            return self.crypto[symbol] * self.get_close_price(symbol) / self._calc_total_portval()
+            return self.crypto[symbol] * self.get_close_price(symbol) / self.calc_total_portval()
         else:
-            return self.fiat / self._calc_total_portval()
+            return self.fiat / self.calc_total_portval()
 
-
-
-    def store_value(self, timestamp, symbol, value):
-        self.portifolio_df.loc[timestamp, symbol] = convert_to.decimal(value)
-
-    def _assert_action(self, action):
+    def assert_action(self, action):
         # TODO WRITE TEST
         try:
             for posit in action:
                 if not isinstance(posit, Decimal):
-                    action = convert_to.decimal(np.float64(action))
+                    if isinstance(posit, np.float32):
+                        action = convert_to.decimal(np.float64(action))
+                    else:
+                        action = convert_to.decimal(action)
 
             try:
                 assert self.action_space.contains(action)
@@ -332,14 +339,14 @@ class TradingEnvironment(Env):
                         assert action.sum() == convert_to.decimal('1.0')
 
                 # if debug:
-                #     self.logger.error(Apocalipse._assert_action, "Action does not belong to action space")
+                #     self.logger.error(Apocalipse.assert_action, "Action does not belong to action space")
 
             assert action.sum() - convert_to.decimal('1.0') < convert_to.decimal('1e-6')
 
         except AssertionError:
             if debug:
                 self.status['ActionError'] += 1
-                # self.logger.error(Apocalipse._assert_action, "Action out of range")
+                # self.logger.error(Apocalipse.assert_action, "Action out of range")
 
             action /= action.sum()
             try:
@@ -353,7 +360,10 @@ class TradingEnvironment(Env):
 
         return action
 
-    # Helper methods
+    def log_action(self, timestamp, symbol, value):
+        self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
+
+    # Env methods
     def set_observation_space(self):
         # Observation space:
         obs_space = []
@@ -372,9 +382,10 @@ class TradingEnvironment(Env):
         self.action_space = Box(0., 1., len(self.symbols))
         self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
-    def _reset_status(self):
+    def reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
+    # Helper methods
     def parse_error(self, e):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)

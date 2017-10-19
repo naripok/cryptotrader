@@ -9529,8 +9529,8 @@ class Test_env_setup(object):
     def teardown_class(cls):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
-    def test__reset_status(self):
-        self.env._reset_status()
+    def test_reset_status(self):
+        self.env.reset_status()
         assert self.env.status == {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
     def test_add_pairs(self):
@@ -9625,7 +9625,21 @@ def test_crypto(fresh_env):
     for symbol, value in env.crypto.items():
         assert value == convert_to.decimal(balance[symbol])
         assert symbol in env.symbols
-        assert env._fiat['symbol'] not in env.crypto.keys()
+        assert env._fiat not in env.crypto.keys()
+
+def test_balance(fresh_env):
+    env = fresh_env
+
+    with pytest.raises(AssertionError):
+        env.balance = []
+        env.balance = 0
+        env.balance = '0'
+
+    env.balance = env.get_balance()
+    for symbol, value in env.balance.items():
+        assert value == convert_to.decimal(env.balance[symbol])
+        assert symbol in env.symbols
+        assert env._fiat not in env.crypto.keys()
 
 def test_get_close_price(ready_env):
     env = ready_env
@@ -9653,19 +9667,19 @@ def test_get_fee(ready_env):
     with pytest.raises(AssertionError):
         fee = env.get_fee('wrong_str')
 
-def test__calc_total_portval(ready_env):
+def test_calc_total_portval(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
-    portval = env._calc_total_portval()
+    portval = env.calc_total_portval()
     assert isinstance(portval, Decimal)
     assert portval >= Decimal('0.00000000')
 
-def test__calc_posit(ready_env):
+def test_calc_posit(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
     total_posit = Decimal('0E-8')
     for symbol in env.symbols:
-        posit = env._calc_posit(symbol)
+        posit = env.calc_posit(symbol)
         assert isinstance(posit, Decimal)
         assert Decimal('0.00000000') <= posit <= Decimal('1.00000000')
         total_posit += posit
