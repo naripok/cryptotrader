@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from decimal import Decimal
 from poloniex import Poloniex
+from datetime import datetime
 
 # Mocks
 tapi = mock.Mock(spec=Poloniex)
@@ -9615,8 +9616,14 @@ def test_fiat(fresh_env):
         env.fiat = value
         assert env.fiat == convert_to.decimal(value)
 
+    timestamp = datetime.utcnow()
+    env.fiat = {"USDT": 10, 'timestamp': timestamp}
+    assert env.portifolio_df.get_value(timestamp, "USDT") == 10
+
 def test_crypto(fresh_env):
     env = fresh_env
+    env.add_pairs("USDT_BTC")
+    env.fiat = "USDT"
 
     with pytest.raises(AssertionError):
         env.crypto = []
@@ -9628,7 +9635,11 @@ def test_crypto(fresh_env):
     for symbol, value in env.crypto.items():
         assert value == convert_to.decimal(balance[symbol])
         assert symbol in env.symbols
-        assert env._fiat not in env.crypto.keys()
+        assert env._fiat not in env.crypto
+
+    timestamp = datetime.utcnow()
+    env.crypto = {"BTC": 10, 'timestamp': timestamp}
+    assert env.portifolio_df.get_value(timestamp, "BTC") == Decimal('10')
 
 def test_balance(fresh_env):
     env = fresh_env
@@ -9744,7 +9755,7 @@ class Test_env_step(object):
                        self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \
                         self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
-    def test_get_reward(self):
+    def test_step(self):
         pass
 
 

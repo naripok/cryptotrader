@@ -113,14 +113,19 @@ class TradingEnvironment(Env):
         try:
             if isinstance(value, str):
                 assert value in self.symbols, "Fiat not in symbols."
-
                 self._fiat = value
                 self._crypto = self.symbols.difference([self._fiat])
-                # self._fiat['amount'] = convert_to.decimal(self.get_balance()[value])
-                # self.portifolio_df[self._fiat]
+
             elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
                 self.portifolio_df.loc[datetime.utcnow(), self._fiat] = convert_to.decimal(value)
-                # self.portifolio_df.ffill(inplace=True)
+
+            elif isinstance(value, dict):
+                try:
+                    timestamp = value['timestamp']
+                except KeyError:
+                    timestamp = datetime.utcnow()
+                self.portifolio_df.loc[timestamp, self._fiat] = convert_to.decimal(value[self._fiat])
+
         except Exception as e:
             self.logger.error(TradingEnvironment.fiat, self.parse_error(e))
             raise e
@@ -143,11 +148,14 @@ class TradingEnvironment(Env):
     def crypto(self, values):
         try:
             assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
-            timestamp = datetime.utcnow()
+            try:
+                timestamp = values['timestamp']
+            except KeyError:
+                timestamp = datetime.utcnow()
             for symbol, value in values.items():
-                if symbol not in self._fiat:
+                if symbol not in [self._fiat, 'timestamp']:
                     self.portifolio_df.at[timestamp, symbol] = convert_to.decimal(value)
-            # self.portifolio_df.ffill(inplace=True)
+
         except Exception as e:
             self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
             raise e
@@ -240,7 +248,7 @@ class TradingEnvironment(Env):
 
     def get_pair_history(self, pair):
         """
-        Pools symbol's trade data from exchange
+        Pools symbol's trade data from exchange api
         """
         try:
             if self.freq < 5:
@@ -451,6 +459,9 @@ class TradingEnvironment(Env):
 
         # Log executed action
         self.log_action_vector(datetime.utcnow(), self.calc_portifolio_vector(), True)
+
+    def step(self, action):
+        return NotImplementedError("You must not use this class directly. Instead, use one of it's subclasses.")
 
     # Env methods
     def set_observation_space(self):
