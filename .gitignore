@@ -101,3 +101,4 @@ historical_data/
 notebooks/logs
 .cache/
 /notebooks/online_trading_env_nb.ipynb
+/notebooks/papertrading_nb.ipynb

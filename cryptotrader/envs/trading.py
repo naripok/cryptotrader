@@ -4,7 +4,7 @@ data: 12/10/2017
 author: Tau
 """
 from .driver import *
-
+from decimal import DivisionByZero, InvalidOperation
 
 class TradingEnvironment(Env):
     """
@@ -19,13 +19,13 @@ class TradingEnvironment(Env):
         self.tapi = tapi
 
         # Environment configuration
-        self.epsilon = 1e-8
+        self.epsilon = convert_to.decimal('1E-8')
         self._obs_steps = None
         self._freq = None
+        self.pairs = []
         self._crypto = []
         self._fiat = None
         self.tax = {}
-        self.pairs = []
 
         # Dataframes
         self.obs_df = pd.DataFrame(index=[datetime.utcnow()])
@@ -171,9 +171,30 @@ class TradingEnvironment(Env):
             timestamp = datetime.utcnow()
             for symbol, value in values.items():
                 self.portifolio_df.loc[timestamp, symbol] = convert_to.decimal(value)
-            # self.portifolio_df.ffill(inplace=True)
+
         except Exception as e:
             self.logger.error(TradingEnvironment.balance, self.parse_error(e))
+            raise e
+
+    @property
+    def portval(self):
+        return self.calc_total_portval()
+
+    @portval.setter
+    def portval(self, value):
+        try:
+            if isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
+                self.portifolio_df.loc[datetime.utcnow(), 'portval'] = convert_to.decimal(value)
+
+            elif isinstance(value, dict):
+                try:
+                    timestamp = value['timestamp']
+                except KeyError:
+                    timestamp = datetime.utcnow()
+                self.portifolio_df.loc[timestamp, 'portval'] = convert_to.decimal(value['portval'])
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.portval, self.parse_error(e))
             raise e
 
     ## Data feed methods
@@ -397,71 +418,27 @@ class TradingEnvironment(Env):
             self.log_action(timestamp, symbol, vector[i])
         self.log_action(timestamp, 'online', online)
 
-    def simulate_trade(self, action, timestamp):
-        # Assert inputs
-        action = self.assert_action(action)
-        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-        #     self.observation_space.contains(observation[symbol])
-        # assert isinstance(timestamp, pd.Timestamp)
+    def get_previous_portval(self):
+        try:
+            return self.portifolio_df.get_value(self.portifolio_df['portval'].last_valid_index(), 'portval')
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_previous_portval, self.parse_error(e))
+            raise e
 
-        # Log action
-        self.log_action_vector(timestamp, action, False)
+    def get_reward(self):
+        try:
+            return (self.portval - self.get_previous_portval()) / self.get_previous_portval()
 
-        # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self.calc_portifolio_vector())[:-1]
 
-        # Get initial portval
-        portval = self.calc_total_portval()
+        except DivisionByZero:
+            return (self.portval - self.get_previous_portval()) / (self.get_previous_portval() + self.epsilon)
 
-        # Sell assets first
-        for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0E-8'):
+        except InvalidOperation:
+            return (self.portval - self.get_previous_portval()) / (self.get_previous_portval() + self.epsilon)
 
-                symbol = self.action_vector[i]
-
-                crypto_pool = portval * action[i] / self.get_close_price(symbol)
-
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
-
-                    fee = portval * change.copy_abs() * self.tax[symbol]
-
-                self.fiat = self.fiat + portval.fma(change.copy_abs(), -fee)
-
-                self.crypto = {symbol: crypto_pool}
-
-        # Uodate prev portval with deduced taxes
-        portval = self.calc_total_portval()
-
-        # Then buy some goods
-        for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0E-8'):
-
-                symbol = self.action_vector[i]
-
-                self.fiat = self.fiat - portval * change.copy_abs()
-
-                # if fiat_pool is negative, deduce it from portval and clip
-                try:
-                    assert self.fiat >= convert_to.decimal('0E-8')
-                except AssertionError:
-                    portval += self.fiat
-                    self.fiat = convert_to.decimal('0E-8')
-
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
-
-                    fee = self.tax[symbol] * portval * change
-
-                crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
-
-                self.crypto = {symbol: crypto_pool}
-
-        # Log executed action
-        self.log_action_vector(datetime.utcnow(), self.calc_portifolio_vector(), True)
-
-    def step(self, action):
-        return NotImplementedError("You must not use this class directly. Instead, use one of it's subclasses.")
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
+            raise e
 
     # Env methods
     def set_observation_space(self):
@@ -504,6 +481,7 @@ class TradingEnvironment(Env):
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
         obs = self.get_observation()
         self.set_action_vector()
+        self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
 
     # Helper methods
@@ -511,3 +489,81 @@ class TradingEnvironment(Env):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
         return error_msg
+
+
+class PaperTradingEnvironment(TradingEnvironment):
+    """
+    Paper trading environment for financial strategies forward testing
+    """
+    def __init__(self, tapi, name):
+        super().__init__(tapi, name)
+
+    def simulate_trade(self, action, timestamp):
+        # Assert inputs
+        action = self.assert_action(action)
+        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
+        #     self.observation_space.contains(observation[symbol])
+        # assert isinstance(timestamp, pd.Timestamp)
+
+        # Log action
+        self.log_action_vector(timestamp, action, False)
+
+        # Calculate position change given action
+        posit_change = (convert_to.decimal(action) - self.calc_portifolio_vector())[:-1]
+
+        # Get initial portval
+        portval = self.calc_total_portval()
+
+        # Sell assets first
+        for i, change in enumerate(posit_change):
+            if change < convert_to.decimal('0E-8'):
+
+                symbol = self.action_vector[i]
+
+                crypto_pool = portval * action[i] / self.get_close_price(symbol)
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = portval * change.copy_abs() * self.tax[symbol]
+
+                self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
+
+                self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+
+        # Uodate prev portval with deduced taxes
+        portval = self.calc_total_portval()
+
+        # Then buy some goods
+        for i, change in enumerate(posit_change):
+            if change > convert_to.decimal('0E-8'):
+
+                symbol = self.action_vector[i]
+
+                self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
+
+                # if fiat_pool is negative, deduce it from portval and clip
+                try:
+                    assert self.fiat >= convert_to.decimal('0E-8')
+                except AssertionError:
+                    portval += self.fiat
+                    self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
+
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_UP
+
+                    fee = self.tax[symbol] * portval * change
+
+                crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
+
+                self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+
+        # Log executed action
+        self.log_action_vector(datetime.utcnow(), self.calc_portifolio_vector(), True)
+
+    def step(self, action):
+
+        reward = self.get_reward()
+        done = False
+
+        return self.get_observation().astype(np.float64), np.float64(reward), done, self.status

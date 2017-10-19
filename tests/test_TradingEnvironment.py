@@ -7,8 +7,7 @@ import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
-from cryptotrader.envs.trading import TradingEnvironment
-from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
+from cryptotrader.envs.trading import TradingEnvironment, PaperTradingEnvironment
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
 from cryptotrader.spaces import Box, Tuple
 import numpy as np
@@ -9516,7 +9515,6 @@ def ready_env():
     yield env
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
-
 # Tests
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
@@ -9699,6 +9697,16 @@ def test_calc_posit(ready_env):
         total_posit += posit
     assert total_posit - Decimal('1.00000000') <= Decimal('1E-8')
 
+def test_get_previous_portval(ready_env):
+    env = ready_env
+    env.obs_df = env.get_history()
+    with pytest.raises(KeyError):
+        portval = env.get_previous_portval()
+
+    env.portval = 10
+    portval = env.get_previous_portval()
+    assert portval == Decimal('10')
+
 class Test_env_reset(object):
     @classmethod
     def setup_class(cls):
@@ -9716,20 +9724,35 @@ class Test_env_reset(object):
         obs = self.env.reset()
         assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] == self.env.obs_steps
         assert set(self.env.tax.keys()) == self.env.symbols
-        assert set(self.env.portifolio_df.columns) == self.env.symbols
+        assert set(self.env.portifolio_df.columns).issuperset(self.env.symbols)
         assert np.all(obs.values) == np.all(self.env.obs_df.values)
+
+def test_get_reward(ready_env):
+    env = ready_env
+    env.reset()
+    r = env.get_reward()
+    assert isinstance(r, Decimal)
+    assert r == Decimal('0.0')
+
+    env.fiat = Decimal('1')
+    env.portval = env.calc_total_portval()
+    env.fiat = Decimal('10')
+    r = env.get_reward()
+    assert r == Decimal('9.00000000')
+
 
 @pytest.mark.incremental
 class Test_env_step(object):
     @classmethod
     def setup_class(cls):
-        cls.env = TradingEnvironment(tapi=tapi, name='env_test')
+        cls.env = PaperTradingEnvironment(tapi=tapi, name='env_test')
         cls.env.obs_steps = 30
         cls.env.freq = 5
         cls.env.add_pairs("USDT_BTC", "USDT_ETH")
         cls.env.fiat = "USDT"
         cls.env.reset()
         cls.env.fiat = 100
+        cls.env.reset_status()
 
     @classmethod
     def teardown_class(cls):
@@ -9755,8 +9778,30 @@ class Test_env_step(object):
                        self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \
                         self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
-    def test_step(self):
-        pass
+    @given(arrays(dtype=np.float32,
+                  shape=(3,),
+                  elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
+    @settings(max_examples=50)
+    def test_step(self, action):
+        action = array_softmax(action)
+        obs, reward, done, status = self.env.step(action)
+
+        # Assert returned obs
+        assert isinstance(obs, pd.DataFrame)
+        assert obs.shape[0] == self.env.obs_steps
+        assert set(obs.columns.levels[0].values) == set(self.env.pairs)
+
+        # Assert reward
+        assert isinstance(reward, np.float64)
+
+
+        # Assert done
+        assert isinstance(done, bool)
+
+        # Assert status
+        assert status == self.env.status
+        for key in status:
+            assert status[key] == False
 
 
 if __name__ == '__main__':
