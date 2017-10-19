@@ -304,6 +304,15 @@ class TradingEnvironment(Env):
 
             return pd.concat(obs_list, keys=keys, axis=1)
 
+        except ValueError:
+            obs_list = []
+            keys = []
+            for symbol in self.pairs:
+                keys.append(symbol)
+                obs_list.append(self.get_pair_history(symbol))
+
+            return pd.concat(obs_list, keys=keys, axis=1)
+
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
