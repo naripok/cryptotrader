@@ -11,6 +11,7 @@ class BacktestDataFeed(object):
     """
     Data feeder for backtesting with TradingEnvironment.
     """
+    # TODO WRITE TESTS
     def __init__(self, tapi, freq, pairs=[], portifolio={}):
         self.tapi = tapi
         self.ohlc_data = {}
@@ -47,8 +48,8 @@ class BacktestDataFeed(object):
             self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.freq * 60,
                                                                start=start, end=end
                                                               ))
-            self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
-                lambda x: datetime.fromtimestamp(int(x)))
+            # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
+            #     lambda x: datetime.fromtimestamp(int(x)))
             self.ohlc_data[pair].set_index('date', inplace=True, drop=False)
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
@@ -57,11 +58,16 @@ class BacktestDataFeed(object):
             assert currencyPair in self.pairs, "Invalid pair"
 
             if not start:
-                start = datetime.timestamp(self.ohlc_data[currencyPair].date.index[-50])
+                start = self.ohlc_data[currencyPair].date.index[-50]
             if not end:
-                end = datetime.timestamp(self.ohlc_data[currencyPair].date.index[-1])
+                end = self.ohlc_data[currencyPair].date.index[-1]
 
-            return self.ohlc_data[currencyPair].loc[datetime.fromtimestamp(start):datetime.fromtimestamp(end), :].to_dict()
+            data = []
+            for row in self.ohlc_data[currencyPair].loc[start:end,
+                   :].iterrows():
+                data.append(row[1].to_dict())
+
+            return data
 
         except AssertionError as e:
             if "Invalid period" == e:

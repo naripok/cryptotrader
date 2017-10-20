@@ -9819,8 +9819,8 @@ def test_returnBalances(data_feed):
     with pytest.raises(AssertionError):
         data_feed.balance = 10
 
-def test_returnFeeInfos(data_feed):
-    fee = data_feed.returnFeeInfos()
+def test_returnFeeInfo(data_feed):
+    fee = data_feed.returnFeeInfo()
     assert isinstance(fee, dict)
     assert fee['makerFee'] == '0.00150000'
 
