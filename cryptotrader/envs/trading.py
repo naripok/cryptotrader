@@ -5,6 +5,65 @@ author: Tau
 """
 from .driver import *
 from decimal import DivisionByZero, InvalidOperation
+from ..exchange_api.poloniex import PoloniexError
+
+class BacktestDataFeed(object):
+    """
+    Data feeder for backtesting with TradingEnvironment.
+    """
+    def __init__(self, tapi, freq, pairs=[], portifolio={}):
+        self.tapi = tapi
+        self.ohlc_data = {}
+        self.portfolio = portifolio
+        self.pairs = pairs
+        self.freq = freq
+
+    @property
+    def balance(self):
+        return self.portfolio
+
+    @balance.setter
+    def balance(self, port):
+        assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
+        for key in port:
+            self.portfolio[key] = port[key]
+
+    def returnBalances(self):
+        return self.portfolio
+
+    def returnFeeInfos(self):
+        return {'makerFee': '0.00150000',
+                'nextTier': '600.00000000',
+                'takerFee': '0.00250000',
+                'thirtyDayVolume': '0.00000000'}
+
+    def get_ohlc(self, start=None, end=None):
+        # TODO WRITE TEST
+
+        for pair in self.pairs:
+            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.freq * 60,
+                                                               start=start, end=end
+                                                              ))
+            self.ohlc_data[pair].set_index('date', inplace=True, drop=False)
+
+    def returnChartData(self, currencyPair, period, start=None, end=None):
+        try:
+            assert np.allclose(period, self.freq * 60), "Invalid period"
+            assert currencyPair in self.pairs, "Invalid pair"
+
+            if not start:
+                start = self.ohlc_data[currencyPair].date.index[-50:]
+            if not end:
+                end = self.ohlc_data[currencyPair].date.index[0]
+
+            return self.ohlc_data[currencyPair].loc[start, end].to_dict()
+
+        except AssertionError as e:
+            if "Invalid period" == e:
+                raise PoloniexError("%d invalid candle period" % period)
+            elif "Invalid pair" == e:
+                raise PoloniexError("Invalid currency pair.")
+
 
 class TradingEnvironment(Env):
     """
@@ -204,40 +263,62 @@ class TradingEnvironment(Env):
         # return datetime.utcnow() - timedelta(hours=2)
         return datetime.fromtimestamp(time())
 
-    def get_pair_trades(self, pair):
+    def get_pair_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
+        # TODO FINISH THIS
         try:
             # Pool data from exchage
-            data = self.tapi.marketTradeHist(pair)
+            if isinstance(end, float):
+                data = self.tapi.marketTradeHist(pair, end=end)
+            else:
+                data = self.tapi.marketTradeHist(pair)
             df = pd.DataFrame.from_records(data)
 
             # Get more data from exchange until have enough to make obs_steps rows
-            while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
-                    timedelta(minutes=self.freq * self.obs_steps) < \
-                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+            if isinstance(start, float):
+                while datetime.fromtimestamp(start) < \
+                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
 
-                market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
-                    datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S") - timedelta(hours=3)))
+                    market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
+                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S")))
 
-                df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
-                appended = False
-                i = 0
-                while not appended:
-                    try:
-                        df = df.append(df2.iloc[i:], verify_integrity=True)
-                        appended = True
-                    except ValueError:
-                        i += 1
+                    df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
+                    appended = False
+                    i = 0
+                    while not appended:
+                        try:
+                            df = df.append(df2.iloc[i:], verify_integrity=True)
+                            appended = True
+                        except ValueError:
+                            i += 1
 
-            return df
+            else:
+                while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
+                        timedelta(minutes=self.freq * self.obs_steps) < \
+                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+
+                    market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
+                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S")))
+
+                    df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
+                    appended = False
+                    i = 0
+                    while not appended:
+                        try:
+                            df = df.append(df2.iloc[i:], verify_integrity=True)
+                            appended = True
+                        except ValueError:
+                            i += 1
+
+                return df
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
             return False
 
-    def get_ohlc_from_trades(self, pair):
+    def get_ohlc_from_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
-        df = self.get_pair_trades(pair)
+        df = self.get_pair_trades(pair, start=start, end=end)
 
         freq = "%dmin" % self.freq
 
@@ -290,7 +371,7 @@ class TradingEnvironment(Env):
             else:
                 df = self.get_ohlc(pair, start=start, end=end)
 
-            if not start or not end:
+            if not start and not end:
                 # If df is large enough, return
                 if df.shape[0] >= self.obs_steps:
                     return df.iloc[-self.obs_steps:]
@@ -526,13 +607,16 @@ class TradingEnvironment(Env):
     def get_sampled_portfolio(self):
         return self.portfolio_df.resample("%dmin" % self.freq).last()
 
-    def _get_results(self, window=30):
+    def get_sampled_actions(self):
+        return self.action_df.resample("%dmin" % self.freq).last()
+
+    def get_results(self, window=7):
         """
         Calculate arbiter desired actions statistics
         :return:
         """
 
-        self.results = self.get_sampled_portfolio()
+        self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
 
         obs = self.get_history(end=datetime.timestamp(self.results.index[-1]),
              start=datetime.timestamp(self.results.index[0]))
@@ -569,6 +653,148 @@ class TradingEnvironment(Env):
         self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
 
         return self.results
+
+    def plot_results(self):
+        def config_fig(fig):
+            fig.background_fill_color = "black"
+            fig.background_fill_alpha = 0.5
+            fig.border_fill_color = "#232323"
+            fig.outline_line_color = "#232323"
+            fig.title.text_color = "whitesmoke"
+            fig.xaxis.axis_label_text_color = "whitesmoke"
+            fig.yaxis.axis_label_text_color = "whitesmoke"
+            fig.yaxis.major_label_text_color = "whitesmoke"
+            fig.xaxis.major_label_orientation = np.pi / 4
+            fig.grid.grid_line_alpha = 0.3
+
+        df = self.get_results().astype(np.float64)
+
+        # Results figures
+        results = {}
+
+        # Position
+        p_pos = figure(title="Position over time",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='position',
+                       plot_width=800, plot_height=400,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_pos)
+
+        palettes = inferno(len(self.symbols))
+
+        for i, symbol in enumerate(self.symbols):
+            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i], legend=symbol)
+
+        # Portifolio and benchmark values
+        p_val = figure(title="Portifolio / Benchmark Value",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='position',
+                       plot_width=800, plot_height=400,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_val)
+
+        results['portval'] = p_val.line(df.index, df.portval, color='green')
+        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
+
+        # Portifolio and benchmark returns
+        p_ret = figure(title="Portifolio / Benchmark Returns",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='Returns',
+                       plot_width=800, plot_height=200,
+                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       toolbar_location="above"
+                       )
+        config_fig(p_ret)
+
+        results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
+        results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
+
+        p_hist = figure(title="Portifolio Value Pct Change Distribution",
+                        x_axis_label='Pct Change',
+                        y_axis_label='frequency',
+                        plot_width=800, plot_height=300,
+                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        toolbar_location="above"
+                        )
+        config_fig(p_hist)
+
+        hist, edges = np.histogram(df.returns, density=True, bins=100)
+
+        p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
+                    fill_color="#036564", line_color="#033649")
+
+        # Portifolio rolling alpha
+        p_alpha = figure(title="Portifolio rolling alpha",
+                         x_axis_type="datetime",
+                         x_axis_label='timestep',
+                         y_axis_label='alpha',
+                         plot_width=800, plot_height=200,
+                         tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                         toolbar_location="above"
+                         )
+        config_fig(p_alpha)
+
+        results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
+
+        # Portifolio rolling beta
+        p_beta = figure(title="Portifolio rolling beta",
+                        x_axis_type="datetime",
+                        x_axis_label='timestep',
+                        y_axis_label='beta',
+                        plot_width=800, plot_height=200,
+                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        toolbar_location="above"
+                        )
+        config_fig(p_beta)
+
+        results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
+
+        # Rolling Drawdown
+        p_dd = figure(title="Portifolio rolling drawdown",
+                      x_axis_type="datetime",
+                      x_axis_label='timestep',
+                      y_axis_label='drawdown',
+                      plot_width=800, plot_height=200,
+                      tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                      toolbar_location="above"
+                      )
+        config_fig(p_dd)
+
+        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
+
+        # Portifolio Sharpe ratio
+        p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
+                          x_axis_type="datetime",
+                          x_axis_label='timestep',
+                          y_axis_label='Sharpe ratio',
+                          plot_width=800, plot_height=200,
+                          tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                          toolbar_location="above"
+                          )
+        config_fig(p_sharpe)
+
+        results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
+
+        print("################### > Portifolio Performance Analysis < ###################\n")
+        print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
+        print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
+                                                                     ec.sharpe_ratio(df.benchmark_returns)))
+        print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
+                                                                     ec.omega_ratio(df.benchmark_returns)))
+        print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
+                                                                     ec.max_drawdown(df.benchmark_returns)))
+
+        results['handle'] = show(column(p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta),
+                                 notebook_handle=True)
+
+        return results
 
     # Helper methods
     def parse_error(self, e):

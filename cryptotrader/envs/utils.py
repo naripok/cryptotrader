@@ -6,6 +6,9 @@ from time import time
 
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
 from ..utils import convert_to
+from bokeh.layouts import column
+from bokeh.palettes import inferno
+from bokeh.plotting import figure, show
 
 
 def get_historical(file, freq, start=None, end=None):
@@ -524,3 +527,144 @@ def plot_candles(df, results=False):
                 handles['all'] = show(column(p_candle, p_volume), notebook_handle=True)
 
         return handles
+
+
+def plot_results(env):
+    def config_fig(fig):
+        fig.background_fill_color = "black"
+        fig.background_fill_alpha = 0.5
+        fig.border_fill_color = "#232323"
+        fig.outline_line_color = "#232323"
+        fig.title.text_color = "whitesmoke"
+        fig.xaxis.axis_label_text_color = "whitesmoke"
+        fig.yaxis.axis_label_text_color = "whitesmoke"
+        fig.yaxis.major_label_text_color = "whitesmoke"
+        fig.xaxis.major_label_orientation = np.pi / 4
+        fig.grid.grid_line_alpha = 0.3
+
+    df = env.results.astype(np.float64)
+    # Results figures
+    results = {}
+
+    # Position
+    p_pos = figure(title="Position over time",
+                   x_axis_type="datetime",
+                   x_axis_label='timestep',
+                   y_axis_label='position',
+                   plot_width=800, plot_height=400,
+                   tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                   toolbar_location="above"
+                   )
+    config_fig(p_pos)
+
+    palettes = inferno(len(env.symbols))
+
+    for i, symbol in enumerate():
+        results[symbol + '_posit'] = p_pos.line(df.index, df[symbol, 'position'], color=palettes[i], legend=symbol)
+
+    # Portifolio and benchmark values
+    p_val = figure(title="Portifolio / Benchmark Value",
+                   x_axis_type="datetime",
+                   x_axis_label='timestep',
+                   y_axis_label='position',
+                   plot_width=800, plot_height=400,
+                   tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                   toolbar_location="above"
+                   )
+    config_fig(p_val)
+
+    results['portval'] = p_val.line(df.index, df.portval, color='green')
+    results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
+
+    # Portifolio and benchmark returns
+    p_ret = figure(title="Portifolio / Benchmark Returns",
+                   x_axis_type="datetime",
+                   x_axis_label='timestep',
+                   y_axis_label='Returns',
+                   plot_width=800, plot_height=200,
+                   tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                   toolbar_location="above"
+                   )
+    config_fig(p_ret)
+
+    results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
+    results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
+
+    p_hist = figure(title="Portifolio Value Pct Change Distribution",
+                    x_axis_label='Pct Change',
+                    y_axis_label='frequency',
+                    plot_width=800, plot_height=300,
+                    tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                    toolbar_location="above"
+                    )
+    config_fig(p_hist)
+
+    hist, edges = np.histogram(df.returns, density=True, bins=100)
+
+    p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
+                fill_color="#036564", line_color="#033649")
+
+    # Portifolio rolling alpha
+    p_alpha = figure(title="Portifolio rolling alpha",
+                     x_axis_type="datetime",
+                     x_axis_label='timestep',
+                     y_axis_label='alpha',
+                     plot_width=800, plot_height=200,
+                     tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                     toolbar_location="above"
+                     )
+    config_fig(p_alpha)
+
+    results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
+
+    # Portifolio rolling beta
+    p_beta = figure(title="Portifolio rolling beta",
+                    x_axis_type="datetime",
+                    x_axis_label='timestep',
+                    y_axis_label='beta',
+                    plot_width=800, plot_height=200,
+                    tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                    toolbar_location="above"
+                    )
+    config_fig(p_beta)
+
+    results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
+
+    # Rolling Drawdown
+    p_dd = figure(title="Portifolio rolling drawdown",
+                  x_axis_type="datetime",
+                  x_axis_label='timestep',
+                  y_axis_label='drawdown',
+                  plot_width=800, plot_height=200,
+                  tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                  toolbar_location="above"
+                  )
+    config_fig(p_dd)
+
+    results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
+
+    # Portifolio Sharpe ratio
+    p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
+                      x_axis_type="datetime",
+                      x_axis_label='timestep',
+                      y_axis_label='Sharpe ratio',
+                      plot_width=800, plot_height=200,
+                      tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                      toolbar_location="above"
+                      )
+    config_fig(p_sharpe)
+
+    results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
+
+    print("################### > Portifolio Performance Analysis < ###################\n")
+    print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
+    print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
+                                                                 ec.sharpe_ratio(df.benchmark_returns)))
+    print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
+                                                                 ec.omega_ratio(df.benchmark_returns)))
+    print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
+                                                                 ec.max_drawdown(df.benchmark_returns)))
+
+    results['handle'] = show(column(p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta), notebook_handle=True)
+
+    return results

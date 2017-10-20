@@ -7,7 +7,7 @@ import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
-from cryptotrader.envs.trading import TradingEnvironment, PaperTradingEnvironment
+from cryptotrader.envs.trading import TradingEnvironment, PaperTradingEnvironment, BacktestDataFeed
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
 from cryptotrader.spaces import Box, Tuple
 import numpy as np
@@ -9515,6 +9515,14 @@ def ready_env():
     yield env
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
+@pytest.fixture
+def data_feed():
+    df = BacktestDataFeed(tapi, freq=5, pairs=["USDT_BTC", "USDT_ETH"], portifolio={"BTC":'1.00000000',
+                                                                                    "ETH":'0.50000000',
+                                                                                    "USDT":'100.00000000'})
+    yield df
+
+
 # Tests
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
@@ -9800,6 +9808,23 @@ class Test_env_step(object):
         assert status == self.env.status
         for key in status:
             assert status[key] == False
+
+def test_returnBalances(data_feed):
+    balance = data_feed.returnBalances()
+    assert isinstance(balance, dict)
+    data_feed.balance = {"BTC": '10.00000000'}
+    balance = data_feed.returnBalances()
+    assert isinstance(balance, dict)
+    assert balance["BTC"] == '10.00000000'
+    with pytest.raises(AssertionError):
+        data_feed.balance = 10
+
+def test_returnFeeInfos(data_feed):
+    fee = data_feed.returnFeeInfos()
+    assert isinstance(fee, dict)
+    assert fee['makerFee'] == '0.00150000'
+
+
 
 
 if __name__ == '__main__':

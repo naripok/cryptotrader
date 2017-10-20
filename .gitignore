@@ -102,3 +102,5 @@ notebooks/logs
 .cache/
 /notebooks/online_trading_env_nb.ipynb
 /notebooks/papertrading_nb.ipynb
+/notebooks/datafeed_nb.ipynb
+/notebooks/pytrends.ipynb
