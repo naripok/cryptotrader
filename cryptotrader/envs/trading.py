@@ -980,7 +980,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     @property
     def timestamp(self):
-        return self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]
+        return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
 
     def step(self, action):
         try:
