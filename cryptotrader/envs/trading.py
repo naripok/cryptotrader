@@ -201,7 +201,8 @@ class TradingEnvironment(Env):
     @property
     def timestamp(self):
         #TODO FIX FOR DAYLIGHT SAVING TIME
-        return datetime.utcnow() - timedelta(hours=2)
+        # return datetime.utcnow() - timedelta(hours=2)
+        return datetime.fromtimestamp(time())
 
     def get_pair_trades(self, pair):
         # TODO WRITE TEST
