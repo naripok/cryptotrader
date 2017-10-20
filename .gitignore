@@ -104,3 +104,4 @@ notebooks/logs
 /notebooks/papertrading_nb.ipynb
 /notebooks/datafeed_nb.ipynb
 /notebooks/pytrends.ipynb
+/notebooks/backtest_nb.ipynb

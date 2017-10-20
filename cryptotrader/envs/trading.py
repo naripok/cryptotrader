@@ -37,6 +37,9 @@ class BacktestDataFeed(object):
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
 
+    def returnCurrencies(self):
+        return self.tapi.returnCurrencies()
+
     def get_ohlc(self, start=None, end=None):
         # TODO WRITE TEST
 
@@ -947,3 +950,17 @@ class PaperTradingEnvironment(TradingEnvironment):
                                 datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             return False
+
+
+class BacktestEnvironment(PaperTradingEnvironment):
+    """
+    Paper trading environment for financial strategies forward testing
+    """
+    def __init__(self, tapi, name):
+        assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
+        super().__init__(tapi, name)
+
+    @property
+    def timestamp(self):
+
+        return datetime.fromtimestamp(time())
