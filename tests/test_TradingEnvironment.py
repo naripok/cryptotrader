@@ -9500,14 +9500,12 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
 # Fixtures
 @pytest.fixture
 def fresh_env():
-    yield TradingEnvironment(tapi=tapi, name='env_test')
+    yield TradingEnvironment(freq=5, obs_steps=30, tapi=tapi, name='env_test')
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
 @pytest.fixture
 def ready_env():
-    env = TradingEnvironment(tapi=tapi, name='env_test')
-    env.obs_steps = 30
-    env.freq = 5
+    env = TradingEnvironment(freq=5, obs_steps=30, tapi=tapi, name='env_test')
     env.add_pairs("USDT_BTC", "USDT_ETH")
     env.fiat = "USDT"
     env.balance = env.get_balance()
@@ -9530,7 +9528,7 @@ def test_env_name(fresh_env):
 class Test_env_setup(object):
     @classmethod
     def setup_class(cls):
-        cls.env = TradingEnvironment(tapi=tapi, name='env_test')
+        cls.env = TradingEnvironment(freq=5, obs_steps=30, tapi=tapi, name='env_test')
 
     @classmethod
     def teardown_class(cls):
@@ -9718,9 +9716,7 @@ def test_get_previous_portval(ready_env):
 class Test_env_reset(object):
     @classmethod
     def setup_class(cls):
-        cls.env = TradingEnvironment(tapi=tapi, name='env_test')
-        cls.env.obs_steps = 30
-        cls.env.freq = 5
+        cls.env = TradingEnvironment(freq=5, obs_steps=30, tapi=tapi, name='env_test')
         cls.env.add_pairs("USDT_BTC", "USDT_ETH")
         cls.env.fiat = "USDT"
 
@@ -9752,9 +9748,7 @@ def test_get_reward(ready_env):
 class Test_env_step(object):
     @classmethod
     def setup_class(cls):
-        cls.env = PaperTradingEnvironment(tapi=tapi, name='env_test')
-        cls.env.obs_steps = 30
-        cls.env.freq = 5
+        cls.env = PaperTradingEnvironment(freq=5, obs_steps=30, tapi=tapi, name='env_test')
         cls.env.add_pairs("USDT_BTC", "USDT_ETH")
         cls.env.fiat = "USDT"
         cls.env.reset()

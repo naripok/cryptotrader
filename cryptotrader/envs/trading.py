@@ -41,7 +41,7 @@ class BacktestDataFeed(object):
     def returnCurrencies(self):
         return self.tapi.returnCurrencies()
 
-    def get_ohlc(self, start=None, end=None):
+    def download_data(self, start=None, end=None):
         # TODO WRITE TEST
 
         for pair in self.pairs:
@@ -81,7 +81,7 @@ class TradingEnvironment(Env):
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, tapi, name):
+    def __init__(self, freq, obs_steps, tapi, name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -110,6 +110,10 @@ class TradingEnvironment(Env):
         self.logger = Logger(self.name, './logs/')
         self.logger.info("Trading Environment initialization",
                          "Trading Environment Initialized!")
+
+        # Setup
+        self.freq = freq
+        self.obs_steps = obs_steps
 
     # Env properties
     @property
@@ -143,16 +147,16 @@ class TradingEnvironment(Env):
                 else:
                     self.logger.error(TradingEnvironment.add_pairs, "Symbol not found on exchange currencies.")
 
-            else:
-                self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
-
-            if isinstance(arg, list):
+            elif isinstance(arg, list):
                 for item in arg:
                     if set(item.split('_')).issubset(universe):
                         if isinstance(item, str):
                             self.pairs.append(item)
                         else:
                             self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
+
+            else:
+                self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
         self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
         self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
@@ -872,8 +876,8 @@ class PaperTradingEnvironment(TradingEnvironment):
     """
     Paper trading environment for financial strategies forward testing
     """
-    def __init__(self, tapi, name):
-        super().__init__(tapi, name)
+    def __init__(self, freq, obs_steps, tapi, name):
+        super().__init__(freq, obs_steps, tapi, name)
 
     def simulate_trade(self, action, timestamp):
         # Assert inputs
@@ -969,11 +973,39 @@ class BacktestEnvironment(PaperTradingEnvironment):
     """
     Paper trading environment for financial strategies forward testing
     """
-    def __init__(self, tapi, name):
+    def __init__(self, freq, obs_steps, tapi, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
-        super().__init__(tapi, name)
+        self.index = obs_steps
+        super().__init__(freq, obs_steps, tapi, name)
 
     @property
     def timestamp(self):
+        return self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]
 
-        return datetime.fromtimestamp(time())
+    def step(self, action):
+        try:
+            # Get reward for previous action
+            reward = self.get_reward()
+
+            # Get step timestamp
+            timestamp = self.timestamp
+
+            # Simulate portifolio rebalance
+            self.simulate_trade(action, timestamp)
+
+            # Calculate new portval
+            self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
+
+            done = False
+
+            self.index += 1
+
+            # Return new observation, reward, done flag and status for debugging
+            return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
+        except Exception as e:
+            self.logger.error(TradingEnvironment.step, self.parse_error(e))
+            if hasattr(self, 'email') and hasattr(self, 'psw'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            return False
