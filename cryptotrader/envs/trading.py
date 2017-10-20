@@ -260,7 +260,8 @@ class TradingEnvironment(Env):
 
     def get_ohlc(self, symbol, start=None, end=None):
         # TODO WRITE TEST
-        if start or end:
+        # TODO GET INVALID CANDLE TIMES RIGHT
+        if isinstance(start, float) or isinstance(end,float):
             ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
                                                   start=start, end=end
                                                   )
@@ -268,7 +269,7 @@ class TradingEnvironment(Env):
             ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
                                                   start=datetime.timestamp(self.timestamp -
                                                                            timedelta(
-                                                                               minutes=self.freq * self.obs_steps + 5))
+                                                                               minutes=self.freq * (self.obs_steps + 2)))
                                                   )
 
         ohlc_df = pd.DataFrame.from_records(ohlc_data)
@@ -289,13 +290,25 @@ class TradingEnvironment(Env):
             else:
                 df = self.get_ohlc(pair, start=start, end=end)
 
-            # If df is large enough, return
-            if df.shape[0] >= self.obs_steps:
-                return df.iloc[-self.obs_steps:]
+            if not start or not end:
+                # If df is large enough, return
+                if df.shape[0] >= self.obs_steps:
+                    return df.iloc[-self.obs_steps:]
 
-            # Else, get more data and append
+                # Else, get more data and append
+                else:
+                    sleep(2)
+                    if self.freq < 5:
+                        df = self.get_ohlc_from_trades(pair)
+                    else:
+                        df = self.get_ohlc(pair, start=start, end=end)
+
+                    if df.shape[0] >= self.obs_steps:
+                        return df.iloc[-self.obs_steps:]
+                    else:
+                        raise ValueError("Dataframe is to small. Shape: %s" % str(df.shape))
             else:
-                raise ValueError("Dataframe is to small. Shape: %s" % str(df.shape))
+                return df.iloc[-self.obs_steps:]
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
@@ -521,7 +534,8 @@ class TradingEnvironment(Env):
 
         self.results = self.get_sampled_portfolio()
 
-        obs = self.get_history()
+        obs = self.get_history(end=datetime.timestamp(self.results.index[-1]),
+             start=datetime.timestamp(self.results.index[0]))
 
         self.results['benchmark'] = convert_to.decimal('0e-8')
         self.results['returns'] = convert_to.decimal(np.nan)
@@ -533,9 +547,9 @@ class TradingEnvironment(Env):
 
         # Calculate benchmark portifolio, just equaly distribute money over all the assets
 
-        for symbol in self.crypto:
-            self.results[symbol+'_benchmark'] = (1 - self.tax[symbol]) * self.results[symbol, 'close'] * \
-                                        self._get_init_fiat() / (self.results.at[self.results.index[0],
+        for symbol in self.pairs:
+            self.results[symbol+'_benchmark'] = (1 - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
+                                        self.calc_total_portval(self.results.index[0]) / (obs.at[self.results.index[0],
                                         (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
