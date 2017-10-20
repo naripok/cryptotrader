@@ -44,6 +44,8 @@ class BacktestDataFeed(object):
             self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.freq * 60,
                                                                start=start, end=end
                                                               ))
+            self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
+                lambda x: datetime.fromtimestamp(int(x)))
             self.ohlc_data[pair].set_index('date', inplace=True, drop=False)
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
@@ -52,11 +54,11 @@ class BacktestDataFeed(object):
             assert currencyPair in self.pairs, "Invalid pair"
 
             if not start:
-                start = self.ohlc_data[currencyPair].date.index[-50:]
+                start = datetime.timestamp(self.ohlc_data[currencyPair].date.index[-50])
             if not end:
-                end = self.ohlc_data[currencyPair].date.index[0]
+                end = datetime.timestamp(self.ohlc_data[currencyPair].date.index[-1])
 
-            return self.ohlc_data[currencyPair].loc[start, end].to_dict()
+            return self.ohlc_data[currencyPair].loc[datetime.fromtimestamp(start):datetime.fromtimestamp(end), :].to_dict()
 
         except AssertionError as e:
             if "Invalid period" == e:
@@ -359,12 +361,17 @@ class TradingEnvironment(Env):
         ohlc_df.set_index('date', inplace=True)
 
         return ohlc_df[['open','high','low','close',
-                        'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(columns={'quoteVolume':'volume'})
+                        'volume']].asfreq("%dT" % self.freq).apply(convert_and_clean)
+
+        # return ohlc_df[['open', 'high', 'low', 'close',
+        #                 'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(
+        #     columns={'quoteVolume': 'volume'})
 
     def get_pair_history(self, pair, start=None, end=None):
         """
         Pools symbol's trade data from exchange api
         """
+        # TODO RETURN POSITION ON OBS
         try:
             if self.freq < 5:
                 df = self.get_ohlc_from_trades(pair)
@@ -632,7 +639,7 @@ class TradingEnvironment(Env):
         # Calculate benchmark portifolio, just equaly distribute money over all the assets
 
         for symbol in self.pairs:
-            self.results[symbol+'_benchmark'] = (1 - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
+            self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
                                         self.calc_total_portval(self.results.index[0]) / (obs.at[self.results.index[0],
                                         (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
@@ -649,8 +656,8 @@ class TradingEnvironment(Env):
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
-        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window))
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.001)
 
         return self.results
 
