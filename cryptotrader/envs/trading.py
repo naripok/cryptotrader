@@ -31,7 +31,7 @@ class BacktestDataFeed(object):
     def returnBalances(self):
         return self.portfolio
 
-    def returnFeeInfos(self):
+    def returnFeeInfo(self):
         return {'makerFee': '0.00150000',
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
@@ -639,11 +639,18 @@ class TradingEnvironment(Env):
         self.results['drawdown'] = convert_to.decimal(np.nan)
         self.results['sharpe'] = convert_to.decimal(np.nan)
 
-        # Calculate benchmark portifolio, just equaly distribute money over all the assets
+        ## Calculate benchmark portifolio, just equaly distribute money over all the assets
+        # Calc init portval
+        init_portval = Decimal('0E-8')
+        init_time = self.results.index[0]
+        for symbol in self._crypto:
+            init_portval += self.get_sampled_portfolio().get_value(init_time, symbol) * \
+                           self.get_close_price(symbol, init_time)
+        init_portval += self.get_sampled_portfolio().get_value(init_time, self._fiat)
 
         for symbol in self.pairs:
             self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
-                                        self.calc_total_portval(self.results.index[0]) / (obs.at[self.results.index[0],
+                                        init_portval / (obs.at[self.results.index[0],
                                         (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
