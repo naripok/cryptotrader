@@ -365,7 +365,8 @@ class TradingEnvironment(Env):
             ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
                                                   start=datetime.timestamp(self.timestamp -
                                                                            timedelta(
-                                                                               minutes=self.freq * (self.obs_steps + 2)))
+                                                                               minutes=self.freq * (self.obs_steps + 2))),
+                                                  end=datetime.timestamp(self.timestamp)
                                                   )
 
         ohlc_df = pd.DataFrame.from_records(ohlc_data)
