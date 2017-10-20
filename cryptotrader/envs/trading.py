@@ -258,12 +258,18 @@ class TradingEnvironment(Env):
 
         return out
 
-    def get_ohlc(self, symbol):
+    def get_ohlc(self, symbol, start=None, end=None):
         # TODO WRITE TEST
-        ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
-                                              start=datetime.timestamp(self.timestamp -
-                                                timedelta(minutes=self.freq * self.obs_steps + 5))
-                                             ) #datetime.timestamp(datetime.utcnow()))
+        if start or end:
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+                                                  start=start, end=end
+                                                  )
+        else:
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+                                                  start=datetime.timestamp(self.timestamp -
+                                                                           timedelta(
+                                                                               minutes=self.freq * self.obs_steps + 5))
+                                                  )
 
         ohlc_df = pd.DataFrame.from_records(ohlc_data)
         ohlc_df['date'] = ohlc_df.date.apply(
@@ -273,7 +279,7 @@ class TradingEnvironment(Env):
         return ohlc_df[['open','high','low','close',
                         'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(columns={'quoteVolume':'volume'})
 
-    def get_pair_history(self, pair):
+    def get_pair_history(self, pair, start=None, end=None):
         """
         Pools symbol's trade data from exchange api
         """
@@ -281,7 +287,7 @@ class TradingEnvironment(Env):
             if self.freq < 5:
                 df = self.get_ohlc_from_trades(pair)
             else:
-                df = self.get_ohlc(pair)
+                df = self.get_ohlc(pair, start=start, end=end)
 
             # If df is large enough, return
             if df.shape[0] >= self.obs_steps:
@@ -295,27 +301,35 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
             return False
 
-    def get_history(self):
+    def get_history(self, start=None, end=None):
         try:
             obs_list = []
             keys = []
             for symbol in self.pairs:
                 keys.append(symbol)
-                obs_list.append(self.get_pair_history(symbol))
+                obs_list.append(self.get_pair_history(symbol, start=start, end=end))
 
-            return pd.concat(obs_list, keys=keys, axis=1)
+            return pd.concat(obs_list, keys=keys, axis=1).ffill()
 
         except ValueError:
             obs_list = []
             keys = []
             for symbol in self.pairs:
                 keys.append(symbol)
-                obs_list.append(self.get_pair_history(symbol))
+                obs_list.append(self.get_pair_history(symbol, start=start, end=end))
 
-            return pd.concat(obs_list, keys=keys, axis=1)
+            return pd.concat(obs_list, keys=keys, axis=1).ffill()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
+            return False
+
+    def get_observation(self):
+        try:
+            self.obs_df = self.get_history()
+            return self.obs_df
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
             return False
 
     def get_balance(self):
@@ -343,10 +357,6 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
             raise e
-
-    def get_observation(self):
-        self.obs_df = self.get_history()
-        return self.obs_df
 
     # ## Trading methods
     def get_close_price(self, symbol, timestamp=None):
@@ -499,11 +509,100 @@ class TradingEnvironment(Env):
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
 
+    # Analytics methods
+    def get_sampled_portfolio(self):
+        return self.portfolio_df.resample("%dmin" % self.freq).last()
+
+    def _get_results(self, window=30):
+        """
+        Calculate arbiter desired actions statistics
+        :return:
+        """
+
+        self.results = self.get_sampled_portfolio()
+
+        obs = self.get_history()
+
+        self.results['benchmark'] = convert_to.decimal('0e-8')
+        self.results['returns'] = convert_to.decimal(np.nan)
+        self.results['benchmark_returns'] = convert_to.decimal(np.nan)
+        self.results['alpha'] = convert_to.decimal(np.nan)
+        self.results['beta'] = convert_to.decimal(np.nan)
+        self.results['drawdown'] = convert_to.decimal(np.nan)
+        self.results['sharpe'] = convert_to.decimal(np.nan)
+
+        # Calculate benchmark portifolio, just equaly distribute money over all the assets
+
+        for symbol in self.crypto:
+            self.results[symbol+'_benchmark'] = (1 - self.tax[symbol]) * self.results[symbol, 'close'] * \
+                                        self._get_init_fiat() / (self.results.at[self.results.index[0],
+                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
+            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+
+        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
+        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
+        self.results['alpha'] = ec.utils.roll(self.results.returns,
+                                              self.results.benchmark_returns,
+                                              function=ec.alpha_aligned,
+                                              window=window,
+                                              risk_free=0.001
+                                              )
+        self.results['beta'] = ec.utils.roll(self.results.returns,
+                                             self.results.benchmark_returns,
+                                             function=ec.beta_aligned,
+                                             window=window)
+        self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window/10))
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window/5), risk_free=0.001)
+
+        return self.results
+
     # Helper methods
     def parse_error(self, e):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
         return error_msg
+
+    def set_email(self, email, psw):
+        """
+        Set Gmail address and password for log keeping
+        :param email: str: Gmail address
+        :param psw: str: account password
+        :return:
+        """
+        try:
+            assert isinstance(email, str) and isinstance(psw, str)
+            self.email = email
+            self.psw = psw
+            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (self.email))
+        except Exception as e:
+            self.logger.error(TradingEnvironment.set_email, self.parse_error(e))
+
+    def send_email(self, subject, body):
+        try:
+            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
+                   isinstance(subject, str) and isinstance(body, str)
+            gmail_user = self.email
+            gmail_pwd = self.psw
+            FROM = self.email
+            TO = self.email if type(self.email) is list else [self.email]
+            SUBJECT = subject
+            TEXT = body
+
+            # Prepare actual message
+            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_user, gmail_pwd)
+            server.sendmail(FROM, TO, message)
+            server.close()
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
+        finally:
+            pass
 
 
 class PaperTradingEnvironment(TradingEnvironment):
@@ -577,20 +676,27 @@ class PaperTradingEnvironment(TradingEnvironment):
         self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
 
     def step(self, action):
+        try:
+            # Get reward for previous action
+            reward = self.get_reward()
 
-        # Get reward for previous action
-        reward = self.get_reward()
+            # Get step timestamp
+            timestamp = self.timestamp
 
-        # Get step timestamp
-        timestamp = self.timestamp
+            # Simulate portifolio rebalance
+            self.simulate_trade(action, timestamp)
 
-        # Simulate portifolio rebalance
-        self.simulate_trade(action, timestamp)
+            # Calculate new portval
+            self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
-        # Calculate new portval
-        self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
+            done = False
 
-        done = False
-
-        # Return new observation, reward, done flag and status for debugging
-        return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
+            # Return new observation, reward, done flag and status for debugging
+            return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
+        except Exception as e:
+            self.logger.error(TradingEnvironment.step, self.parse_error(e))
+            if hasattr(self, 'email') and hasattr(self, 'psw'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            return False
