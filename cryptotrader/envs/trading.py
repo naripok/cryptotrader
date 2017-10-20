@@ -6,6 +6,7 @@ author: Tau
 from .driver import *
 from decimal import DivisionByZero, InvalidOperation
 from ..exchange_api.poloniex import PoloniexError
+import json
 
 class BacktestDataFeed(object):
     """
@@ -62,10 +63,12 @@ class BacktestDataFeed(object):
             if not end:
                 end = self.ohlc_data[currencyPair].date.index[-1]
 
-            data = []
-            for row in self.ohlc_data[currencyPair].loc[start:end,
-                   :].iterrows():
-                data.append(row[1].to_dict())
+            # Faster method
+            # data = []
+            # for row in self.ohlc_data[currencyPair].loc[start:end, :].iterrows():
+            #     data.append(row[1].to_dict())
+
+            data = json.loads(self.ohlc_data[currencyPair].loc[start:end, :].to_json(orient='records'))
 
             return data
 
@@ -371,11 +374,11 @@ class TradingEnvironment(Env):
 
         ohlc_df = pd.DataFrame.from_records(ohlc_data)
         ohlc_df['date'] = ohlc_df.date.apply(
-            lambda x: pd.to_datetime(datetime.strftime(datetime.fromtimestamp(x), "%Y-%m-%d %H:%M:%S")))
+            lambda x: datetime.fromtimestamp(x))
         ohlc_df.set_index('date', inplace=True)
 
         return ohlc_df[['open','high','low','close',
-                        'volume']].asfreq("%dT" % self.freq).apply(convert_and_clean)
+                        'volume']].apply(convert_and_clean)
 
         # return ohlc_df[['open', 'high', 'low', 'close',
         #                 'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(
