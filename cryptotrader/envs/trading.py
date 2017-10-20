@@ -98,9 +98,9 @@ class TradingEnvironment(Env):
         self.tax = {}
 
         # Dataframes
-        self.obs_df = pd.DataFrame(index=[self.timestamp])
-        self.portfolio_df = pd.DataFrame(index=[self.timestamp])
-        self.action_df = pd.DataFrame(index=[self.timestamp])
+        self.obs_df = pd.DataFrame()
+        self.portfolio_df = pd.DataFrame()
+        self.action_df = pd.DataFrame()
 
         # Logging and debugging
         self.status = None
@@ -135,31 +135,6 @@ class TradingEnvironment(Env):
         assert isinstance(value, int) and value >= 1,\
             "Frequency must be a integer >= 1."
         self._freq = value
-
-    def add_pairs(self, *args):
-
-        universe = self.tapi.returnCurrencies()
-
-        for arg in args:
-            if isinstance(arg, str):
-                if set(arg.split('_')).issubset(universe):
-                    self.pairs.append(arg)
-                else:
-                    self.logger.error(TradingEnvironment.add_pairs, "Symbol not found on exchange currencies.")
-
-            elif isinstance(arg, list):
-                for item in arg:
-                    if set(item.split('_')).issubset(universe):
-                        if isinstance(item, str):
-                            self.pairs.append(item)
-                        else:
-                            self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
-
-            else:
-                self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
-
-        self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
-        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
 
     @property
     def symbols(self):
@@ -277,6 +252,31 @@ class TradingEnvironment(Env):
         #TODO FIX FOR DAYLIGHT SAVING TIME
         # return datetime.utcnow() - timedelta(hours=2)
         return datetime.fromtimestamp(time())
+
+    def add_pairs(self, *args):
+
+        universe = self.tapi.returnCurrencies()
+
+        for arg in args:
+            if isinstance(arg, str):
+                if set(arg.split('_')).issubset(universe):
+                    self.pairs.append(arg)
+                else:
+                    self.logger.error(TradingEnvironment.add_pairs, "Symbol not found on exchange currencies.")
+
+            elif isinstance(arg, list):
+                for item in arg:
+                    if set(item.split('_')).issubset(universe):
+                        if isinstance(item, str):
+                            self.pairs.append(item)
+                        else:
+                            self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
+
+            else:
+                self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
+
+        self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
+        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
 
     def get_pair_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
