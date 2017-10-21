@@ -332,7 +332,7 @@ class TradingEnvironment(Env):
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
-            return False
+            raise e
 
     def get_ohlc_from_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
@@ -922,9 +922,6 @@ class PaperTradingEnvironment(TradingEnvironment):
         #     self.observation_space.contains(observation[symbol])
         # assert isinstance(timestamp, pd.Timestamp)
 
-        # Log action
-        self.log_action_vector(timestamp, action, False)
-
         # Calculate position change given action
         posit_change = (convert_to.decimal(action) - self.calc_portfolio_vector())[:-1]
 
@@ -995,6 +992,9 @@ class PaperTradingEnvironment(TradingEnvironment):
 
             # Get step timestamp
             timestamp = self.timestamp
+
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
 
             # Simulate portifolio rebalance
             self.simulate_trade(action, timestamp)
