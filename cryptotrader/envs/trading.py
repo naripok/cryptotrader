@@ -118,7 +118,7 @@ class TradingEnvironment(Env):
         self.freq = freq
         self.obs_steps = obs_steps
 
-    # Env properties
+    ## Env properties
     @property
     def obs_steps(self):
         return self._obs_steps
@@ -476,7 +476,7 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
             raise e
 
-    # ## Trading methods
+    ## Trading methods
     def get_close_price(self, symbol, timestamp=None):
         if isinstance(timestamp, pd.Timestamp):
             return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
@@ -494,9 +494,19 @@ class TradingEnvironment(Env):
 
     def calc_posit(self, symbol):
         if symbol not in self._fiat:
-            return self.crypto[symbol] * self.get_close_price(symbol) / self.calc_total_portval()
+            try:
+                return self.crypto[symbol] * self.get_close_price(symbol) / self.calc_total_portval()
+            except DivisionByZero:
+                return self.crypto[symbol] * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
+            except InvalidOperation:
+                return self.crypto[symbol] * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
         else:
-            return self.fiat / self.calc_total_portval()
+            try:
+                return self.fiat / self.calc_total_portval()
+            except DivisionByZero:
+                return self.fiat / (self.calc_total_portval() + self.epsilon)
+            except InvalidOperation:
+                return self.fiat / (self.calc_total_portval() + self.epsilon)
 
     def calc_portfolio_vector(self):
         portfolio = []
@@ -520,12 +530,24 @@ class TradingEnvironment(Env):
             except AssertionError:
                 # normalize
                 if action.sum() != convert_to.decimal('1.0'):
-                    action /= action.sum()
+                    try:
+                        action /= action.sum()
+                    except DivisionByZero:
+                        action /= (action.sum() + self.epsilon)
+                    except InvalidOperation:
+                        action /= (action.sum() + self.epsilon)
+
                     try:
                         assert action.sum() == convert_to.decimal('1.0')
                     except AssertionError:
                         action[-1] += convert_to.decimal('1.0') - action.sum()
-                        action /= action.sum()
+                        try:
+                            action /= action.sum()
+                        except DivisionByZero:
+                            action /= (action.sum() + self.epsilon)
+                        except InvalidOperation:
+                            action /= (action.sum() + self.epsilon)
+
                         assert action.sum() == convert_to.decimal('1.0')
 
                 # if debug:
@@ -537,8 +559,13 @@ class TradingEnvironment(Env):
             if debug:
                 self.status['ActionError'] += 1
                 # self.logger.error(Apocalipse.assert_action, "Action out of range")
+            try:
+                action /= action.sum()
+            except DivisionByZero:
+                action /= (action.sum() + self.epsilon)
+            except InvalidOperation:
+                action /= (action.sum() + self.epsilon)
 
-            action /= action.sum()
             try:
                 assert action.sum() == convert_to.decimal('1.0')
             except AssertionError:
@@ -546,7 +573,12 @@ class TradingEnvironment(Env):
                 try:
                     assert action.sum() == convert_to.decimal('1.0')
                 except AssertionError:
-                    action /= action.sum()
+                    try:
+                        action /= action.sum()
+                    except DivisionByZero:
+                        action /= (action.sum() + self.epsilon)
+                    except InvalidOperation:
+                        action /= (action.sum() + self.epsilon)
 
         return action
 
@@ -569,9 +601,9 @@ class TradingEnvironment(Env):
             raise e
 
     def get_reward(self):
+        # TODO TEST
         try:
             return (self.portval - self.get_previous_portval()) / self.get_previous_portval()
-
 
         except DivisionByZero:
             return (self.portval - self.get_previous_portval()) / (self.get_previous_portval() + self.epsilon)
@@ -583,7 +615,7 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
             raise e
 
-    # Env methods
+    ## Env methods
     def set_observation_space(self):
         # Observation space:
         obs_space = []
@@ -627,7 +659,7 @@ class TradingEnvironment(Env):
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
 
-    # Analytics methods
+    ## Analytics methods
     def get_sampled_portfolio(self):
         return self.portfolio_df.resample("%dmin" % self.freq).last()
 
@@ -827,7 +859,7 @@ class TradingEnvironment(Env):
 
         return results
 
-    # Helper methods
+    ## Helper methods
     def parse_error(self, e):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
@@ -985,7 +1017,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
 class BacktestEnvironment(PaperTradingEnvironment):
     """
-    Paper trading environment for financial strategies forward testing
+    Backtest environment for financial strategies history testing
     """
     def __init__(self, freq, obs_steps, tapi, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
@@ -998,9 +1030,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
-            # Get new index
-            self.index += 1
-
             # Get reward for previous action
             reward = self.get_reward()
 
@@ -1015,7 +1044,8 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
             done = False
 
-
+            # Get new index
+            self.index += 1
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
