@@ -288,8 +288,6 @@ class MomentumTrader(APrioriAgent):
 
             position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
 
-            print(position)
-
             return array_normalize(position)
 
         except TypeError:
