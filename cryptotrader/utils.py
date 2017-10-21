@@ -109,7 +109,7 @@ class convert_to(object):
             elif isinstance(data, np.float32) or isinstance(data, float):
                 data = np.float64(data)
                 return Decimal.from_float(data).quantize(Decimal('1e-8'))
-            elif isinstance(data, np.ndarray):
+            if isinstance(data, np.ndarray):
                 output = []
                 shape = data.shape
                 for item in data.flatten():

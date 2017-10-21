@@ -78,7 +78,7 @@ class APrioriAgent(Agent):
                 except Exception as e:
                     print("Model Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
+                    raise e
 
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order to test.")
@@ -266,7 +266,7 @@ class MomentumTrader(APrioriAgent):
             prev_posit = self.get_portfolio_vector(obs)
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
-                df = obs[symbol].astype(np.float64).copy()
+                df = obs[symbol].astype(np.float64).ffill().copy()
                 df = self.get_ma(df)
 
                 # Get action
@@ -287,6 +287,8 @@ class MomentumTrader(APrioriAgent):
                 position[key] = action
 
             position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+
+            print(position)
 
             return array_normalize(position)
 
