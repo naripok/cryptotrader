@@ -1074,8 +1074,8 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
         if reset_funds:
             self.obs_df = pd.DataFrame()
-            self.portfolio_df = pd.DataFrame()
-            self.action_df = pd.DataFrame()
+            self.portfolio_df = pd.DataFrame(index=[self.timestamp])
+            self.action_df = pd.DataFrame(index=[self.timestamp])
 
         self.index = self.obs_steps
         self.set_observation_space()
