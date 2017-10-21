@@ -360,7 +360,7 @@ class TradingEnvironment(Env):
     def get_ohlc(self, symbol, start=None, end=None):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
-        if isinstance(start, float) or isinstance(end,float):
+        if start or end:
             ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
                                                   start=start, end=end
                                                   )
@@ -659,7 +659,7 @@ class TradingEnvironment(Env):
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += self.get_sampled_portfolio().get_value(init_time, symbol) * \
-                           self.get_close_price(symbol, init_time)
+                           obs[self._fiat + '_' + symbol].get_value(init_time, 'close')
         init_portval += self.get_sampled_portfolio().get_value(init_time, self._fiat)
 
         for symbol in self.pairs:
