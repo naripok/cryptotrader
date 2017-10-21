@@ -9647,6 +9647,8 @@ def test_crypto(fresh_env):
 
 def test_balance(fresh_env):
     env = fresh_env
+    env.add_pairs("USDT_BTC", "USDT_ETH")
+    env.fiat = "USDT"
 
     with pytest.raises(AssertionError):
         env.balance = []

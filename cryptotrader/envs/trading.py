@@ -169,14 +169,14 @@ class TradingEnvironment(Env):
                 self._crypto = self.symbols.difference([self._fiat])
 
             elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
-                self.portfolio_df.loc[self.timestamp, self._fiat] = convert_to.decimal(value)
+                self.portfolio_df.at[self.timestamp, self._fiat] = convert_to.decimal(value)
 
             elif isinstance(value, dict):
                 try:
                     timestamp = value['timestamp']
                 except KeyError:
                     timestamp = self.timestamp
-                self.portfolio_df.loc[timestamp, self._fiat] = convert_to.decimal(value[self._fiat])
+                self.portfolio_df.at[timestamp, self._fiat] = convert_to.decimal(value[self._fiat])
 
         except Exception as e:
             self.logger.error(TradingEnvironment.fiat, self.parse_error(e))
@@ -189,6 +189,16 @@ class TradingEnvironment(Env):
             for symbol in self._crypto:
                 crypto[symbol] = self.portfolio_df.get_value(self.portfolio_df[symbol].last_valid_index(), symbol)
             return crypto
+        except KeyError as e:
+            self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
+            raise e
+        except Exception as e:
+            self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
+            raise e
+
+    def get_crypto(self, symbol):
+        try:
+            return self.portfolio_df.get_value(self.portfolio_df[symbol].last_valid_index(), symbol)
         except KeyError as e:
             self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
             raise e
@@ -214,7 +224,7 @@ class TradingEnvironment(Env):
 
     @property
     def balance(self):
-        return self.portfolio_df.iloc[-1].to_dict()
+        return self.portfolio_df.iloc[-1, :].to_dict()
 
     @balance.setter
     def balance(self, values):
@@ -222,7 +232,7 @@ class TradingEnvironment(Env):
             assert isinstance(values, dict), "Balance must be a dictionary containing the currencies amount."
             timestamp = self.timestamp
             for symbol, value in values.items():
-                self.portfolio_df.loc[timestamp, symbol] = convert_to.decimal(value)
+                self.portfolio_df.at[timestamp, symbol] = convert_to.decimal(value)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.balance, self.parse_error(e))
@@ -236,14 +246,14 @@ class TradingEnvironment(Env):
     def portval(self, value):
         try:
             if isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
-                self.portfolio_df.loc[self.timestamp, 'portval'] = convert_to.decimal(value)
+                self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value)
 
             elif isinstance(value, dict):
                 try:
                     timestamp = value['timestamp']
                 except KeyError:
                     timestamp = self.timestamp
-                self.portfolio_df.loc[timestamp, 'portval'] = convert_to.decimal(value['portval'])
+                self.portfolio_df.at[timestamp, 'portval'] = convert_to.decimal(value['portval'])
 
         except Exception as e:
             self.logger.error(TradingEnvironment.portval, self.parse_error(e))
@@ -295,10 +305,10 @@ class TradingEnvironment(Env):
             # Get more data from exchange until have enough to make obs_steps rows
             if isinstance(start, float):
                 while datetime.fromtimestamp(start) < \
-                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
 
                     market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
-                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S")))
+                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
 
                     df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
                     appended = False
@@ -311,12 +321,12 @@ class TradingEnvironment(Env):
                             i += 1
 
             else:
-                while datetime.strptime(df.date.iloc[0], "%Y-%m-%d %H:%M:%S") - \
+                while datetime.strptime(df.date.iat[0], "%Y-%m-%d %H:%M:%S") - \
                         timedelta(minutes=self.freq * self.obs_steps) < \
-                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S"):
+                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
 
                     market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
-                        datetime.strptime(df.date.iloc[-1], "%Y-%m-%d %H:%M:%S")))
+                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
 
                     df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
                     appended = False
@@ -487,7 +497,7 @@ class TradingEnvironment(Env):
         portval = convert_to.decimal('0.0')
 
         for symbol in self._crypto:
-            portval += self.crypto[symbol] * self.get_close_price(symbol, timestamp)
+            portval += self.get_crypto(symbol) * self.get_close_price(symbol, timestamp)
         portval += self.fiat
 
         return portval
@@ -495,11 +505,11 @@ class TradingEnvironment(Env):
     def calc_posit(self, symbol):
         if symbol not in self._fiat:
             try:
-                return self.crypto[symbol] * self.get_close_price(symbol) / self.calc_total_portval()
+                return self.get_crypto(symbol) * self.get_close_price(symbol) / self.calc_total_portval()
             except DivisionByZero:
-                return self.crypto[symbol] * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
+                return self.get_crypto(symbol) * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
             except InvalidOperation:
-                return self.crypto[symbol] * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
+                return self.get_crypto(symbol) * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
         else:
             try:
                 return self.fiat / self.calc_total_portval()
@@ -584,9 +594,9 @@ class TradingEnvironment(Env):
 
     def log_action(self, timestamp, symbol, value):
         if symbol == 'online':
-            self.action_df.loc[timestamp, symbol] = value
+            self.action_df.at[timestamp, symbol] = value
         else:
-            self.action_df.loc[timestamp, symbol] = convert_to.decimal(value)
+            self.action_df.at[timestamp, symbol] = convert_to.decimal(value)
 
     def log_action_vector(self, timestamp, vector, online):
         for i, symbol in enumerate(self.action_vector):
@@ -922,6 +932,9 @@ class PaperTradingEnvironment(TradingEnvironment):
         #     self.observation_space.contains(observation[symbol])
         # assert isinstance(timestamp, pd.Timestamp)
 
+        # Log desired action
+        self.log_action_vector(timestamp, action, False)
+
         # Calculate position change given action
         posit_change = (convert_to.decimal(action) - self.calc_portfolio_vector())[:-1]
 
@@ -993,9 +1006,6 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Get step timestamp
             timestamp = self.timestamp
 
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
-
             # Simulate portifolio rebalance
             self.simulate_trade(action, timestamp)
 
@@ -1030,6 +1040,9 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
+            # Get new index
+            self.index += 1
+
             # Get reward for previous action
             reward = self.get_reward()
 
@@ -1043,9 +1056,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
             done = False
-
-            # Get new index
-            self.index += 1
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
