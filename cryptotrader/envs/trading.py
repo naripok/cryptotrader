@@ -435,7 +435,7 @@ class TradingEnvironment(Env):
             keys = []
 
             if portifolio_vector:
-                port_vec = self.get_sampled_portfolio()
+                port_vec = self.get_sampled_portfolio().ffill()
 
             for symbol in self.pairs:
                 keys.append(symbol)
@@ -479,7 +479,7 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
 
-    def get_observation(self, portfolio_vector=True):
+    def get_observation(self, portfolio_vector=False):
         try:
             self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
@@ -1119,4 +1119,5 @@ class BacktestEnvironment(PaperTradingEnvironment):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
-            return False
+            print(action)
+            raise e
