@@ -429,22 +429,49 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
             return False
 
-    def get_history(self, start=None, end=None):
+    def get_history(self, start=None, end=None, portifolio_vector=False):
         try:
             obs_list = []
             keys = []
+
+            if portifolio_vector:
+                port_vec = self.get_sampled_portfolio()
+
             for symbol in self.pairs:
                 keys.append(symbol)
-                obs_list.append(self.get_pair_history(symbol, start=start, end=end))
+                history = self.get_pair_history(symbol, start=start, end=end)
+
+                if portifolio_vector:
+                    history = pd.concat([history,
+                                         port_vec.loc[history.index[0]:history.index[-1], symbol.split('_')[1]]],
+                                        axis=1)
+                obs_list.append(history)
+
+            if portifolio_vector:
+                keys.append(self._fiat)
+                obs_list.append(port_vec.loc[history.index[0]:history.index[-1], self._fiat])
 
             return pd.concat(obs_list, keys=keys, axis=1).ffill()
 
         except ValueError:
             obs_list = []
             keys = []
+
+            if portifolio_vector:
+                port_vec = self.get_sampled_portfolio()
+
             for symbol in self.pairs:
                 keys.append(symbol)
-                obs_list.append(self.get_pair_history(symbol, start=start, end=end))
+                history = self.get_pair_history(symbol, start=start, end=end)
+
+                if portifolio_vector:
+                    history = pd.concat([history,
+                                      port_vec.loc[history.index[0]:history.index[-1], symbol.split('_')[1]]], axis=1)
+                obs_list.append(history)
+
+            if portifolio_vector:
+                keys.append(self._fiat)
+                obs_list.append(port_vec.loc[history.index[0]:history.index[-1], self._fiat])
 
             return pd.concat(obs_list, keys=keys, axis=1).ffill()
 
@@ -452,9 +479,9 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             return False
 
-    def get_observation(self):
+    def get_observation(self, portfolio_vector=True):
         try:
-            self.obs_df = self.get_history()
+            self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
@@ -664,7 +691,7 @@ class TradingEnvironment(Env):
         self.balance = self.get_balance()
         for symbol in self.symbols:
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
-        obs = self.get_observation()
+        obs = self.get_observation(True)
         self.set_action_vector()
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
@@ -1015,7 +1042,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             done = False
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
+            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
@@ -1055,10 +1082,14 @@ class BacktestEnvironment(PaperTradingEnvironment):
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
-            done = False
+            if self.index >= self.tapi.ohlc_data.shape[0]:
+                done = True
+                self.status["OOD"] += 1
+            else:
+                done = False
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
+            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
