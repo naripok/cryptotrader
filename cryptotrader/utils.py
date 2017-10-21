@@ -104,10 +104,12 @@ class convert_to(object):
     @staticmethod
     def decimal(data):
         try:
-            if isinstance(data, np.float32) or isinstance(data, float):
+            if isinstance(data, Decimal):
+                return data
+            elif isinstance(data, np.float32) or isinstance(data, float):
                 data = np.float64(data)
                 return Decimal.from_float(data).quantize(Decimal('1e-8'))
-            if isinstance(data, np.ndarray):
+            elif isinstance(data, np.ndarray):
                 output = []
                 shape = data.shape
                 for item in data.flatten():

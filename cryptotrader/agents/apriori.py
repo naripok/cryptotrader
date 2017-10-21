@@ -6,8 +6,6 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-from copy import deepcopy
-from multiprocessing import Pool
 
 class APrioriAgent(Agent):
     """
@@ -20,7 +18,7 @@ class APrioriAgent(Agent):
 
     def __init__(self):
         super().__init__()
-        self.episilon = 1e-8
+        self.epsilon = 1e-8
 
     def act(self, obs):
         """
@@ -41,7 +39,7 @@ class APrioriAgent(Agent):
             env._reset_status()
             obs = env.reset(reset_funds=True, reset_results=True)
             t0 = 0
-            step = 0
+            self.step = 0
             episode_reward = 0
 
             while True:
@@ -52,21 +50,21 @@ class APrioriAgent(Agent):
                     obs, reward, _, status = env.step(action)
                     episode_reward += np.float64(reward)
 
-                    step += 1
+                    self.step += 1
 
                     if visualize:
                         env.render()
 
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
-                            step,
+                            self.step,
                             nb_max_episode_steps - env.obs_steps + 1,
-                            int(100 * step / (nb_max_episode_steps - env.obs_steps)),
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
-                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - step) / step))
+                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - self.step) / self.step))
                         ), end="\r", flush=True)
 
-                    if status['OOD'] or step == nb_max_episode_steps:
+                    if status['OOD'] or self.step == nb_max_episode_steps:
                         return episode_reward
 
                     if status['Error']:
@@ -83,9 +81,9 @@ class APrioriAgent(Agent):
             print("\nYou must fit the model or provide indicator parameters in order to test.")
 
         except KeyboardInterrupt:
-            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(step,
+            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
-                                                                             int(100 * step / nb_max_episode_steps)))
+                                                                             int(100 * self.step / nb_max_episode_steps)))
 
 
     def trade(self, env, freq, obs_steps, timeout, verbose=False, render=False):
@@ -193,7 +191,7 @@ class EqualyDistributedTrader(APrioriAgent):
         action[-1] = 0
         return array_normalize(action)
 
-
+    
 class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
@@ -247,7 +245,7 @@ class MomentumTrader(APrioriAgent):
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
                     action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
                              (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
-                              self.episilon)
+                              self.epsilon)
 
 
                 else:
@@ -380,9 +378,9 @@ class MesaMomentumTrader(APrioriAgent):
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
 
-    def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None):
+            nb_max_episode_steps=None, n_workers=1):
         try:
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.df.shape[0] - env.obs_steps
@@ -436,3 +434,151 @@ class MesaMomentumTrader(APrioriAgent):
 
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user.")
+
+
+class PAMR(APrioriAgent):
+    """
+    Passive aggressive mean reversion strategy for portfolio selection.
+
+    Reference:
+        B. Li, P. Zhao, S. C.H. Hoi, and V. Gopalkrishnan.
+        Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
+        https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
+    """
+
+    def __init__(self, sensitivity=0.5, C=500, variant='PAMR'):
+        """
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
+        :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
+        :
+        """
+        super().__init__()
+        self.sensitivity = sensitivity
+        self.C = C
+        self.variant = variant
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        if self.step == 1:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            price_relative = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
+            last_b = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
+                df = obs[symbol].astype(np.float64).copy()
+                price_relative[key] = (df.close.iat[-2] - df.close.iat[-1]) / df.close.iat[-2]
+                last_b[key] = np.float64(df['position'].iat[-1])
+        return self.update(last_b, price_relative)
+
+    def update(self, b, x):
+        """ Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portifolio. """
+        x_mean = np.mean(x)
+        le = max(0., np.dot(b, x) - self.sensitivity)
+
+        if self.variant == 'PAMR':
+            lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
+        elif self.variant == 'PAMR1':
+            lam = min(self.C, le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+        elif self.variant == 'PAMR2':
+            lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C + self.epsilon)
+
+        # limit lambda to avoid numerical problems
+        lam = min(100000, lam)
+
+        # update portfolio
+        b = b - lam * (x - x_mean)
+
+        # project it onto simplex
+        return self.simplex_proj(b)
+
+    def simplex_proj(self, y):
+        """ Projection of y onto simplex. """
+        m = len(y)
+        bget = False
+
+        s = sorted(y, reverse=True)
+        tmpsum = 0.
+
+        for ii in range(m - 1):
+            tmpsum = tmpsum + s[ii]
+            tmax = (tmpsum - 1) / (ii + 1)
+            if tmax >= s[ii + 1]:
+                bget = True
+                break
+
+        if not bget:
+            tmax = (tmpsum + s[m - 1] - 1) / m
+
+        return np.maximum(y - tmax, 0.)
+
+    def set_params(self, **kwargs):
+        self.ma_span = kwargs['sensitivity']
+        # self.C = kwargs['C']
+
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None, n_workers=1):
+        try:
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            i = 0
+            t0 = time()
+            env._reset_status()
+            env.set_training_stage(True)
+            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+
+            def find_hp(**kwargs):
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                self.set_params(**kwargs)
+
+                batch_reward = []
+                for batch in range(batch_size):
+                    # run test on the main process
+                    r = self.test(env,
+                                    nb_episodes=1,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    verbose=False)
+
+                    batch_reward.append(r)
+
+                i += 1
+                if verbose:
+                    t0 += time()
+                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                        nb_steps,
+                                                                        sum(batch_reward),
+                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
+                          end="\r")
+
+                return sum(batch_reward)
+
+            opt_params, info, _ = ot.maximize(find_hp,
+                                              num_evals=nb_steps,
+                                              sensitivity=[0, 1],
+                                              # C=[50, 5000],
+                                              )
+
+            self.set_params(**opt_params)
+            env.set_training_stage(False)
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user.")
+
+
+class FibonacciTrader(APrioriAgent):
+    def init(self):
+        pass
