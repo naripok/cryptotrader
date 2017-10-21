@@ -1060,10 +1060,33 @@ class BacktestEnvironment(PaperTradingEnvironment):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
         self.index = obs_steps
         super().__init__(freq, obs_steps, tapi, name)
+        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
 
     @property
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
+
+    def reset(self, reset_funds=False):
+        """
+        Setup env with initial values
+        :return:
+        """
+
+        if reset_funds:
+            self.obs_df = pd.DataFrame()
+            self.portfolio_df = pd.DataFrame(index=[self.timestamp])
+            self.action_df = pd.DataFrame(index=[self.timestamp])
+
+        self.index = self.obs_steps
+        self.set_observation_space()
+        self.set_action_space()
+        self.balance = self.get_balance()
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+        obs = self.get_observation(True)
+        self.set_action_vector()
+        self.portval = self.calc_total_portval(self.obs_df.index[-1])
+        return obs
 
     def step(self, action):
         try:
@@ -1082,7 +1105,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
-            if self.index >= self.tapi.ohlc_data.shape[0]:
+            if self.index >= self.data_length - 1:
                 done = True
                 self.status["OOD"] += 1
             else:
