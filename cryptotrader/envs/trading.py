@@ -1066,11 +1066,17 @@ class BacktestEnvironment(PaperTradingEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
 
-    def reset(self):
+    def reset(self, reset_funds=False):
         """
         Setup env with initial values
         :return:
         """
+
+        if reset_funds:
+            self.obs_df = pd.DataFrame()
+            self.portfolio_df = pd.DataFrame(index=[self.timestamp])
+            self.action_df = pd.DataFrame(index=[self.timestamp])
+
         self.index = self.obs_steps
         self.set_observation_space()
         self.set_action_space()
