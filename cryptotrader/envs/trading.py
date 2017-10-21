@@ -413,7 +413,7 @@ class TradingEnvironment(Env):
                     else:
                         raise ValueError("Dataframe is to small. Shape: %s" % str(df.shape))
             else:
-                return df.iloc[-self.obs_steps:]
+                return df
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
@@ -664,7 +664,7 @@ class TradingEnvironment(Env):
 
         for symbol in self.pairs:
             self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
-                                        init_portval / (obs.at[self.results.index[0],
+                                        init_portval / (obs.at[init_time,
                                         (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
             self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
@@ -988,6 +988,9 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
+            # Get new index
+            self.index += 1
+
             # Get reward for previous action
             reward = self.get_reward()
 
@@ -1002,7 +1005,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
             done = False
 
-            self.index += 1
+
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation().astype(np.float64), np.float64(reward), done, self.status
