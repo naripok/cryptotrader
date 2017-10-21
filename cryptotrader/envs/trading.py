@@ -905,7 +905,12 @@ class PaperTradingEnvironment(TradingEnvironment):
 
                 symbol = self.action_vector[i]
 
-                crypto_pool = portval * action[i] / self.get_close_price(symbol)
+                try:
+                    crypto_pool = portval * action[i] / self.get_close_price(symbol)
+                except DivisionByZero:
+                    crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
+                except InvalidOperation:
+                    crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
 
                 with localcontext() as ctx:
                     ctx.rounding = ROUND_UP
@@ -939,7 +944,12 @@ class PaperTradingEnvironment(TradingEnvironment):
 
                     fee = self.tax[symbol] * portval * change
 
-                crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
+                try:
+                    crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
+                except DivisionByZero:
+                    crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
+                except InvalidOperation:
+                    crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
 
                 self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
