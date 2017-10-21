@@ -35,7 +35,7 @@ class APrioriAgent(Agent):
         """
         try:
             if nb_max_episode_steps is None:
-                nb_max_episode_steps = 1
+                nb_max_episode_steps = env.data_length
             env.reset_status()
             obs = env.reset()
             t0 = 0
