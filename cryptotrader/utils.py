@@ -105,7 +105,7 @@ class convert_to(object):
     def decimal(data):
         try:
             if isinstance(data, Decimal):
-                return data
+                return data.quantize(Decimal('1e-8'))
             elif isinstance(data, np.float32) or isinstance(data, float):
                 data = np.float64(data)
                 return Decimal.from_float(data).quantize(Decimal('1e-8'))
