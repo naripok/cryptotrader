@@ -8,6 +8,10 @@ import pandas as pd
 import talib as tl
 from decimal import InvalidOperation, DivisionByZero
 
+from functools import partial
+from multiprocessing import Pool
+from copy import deepcopy
+
 class APrioriAgent(Agent):
     """
     Cryptocurrency trading abstract agent
@@ -17,10 +21,10 @@ class APrioriAgent(Agent):
     model: a instance of a sklearn/keras like model, with train and test methods
     """
 
-    def __init__(self):
+    def __init__(self, fiat):
         super().__init__()
         self.epsilon = 1e-8
-        self.fiat = None
+        self.fiat = fiat
 
     def act(self, obs):
         """
@@ -40,7 +44,7 @@ class APrioriAgent(Agent):
             self.fiat = env._fiat
 
             # Reset observations
-            # env.reset_status()
+            env.reset_status()
             obs = env.reset(reset_dfs=True)
 
             # Get max episode length
@@ -204,11 +208,11 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
-    def __init__(self, mean_type='kama'):
+    def __init__(self, fiat, mean_type='kama'):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
-        super().__init__()
+        super().__init__(fiat=fiat)
         self.mean_type = mean_type
         self.ma_span = None
         self.std_span = None
@@ -270,14 +274,14 @@ class MomentumTrader(APrioriAgent):
         try:
             prev_posit = self.get_portfolio_vector(obs)
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs[symbol].astype(np.float64).ffill().copy()
                 df = self.get_ma(df)
 
                 # Get action
                 if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
                     self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = np.zeros(1)
+                    action = 0.0
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
@@ -285,13 +289,14 @@ class MomentumTrader(APrioriAgent):
                              (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
                               self.epsilon)
 
-
                 else:
                     action = np.float64(prev_posit[symbol.split("_")[1]])
-
+                print(symbol, action)
                 position[key] = action
 
-            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+            position[-1] = np.clip(1 - position[:-1].sum(), a_max=np.inf, a_min=0.0)
+
+            print(position)
 
             return array_normalize(position)
 
@@ -326,6 +331,23 @@ class MomentumTrader(APrioriAgent):
                 # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 batch_reward = []
+
+                # eval = partial(self.test,
+                #                 nb_episodes=1,
+                #                 action_repetition=action_repetition,
+                #                 callbacks=callbacks,
+                #                 visualize=visualize,
+                #                 nb_max_episode_steps=nb_max_episode_steps,
+                #                 nb_max_start_steps=nb_max_start_steps,
+                #                 start_step_policy=start_step_policy,
+                #                 verbose=False)
+                #
+                # with Pool(n_workers) as pool:
+                #     for batch in range(int(batch_size/n_workers)):
+                #         rewards = [pool.apply_async(eval, (deepcopy(env),)) for i in range(n_workers)]
+                #         batch_reward.append(sum([r.get() for r in rewards]))
+
+
                 for batch in range(batch_size):
                     # run test on the main process
                     r = self.test(env,
@@ -350,6 +372,8 @@ class MomentumTrader(APrioriAgent):
                           end="\r")
 
                 return sum(batch_reward)
+
+
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
