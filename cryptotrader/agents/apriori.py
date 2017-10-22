@@ -291,12 +291,10 @@ class MomentumTrader(APrioriAgent):
 
                 else:
                     action = np.float64(prev_posit[symbol.split("_")[1]])
-                print(symbol, action)
+
                 position[key] = action
 
             position[-1] = np.clip(1 - position[:-1].sum(), a_max=np.inf, a_min=0.0)
-
-            print(position)
 
             return array_normalize(position)
 

@@ -1060,7 +1060,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
         self.index = obs_steps
         super().__init__(freq, obs_steps, tapi, name)
-        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+        self.data_length = None
         self.training = False
 
     @property
@@ -1073,6 +1073,9 @@ class BacktestEnvironment(PaperTradingEnvironment):
         :return:
         """
         # Reset index
+
+        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+
         if self.training:
             self.index = np.random.random_integers(self.obs_steps, self.data_length - 1)
         else:
