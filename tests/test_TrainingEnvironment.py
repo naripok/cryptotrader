@@ -106,7 +106,7 @@ class Test_env_setup(object):
             assert keys[i] in self.env.symbols
         # TODO other test cases
 
-    @given(amount=st.floats(max_value=1e18, allow_infinity=False, allow_nan=False))
+    @given(amount=st.floats(max_value=1e12, allow_infinity=False, allow_nan=False))
     def test_set_init_crypto(self, amount):
         symbols = self.env.df.columns.levels[0][:-1]
         for symbol in symbols:
@@ -117,7 +117,7 @@ class Test_env_setup(object):
                 with pytest.raises(AssertionError):
                     self.env.set_init_crypto(amount, symbol)
 
-    @given(amount=st.floats(max_value=1e18, allow_infinity=False, allow_nan=False))
+    @given(amount=st.floats(max_value=1e12, allow_infinity=False, allow_nan=False))
     def test_set_init_fiat(self, amount):
         if amount >= Decimal('0.0'):
             self.env.set_init_fiat(amount)
