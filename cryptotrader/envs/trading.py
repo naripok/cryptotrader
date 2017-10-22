@@ -13,12 +13,12 @@ class BacktestDataFeed(object):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, freq, pairs=[], portifolio={}):
+    def __init__(self, tapi, period, pairs=[], portifolio={}):
         self.tapi = tapi
         self.ohlc_data = {}
         self.portfolio = portifolio
         self.pairs = pairs
-        self.freq = freq
+        self.period = period
 
     @property
     def balance(self):
@@ -46,7 +46,7 @@ class BacktestDataFeed(object):
         # TODO WRITE TEST
 
         for pair in self.pairs:
-            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.freq * 60,
+            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                start=start, end=end
                                                               ))
             # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
@@ -55,7 +55,7 @@ class BacktestDataFeed(object):
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
-            assert np.allclose(period, self.freq * 60), "Invalid period"
+            assert np.allclose(period, self.period * 60), "Invalid period"
             assert currencyPair in self.pairs, "Invalid pair"
 
             if not start:
@@ -84,7 +84,7 @@ class TradingEnvironment(Env):
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, freq, obs_steps, tapi, name="TradingEnvironment"):
+    def __init__(self, period, obs_steps, tapi, name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -94,7 +94,7 @@ class TradingEnvironment(Env):
         # Environment configuration
         self.epsilon = convert_to.decimal('1E-8')
         self._obs_steps = None
-        self._freq = None
+        self._period = None
         self.pairs = []
         self._crypto = []
         self._fiat = None
@@ -115,7 +115,7 @@ class TradingEnvironment(Env):
                          "Trading Environment Initialized!")
 
         # Setup
-        self.freq = freq
+        self.period = period
         self.obs_steps = obs_steps
 
     ## Env properties
@@ -130,14 +130,14 @@ class TradingEnvironment(Env):
         self._obs_steps = value
 
     @property
-    def freq(self):
-        return self._freq
+    def period(self):
+        return self._period
 
-    @freq.setter
-    def freq(self, value):
+    @period.setter
+    def period(self, value):
         assert isinstance(value, int) and value >= 1,\
-            "Frequency must be a integer >= 1."
-        self._freq = value
+            "Period must be a integer >= 1."
+        self._period = value
 
     @property
     def symbols(self):
@@ -322,7 +322,7 @@ class TradingEnvironment(Env):
 
             else:
                 while datetime.strptime(df.date.iat[0], "%Y-%m-%d %H:%M:%S") - \
-                        timedelta(minutes=self.freq * self.obs_steps) < \
+                        timedelta(minutes=self.period * self.obs_steps) < \
                         datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
 
                     market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
@@ -348,7 +348,7 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         df = self.get_pair_trades(pair, start=start, end=end)
 
-        freq = "%dmin" % self.freq
+        period = "%dmin" % self.period
 
         # Sample the trades into OHLC data
         df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
@@ -356,14 +356,14 @@ class TradingEnvironment(Env):
         df.index = df.date.apply(pd.to_datetime)
 
         # TODO REMOVE NANS
-        index = df.resample(freq).first().index
+        index = df.resample(period).first().index
         out = pd.DataFrame(index=index)
 
-        out['open'] = convert_and_clean(df['rate'].resample(freq).first())
-        out['high'] = convert_and_clean(df['rate'].resample(freq).max())
-        out['low'] = convert_and_clean(df['rate'].resample(freq).min())
-        out['close'] = convert_and_clean(df['rate'].resample(freq).last())
-        out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
+        out['open'] = convert_and_clean(df['rate'].resample(period).first())
+        out['high'] = convert_and_clean(df['rate'].resample(period).max())
+        out['low'] = convert_and_clean(df['rate'].resample(period).min())
+        out['close'] = convert_and_clean(df['rate'].resample(period).last())
+        out['volume'] = convert_and_clean(df['amount'].resample(period).sum())
 
         return out
 
@@ -371,14 +371,14 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
         if start or end:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
                                                   start=start, end=end
                                                   )
         else:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
                                                   start=datetime.timestamp(self.timestamp -
                                                                            timedelta(
-                                                                               minutes=self.freq * (self.obs_steps + 2))),
+                                                                               minutes=self.period * (self.obs_steps + 2))),
                                                   end=datetime.timestamp(self.timestamp)
                                                   )
 
@@ -400,7 +400,7 @@ class TradingEnvironment(Env):
         """
         # TODO RETURN POSITION ON OBS
         try:
-            if self.freq < 5:
+            if self.period < 5:
                 df = self.get_ohlc_from_trades(pair)
             else:
                 df = self.get_ohlc(pair, start=start, end=end)
@@ -413,7 +413,7 @@ class TradingEnvironment(Env):
                 # Else, get more data and append
                 else:
                     sleep(2)
-                    if self.freq < 5:
+                    if self.period < 5:
                         df = self.get_ohlc_from_trades(pair)
                     else:
                         df = self.get_ohlc(pair, start=start, end=end)
@@ -698,10 +698,10 @@ class TradingEnvironment(Env):
 
     ## Analytics methods
     def get_sampled_portfolio(self):
-        return self.portfolio_df.resample("%dmin" % self.freq).last()
+        return self.portfolio_df.resample("%dmin" % self.period).last()
 
     def get_sampled_actions(self):
-        return self.action_df.resample("%dmin" % self.freq).last()
+        return self.action_df.resample("%dmin" % self.period).last()
 
     def get_results(self, window=7):
         """
@@ -949,8 +949,8 @@ class PaperTradingEnvironment(TradingEnvironment):
     """
     Paper trading environment for financial strategies forward testing
     """
-    def __init__(self, freq, obs_steps, tapi, name):
-        super().__init__(freq, obs_steps, tapi, name)
+    def __init__(self, period, obs_steps, tapi, name):
+        super().__init__(period, obs_steps, tapi, name)
 
     def simulate_trade(self, action, timestamp):
         # Assert inputs
@@ -1056,10 +1056,10 @@ class BacktestEnvironment(PaperTradingEnvironment):
     """
     Backtest environment for financial strategies history testing
     """
-    def __init__(self, freq, obs_steps, tapi, name):
+    def __init__(self, period, obs_steps, tapi, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
         self.index = obs_steps
-        super().__init__(freq, obs_steps, tapi, name)
+        super().__init__(period, obs_steps, tapi, name)
         self.data_length = None
         self.training = False
 
