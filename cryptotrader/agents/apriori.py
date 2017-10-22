@@ -6,6 +6,7 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
+from decimal import InvalidOperation, DivisionByZero
 
 class APrioriAgent(Agent):
     """
@@ -19,6 +20,7 @@ class APrioriAgent(Agent):
     def __init__(self):
         super().__init__()
         self.epsilon = 1e-8
+        self.fiat = None
 
     def act(self, obs):
         """
@@ -36,6 +38,7 @@ class APrioriAgent(Agent):
         try:
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.data_length
+            self.fiat = env._fiat
             env.reset_status()
             obs = env.reset()
             t0 = 0
@@ -75,7 +78,7 @@ class APrioriAgent(Agent):
                 except Exception as e:
                     print("Model Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
+                    raise e
 
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order to test.")
@@ -207,6 +210,35 @@ class MomentumTrader(APrioriAgent):
         self.opt_params = None
 
     # GET INDICATORS FUNCTIONS
+    def get_portfolio_vector(self, obs):
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[-1], (symbol, 'close'))
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[-1].values
+
+        port_vec = {}
+        for symbol in coin_val:
+            try:
+                port_vec[symbol] = coin_val[symbol] / portval
+            except DivisionByZero:
+                port_vec[symbol] = coin_val[symbol] / (portval + Decimal('1E-8'))
+            except InvalidOperation:
+                port_vec[symbol] = coin_val[symbol] / (portval + Decimal('1E-8'))
+        try:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+        except DivisionByZero:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + Decimal('1E-8'))
+        except InvalidOperation:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + Decimal('1E-8'))
+
+        return port_vec
+
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
@@ -231,9 +263,10 @@ class MomentumTrader(APrioriAgent):
         Performs a single step on the environment
         """
         try:
+            prev_posit = self.get_portfolio_vector(obs)
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-                df = obs[symbol].astype(np.float64).copy()
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
+                df = obs[symbol].astype(np.float64).ffill().copy()
                 df = self.get_ma(df)
 
                 # Get action
@@ -249,7 +282,7 @@ class MomentumTrader(APrioriAgent):
 
 
                 else:
-                    action = np.float64(df['position'].iat[-1])
+                    action = np.float64(prev_posit[symbol.split("_")[1]])
 
                 position[key] = action
 
