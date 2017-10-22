@@ -224,7 +224,7 @@ class TradingEnvironment(Env):
 
     @property
     def balance(self):
-        return self.portfolio_df.iloc[-1, :].to_dict()
+        return self.portfolio_df.ffill().iloc[-1, :].to_dict()
 
     @balance.setter
     def balance(self, values):
