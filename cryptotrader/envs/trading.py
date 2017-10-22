@@ -669,7 +669,7 @@ class TradingEnvironment(Env):
     def set_action_space(self):
         # Action space
         self.action_space = Box(0., 1., len(self.symbols))
-        self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
+        # self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
     def set_action_vector(self):
         action_vector = []
@@ -1061,6 +1061,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
         self.index = obs_steps
         super().__init__(freq, obs_steps, tapi, name)
         self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+        self.training = False
 
     @property
     def timestamp(self):
@@ -1072,7 +1073,10 @@ class BacktestEnvironment(PaperTradingEnvironment):
         :return:
         """
         # Reset index
-        self.index = self.obs_steps
+        if self.training:
+            self.index = np.random.random_integers(self.obs_steps, self.data_length - 1)
+        else:
+            self.index = self.obs_steps
         # Reset log dfs
         if reset_dfs:
             self.obs_df = pd.DataFrame()

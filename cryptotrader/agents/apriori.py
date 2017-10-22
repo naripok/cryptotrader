@@ -41,7 +41,7 @@ class APrioriAgent(Agent):
 
             # Reset observations
             # env.reset_status()
-            obs = env.reset()
+            obs = env.reset(reset_dfs=True)
 
             # Get max episode length
             if nb_max_episode_steps is None:
@@ -140,7 +140,7 @@ class APrioriAgent(Agent):
                         break
 
 
-                    sleep(freq * 59.5)
+                    sleep(freq * 60)
 
                 except Exception as e:
                     print("Agent Error:",
@@ -302,12 +302,14 @@ class MomentumTrader(APrioriAgent):
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
         try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
             i = 0
             t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
+            env.reset_status()
+            env.training = True
             env.reset(reset_dfs=True)
 
             @ot.constraints.violations_defaulted(-np.inf)
@@ -363,10 +365,11 @@ class MomentumTrader(APrioriAgent):
                     opt_params[key] = round(value)
 
             self.set_params(**opt_params)
-            env.set_training_stage(False)
+            env.training = False
             return opt_params, info
 
         except KeyboardInterrupt:
+            env.training = False
             print("\nOptimization interrupted by user.")
 
 
