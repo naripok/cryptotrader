@@ -1066,26 +1066,30 @@ class BacktestEnvironment(PaperTradingEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
 
-    def reset(self, reset_funds=False):
+    def reset(self, reset_dfs=False):
         """
         Setup env with initial values
         :return:
         """
-
+        # Reset index
         self.index = self.obs_steps
-
-        if reset_funds:
+        # Reset log dfs
+        if reset_dfs:
             self.obs_df = pd.DataFrame()
             self.portfolio_df = pd.DataFrame()
             self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
-
+        # Set spaces
         self.set_observation_space()
         self.set_action_space()
+        # Reset balance
         self.balance = self.get_balance()
+        # Get fee values
         for symbol in self.symbols:
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
         obs = self.get_observation(True)
+        # Get assets order
         self.set_action_vector()
+        # Reset portfolio value
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
 

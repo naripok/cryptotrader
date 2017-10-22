@@ -36,24 +36,31 @@ class APrioriAgent(Agent):
         Test agent on environment
         """
         try:
+            # Get env params
+            self.fiat = env._fiat
+
+            # Reset observations
+            # env.reset_status()
+            obs = env.reset()
+
+            # Get max episode length
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.data_length
-            self.fiat = env._fiat
-            env.reset_status()
-            obs = env.reset()
-            t0 = 0
+
+            #Reset counters
+            t0 = time()
             self.step = 0
             episode_reward = 0
 
             while True:
                 try:
-                    t0 += time()
-
                     action = self.act(obs)
                     obs, reward, _, status = env.step(action)
                     episode_reward += np.float64(reward)
 
                     self.step += 1
+
+                    t0 += time()
 
                     if visualize:
                         env.render()
@@ -303,7 +310,7 @@ class MomentumTrader(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             @ot.constraints.violations_defaulted(-np.inf)
             @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
@@ -421,7 +428,7 @@ class MesaMomentumTrader(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
@@ -565,7 +572,7 @@ class PAMR(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
