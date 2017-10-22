@@ -27,7 +27,7 @@ from bokeh.plotting import figure, show
 
 
 # Decimal precision
-getcontext().prec = 32
+getcontext().prec = 26
 
 # Debug flag
 debug = True
