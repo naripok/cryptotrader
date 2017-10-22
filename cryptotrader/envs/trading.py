@@ -1072,12 +1072,13 @@ class BacktestEnvironment(PaperTradingEnvironment):
         :return:
         """
 
+        self.index = self.obs_steps
+
         if reset_funds:
             self.obs_df = pd.DataFrame()
             self.portfolio_df = pd.DataFrame(index=[self.timestamp])
             self.action_df = pd.DataFrame(index=[self.timestamp])
 
-        self.index = self.obs_steps
         self.set_observation_space()
         self.set_action_space()
         self.balance = self.get_balance()
