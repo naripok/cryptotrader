@@ -68,7 +68,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps + 1,
+                            nb_max_episode_steps - env.obs_steps - 1,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
                             str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - self.step) / self.step))
@@ -112,8 +112,6 @@ class APrioriAgent(Agent):
             episode_reward = 0
             while True:
                 try:
-                    t_step = time()
-
                     action = self.forward(obs)
                     obs, reward, done, status = env.step(action)
                     episode_reward += np.float64(reward)

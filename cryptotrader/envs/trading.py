@@ -106,7 +106,7 @@ class TradingEnvironment(Env):
         self.action_df = pd.DataFrame()
 
         # Logging and debugging
-        self.status = None
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
         if not os.path.exists('./logs'):
             os.makedirs('./logs')
