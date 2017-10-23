@@ -63,8 +63,6 @@ class APrioriAgent(Agent):
 
                     self.step += 1
 
-                    t0 += time()
-
                     if visualize:
                         env.render()
 
@@ -74,8 +72,9 @@ class APrioriAgent(Agent):
                             nb_max_episode_steps - env.obs_steps - 1,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
-                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - self.step) / self.step))
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps) - self.step), unit='s'))
                         ), end="\r", flush=True)
+                        t0 = time()
 
                     if status['OOD'] or self.step == nb_max_episode_steps:
                         return episode_reward
@@ -140,9 +139,9 @@ class APrioriAgent(Agent):
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Portfolio vector: {4}".format(
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}".format(
                                 self.step,
-                                str(pd.to_timedelta(time() - t0)),
+                                str(pd.to_timedelta(time() - t0, unit='s')),
                                 [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
                                 env.calc_total_portval(),
                                 env.action_df.iloc[-1].astype('f').to_dict()
@@ -171,7 +170,7 @@ class APrioriAgent(Agent):
                   "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(self.step,
                                                                                                       str(
                                                                                                           pd.to_timedelta(
-                                                                                                              t0)),
+                                                                                                              time() - t0, unit='s')),
                                                                                                       actions,
                                                                                                       episode_reward
                                                                                                       ))
@@ -385,13 +384,12 @@ class MomentumTrader(APrioriAgent):
 
                 i += 1
                 if verbose:
-                    t0 += time()
                     print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                         nb_steps,
                                                                         sum(batch_reward),
-                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
+                                                                        str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                           end="\r")
-
+                    t0 = time()
                 return sum(batch_reward)
 
 
