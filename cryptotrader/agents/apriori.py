@@ -118,11 +118,14 @@ class APrioriAgent(Agent):
             action = np.zeros(len(env.symbols))
             status = env.status
             last_action_time = datetime.fromtimestamp(time()) - timedelta(minutes=env.period)
+            can_act = True
             while True:
                 try:
                     if datetime.fromtimestamp(time()) >= last_action_time + timedelta(minutes=env.period) and \
                             datetime.fromtimestamp(time()).minute % env.period == 0:
+                        can_act = True
 
+                    if can_act:
                         action = self.act(obs)
                         obs, reward, done, status = env.step(action)
                         episode_reward += np.float64(reward)
@@ -130,6 +133,7 @@ class APrioriAgent(Agent):
                         if done:
                             self.step += 1
                             last_action_time = datetime.fromtimestamp(time())
+                            can_act = False
 
                     else:
                         obs = env.get_observation(True)
@@ -180,14 +184,14 @@ class DummyTrader(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
     """
-    def __init__(self, random_process=None, activation='softmax'):
+    def __init__(self, random_process=None, activation='softmax', fiat="USDT"):
         """
         Initialization method
         :param env: Apocalipse driver instance
         :param random_process: Random process used to sample actions from
         :param activation: Portifolio activation function
         """
-        super().__init__()
+        super().__init__(fiat)
 
         self.random_process = random_process
         self.activation = activation
@@ -209,8 +213,8 @@ class DummyTrader(APrioriAgent):
 
 
 class EqualyDistributedTrader(APrioriAgent):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, fiat):
+        super().__init__(fiat)
 
     def act(self, obs):
         n_pairs = obs.columns.levels[0].shape[0]
