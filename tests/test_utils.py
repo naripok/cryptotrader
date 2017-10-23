@@ -15,7 +15,7 @@ from decimal import Decimal, InvalidOperation
 
 @given(st.one_of(st.floats(allow_nan=False, allow_infinity=False), st.integers()))
 def test_convert_to(data):
-    if abs(data) < Decimal('1e20'):
+    if abs(data) < Decimal('1e16'):
         number = convert_to.decimal(data)
         assert number == Decimal.from_float(data).quantize(Decimal('1e-8'))
     else:
@@ -25,13 +25,13 @@ def test_convert_to(data):
 
 @given(arrays(dtype=np.float32,
               shape=array_shapes(),
-              elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e15, min_value=-1e15)))
+              elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e6, min_value=-1e6)))
 def test_array_normalize(data):
     array_normalize(data)
 
 @given(arrays(dtype=np.float32,
               shape=array_shapes(),
-              elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e15, min_value=-1e15)))
+              elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e14, min_value=-1e14)))
 def test_array_softmax(data):
     array_softmax(data)
 

@@ -13,12 +13,12 @@ class BacktestDataFeed(object):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, freq, pairs=[], portifolio={}):
+    def __init__(self, tapi, period, pairs=[], portifolio={}):
         self.tapi = tapi
         self.ohlc_data = {}
         self.portfolio = portifolio
         self.pairs = pairs
-        self.freq = freq
+        self.period = period
 
     @property
     def balance(self):
@@ -46,7 +46,7 @@ class BacktestDataFeed(object):
         # TODO WRITE TEST
 
         for pair in self.pairs:
-            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.freq * 60,
+            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                start=start, end=end
                                                               ))
             # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
@@ -55,7 +55,7 @@ class BacktestDataFeed(object):
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
-            assert np.allclose(period, self.freq * 60), "Invalid period"
+            assert np.allclose(period, self.period * 60), "Invalid period"
             assert currencyPair in self.pairs, "Invalid pair"
 
             if not start:
@@ -79,12 +79,46 @@ class BacktestDataFeed(object):
                 raise PoloniexError("Invalid currency pair.")
 
 
+class PaperTradingDataFeed(object):
+    """
+    Data feeder for backtesting with TradingEnvironment.
+    """
+    # TODO WRITE TESTS
+    def __init__(self, tapi, period, pairs=[], portifolio={}):
+        self.tapi = tapi
+        self.portfolio = portifolio
+        self.pairs = pairs
+        self.period = period
+
+    @property
+    def balance(self):
+        return self.portfolio
+
+    @balance.setter
+    def balance(self, port):
+        assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
+        for key in port:
+            self.portfolio[key] = port[key]
+
+    def returnBalances(self):
+        return self.portfolio
+
+    def returnFeeInfo(self):
+        return self.tapi.returnFeeInfo()
+
+    def returnCurrencies(self):
+        return self.tapi.returnCurrencies()
+
+    def returnChartData(self, currencyPair, period, start=None, end=None):
+        return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+
+
 class TradingEnvironment(Env):
     """
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, freq, obs_steps, tapi, name="TradingEnvironment"):
+    def __init__(self, period, obs_steps, tapi, name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -94,7 +128,7 @@ class TradingEnvironment(Env):
         # Environment configuration
         self.epsilon = convert_to.decimal('1E-8')
         self._obs_steps = None
-        self._freq = None
+        self._period = None
         self.pairs = []
         self._crypto = []
         self._fiat = None
@@ -106,7 +140,7 @@ class TradingEnvironment(Env):
         self.action_df = pd.DataFrame()
 
         # Logging and debugging
-        self.status = None
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
         if not os.path.exists('./logs'):
             os.makedirs('./logs')
@@ -115,7 +149,7 @@ class TradingEnvironment(Env):
                          "Trading Environment Initialized!")
 
         # Setup
-        self.freq = freq
+        self.period = period
         self.obs_steps = obs_steps
 
     ## Env properties
@@ -130,14 +164,14 @@ class TradingEnvironment(Env):
         self._obs_steps = value
 
     @property
-    def freq(self):
-        return self._freq
+    def period(self):
+        return self._period
 
-    @freq.setter
-    def freq(self, value):
+    @period.setter
+    def period(self, value):
         assert isinstance(value, int) and value >= 1,\
-            "Frequency must be a integer >= 1."
-        self._freq = value
+            "Period must be a integer >= 1."
+        self._period = value
 
     @property
     def symbols(self):
@@ -224,15 +258,19 @@ class TradingEnvironment(Env):
 
     @property
     def balance(self):
-        return self.portfolio_df.iloc[-1, :].to_dict()
+        return self.portfolio_df.ffill().iloc[-1, :].to_dict()
 
     @balance.setter
     def balance(self, values):
         try:
             assert isinstance(values, dict), "Balance must be a dictionary containing the currencies amount."
-            timestamp = self.timestamp
+            try:
+                timestamp = values['timestamp']
+            except KeyError:
+                timestamp = self.timestamp
             for symbol, value in values.items():
-                self.portfolio_df.at[timestamp, symbol] = convert_to.decimal(value)
+                if symbol is not 'timestamp':
+                    self.portfolio_df.at[timestamp, symbol] = convert_to.decimal(value)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.balance, self.parse_error(e))
@@ -322,7 +360,7 @@ class TradingEnvironment(Env):
 
             else:
                 while datetime.strptime(df.date.iat[0], "%Y-%m-%d %H:%M:%S") - \
-                        timedelta(minutes=self.freq * self.obs_steps) < \
+                        timedelta(minutes=self.period * self.obs_steps) < \
                         datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
 
                     market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
@@ -348,7 +386,7 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         df = self.get_pair_trades(pair, start=start, end=end)
 
-        freq = "%dmin" % self.freq
+        period = "%dmin" % self.period
 
         # Sample the trades into OHLC data
         df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
@@ -356,14 +394,14 @@ class TradingEnvironment(Env):
         df.index = df.date.apply(pd.to_datetime)
 
         # TODO REMOVE NANS
-        index = df.resample(freq).first().index
+        index = df.resample(period).first().index
         out = pd.DataFrame(index=index)
 
-        out['open'] = convert_and_clean(df['rate'].resample(freq).first())
-        out['high'] = convert_and_clean(df['rate'].resample(freq).max())
-        out['low'] = convert_and_clean(df['rate'].resample(freq).min())
-        out['close'] = convert_and_clean(df['rate'].resample(freq).last())
-        out['volume'] = convert_and_clean(df['amount'].resample(freq).sum())
+        out['open'] = convert_and_clean(df['rate'].resample(period).first())
+        out['high'] = convert_and_clean(df['rate'].resample(period).max())
+        out['low'] = convert_and_clean(df['rate'].resample(period).min())
+        out['close'] = convert_and_clean(df['rate'].resample(period).last())
+        out['volume'] = convert_and_clean(df['amount'].resample(period).sum())
 
         return out
 
@@ -371,14 +409,14 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
         if start or end:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
-                                                  start=start, end=end
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
+                                                  start=datetime.timestamp(start), end=datetime.timestamp(end)
                                                   )
         else:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.freq * 60,
+            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
                                                   start=datetime.timestamp(self.timestamp -
                                                                            timedelta(
-                                                                               minutes=self.freq * (self.obs_steps + 2))),
+                                                                               minutes=self.period * (self.obs_steps))),
                                                   end=datetime.timestamp(self.timestamp)
                                                   )
 
@@ -400,42 +438,43 @@ class TradingEnvironment(Env):
         """
         # TODO RETURN POSITION ON OBS
         try:
-            if self.freq < 5:
+            if self.period < 5:
                 df = self.get_ohlc_from_trades(pair)
             else:
                 df = self.get_ohlc(pair, start=start, end=end)
 
             if not start and not end:
                 # If df is large enough, return
-                if df.shape[0] >= self.obs_steps:
-                    return df.iloc[-self.obs_steps:]
-
-                # Else, get more data and append
-                else:
-                    sleep(2)
-                    if self.freq < 5:
+                while not df.shape[0] >= self.obs_steps:
+                    sleep(5)
+                    if self.period < 5:
                         df = self.get_ohlc_from_trades(pair)
                     else:
                         df = self.get_ohlc(pair, start=start, end=end)
 
-                    if df.shape[0] >= self.obs_steps:
-                        return df.iloc[-self.obs_steps:]
-                    else:
-                        raise ValueError("Dataframe is to small. Shape: %s" % str(df.shape))
+                assert df.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(df.shape)
+                return df.iloc[-self.obs_steps:]
+
             else:
                 return df
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
-            return False
+            raise e
 
     def get_history(self, start=None, end=None, portifolio_vector=False):
         try:
+
+            if not end:
+                end = self.timestamp
+            if not start:
+                start = end - timedelta(minutes=self.period * (self.obs_steps))
+
             obs_list = []
             keys = []
 
             if portifolio_vector:
-                port_vec = self.get_sampled_portfolio().ffill()
+                port_vec = self.get_sampled_portfolio(start, end)
 
             for symbol in self.pairs:
                 keys.append(symbol)
@@ -443,41 +482,19 @@ class TradingEnvironment(Env):
 
                 if portifolio_vector:
                     history = pd.concat([history,
-                                         port_vec.loc[history.index[0]:history.index[-1], symbol.split('_')[1]]],
-                                        axis=1)
+                                         port_vec[symbol.split('_')[1]]],
+                                         axis=1)
                 obs_list.append(history)
 
             if portifolio_vector:
                 keys.append(self._fiat)
-                obs_list.append(port_vec.loc[history.index[0]:history.index[-1], self._fiat])
+                obs_list.append(port_vec[self._fiat])
 
-            return pd.concat(obs_list, keys=keys, axis=1).ffill()
-
-        except ValueError:
-            obs_list = []
-            keys = []
-
-            if portifolio_vector:
-                port_vec = self.get_sampled_portfolio()
-
-            for symbol in self.pairs:
-                keys.append(symbol)
-                history = self.get_pair_history(symbol, start=start, end=end)
-
-                if portifolio_vector:
-                    history = pd.concat([history,
-                                      port_vec.loc[history.index[0]:history.index[-1], symbol.split('_')[1]]], axis=1)
-                obs_list.append(history)
-
-            if portifolio_vector:
-                keys.append(self._fiat)
-                obs_list.append(port_vec.loc[history.index[0]:history.index[-1], self._fiat])
-
-            return pd.concat(obs_list, keys=keys, axis=1).ffill()
+            return pd.concat(obs_list, keys=keys, axis=1).ffill().bfill()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
-            return False
+            raise e
 
     def get_observation(self, portfolio_vector=False):
         try:
@@ -485,7 +502,7 @@ class TradingEnvironment(Env):
             return self.obs_df
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
-            return False
+            raise e
 
     def get_balance(self):
         try:
@@ -617,6 +634,10 @@ class TradingEnvironment(Env):
                     except InvalidOperation:
                         action /= (action.sum() + self.epsilon)
 
+        except Exception as e:
+            self.logger.error(TradingEnvironment.assert_action, self.parse_error(e))
+            raise e
+
         return action
 
     def log_action(self, timestamp, symbol, value):
@@ -669,7 +690,7 @@ class TradingEnvironment(Env):
     def set_action_space(self):
         # Action space
         self.action_space = Box(0., 1., len(self.symbols))
-        self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
+        # self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
     def set_action_vector(self):
         action_vector = []
@@ -697,11 +718,11 @@ class TradingEnvironment(Env):
         return obs
 
     ## Analytics methods
-    def get_sampled_portfolio(self):
-        return self.portfolio_df.resample("%dmin" % self.freq).last()
+    def get_sampled_portfolio(self, start, end):
+        return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_sampled_actions(self):
-        return self.action_df.resample("%dmin" % self.freq).last()
+    def get_sampled_actions(self, start, end):
+        return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
     def get_results(self, window=7):
         """
@@ -709,10 +730,12 @@ class TradingEnvironment(Env):
         :return:
         """
 
-        self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
+        end = self.portfolio_df.index[-1]
+        start = self.portfolio_df.index[0]
 
-        obs = self.get_history(end=datetime.timestamp(self.results.index[-1]),
-             start=datetime.timestamp(self.results.index[0]))
+        self.results = self.get_sampled_portfolio(start, end).join(self.get_sampled_actions(start, end), rsuffix='_posit').ffill()
+
+        obs = self.get_history(end=end, start=start)
 
         self.results['benchmark'] = convert_to.decimal('0e-8')
         self.results['returns'] = convert_to.decimal(np.nan)
@@ -727,9 +750,9 @@ class TradingEnvironment(Env):
         init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
         for symbol in self._crypto:
-            init_portval += self.get_sampled_portfolio().get_value(init_time, symbol) * \
+            init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
                            obs[self._fiat + '_' + symbol].get_value(init_time, 'close')
-        init_portval += self.get_sampled_portfolio().get_value(init_time, self._fiat)
+        init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, self._fiat)
 
         for symbol in self.pairs:
             self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
@@ -949,81 +972,93 @@ class PaperTradingEnvironment(TradingEnvironment):
     """
     Paper trading environment for financial strategies forward testing
     """
-    def __init__(self, freq, obs_steps, tapi, name):
-        super().__init__(freq, obs_steps, tapi, name)
+    def __init__(self, period, obs_steps, tapi, name):
+        super().__init__(period, obs_steps, tapi, name)
 
     def simulate_trade(self, action, timestamp):
-        # Assert inputs
-        action = self.assert_action(action)
-        # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-        #     self.observation_space.contains(observation[symbol])
-        # assert isinstance(timestamp, pd.Timestamp)
+        try:
+            # Assert inputs
+            action = self.assert_action(action)
+            # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
+            #     self.observation_space.contains(observation[symbol])
+            # assert isinstance(timestamp, pd.Timestamp)
 
-        # Log desired action
-        self.log_action_vector(timestamp, action, False)
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
 
-        # Calculate position change given action
-        posit_change = (convert_to.decimal(action) - self.calc_portfolio_vector())[:-1]
+            # Calculate position change given action
+            posit_change = (convert_to.decimal(action) - self.calc_portfolio_vector())[:-1]
 
-        # Get initial portval
-        portval = self.calc_total_portval()
+            # Get initial portval
+            portval = self.calc_total_portval()
 
-        # Sell assets first
-        for i, change in enumerate(posit_change):
-            if change < convert_to.decimal('0E-8'):
+            # Sell assets first
+            for i, change in enumerate(posit_change):
+                if change < convert_to.decimal('0E-8'):
 
-                symbol = self.action_vector[i]
+                    symbol = self.action_vector[i]
 
-                try:
-                    crypto_pool = portval * action[i] / self.get_close_price(symbol)
-                except DivisionByZero:
-                    crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
-                except InvalidOperation:
-                    crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
+                    try:
+                        crypto_pool = portval * action[i] / self.get_close_price(symbol)
+                    except DivisionByZero:
+                        crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
+                    except InvalidOperation:
+                        crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
 
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_UP
 
-                    fee = portval * change.copy_abs() * self.tax[symbol]
+                        fee = portval * change.copy_abs() * self.tax[symbol]
 
-                self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
+                    self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
 
-                self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
-        # Uodate prev portval with deduced taxes
-        portval = self.calc_total_portval()
+            # Uodate prev portval with deduced taxes
+            portval = self.calc_total_portval()
 
-        # Then buy some goods
-        for i, change in enumerate(posit_change):
-            if change > convert_to.decimal('0E-8'):
+            # Then buy some goods
+            for i, change in enumerate(posit_change):
+                if change > convert_to.decimal('0E-8'):
 
-                symbol = self.action_vector[i]
+                    symbol = self.action_vector[i]
 
-                self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
+                    self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
 
-                # if fiat_pool is negative, deduce it from portval and clip
-                try:
-                    assert self.fiat >= convert_to.decimal('0E-8')
-                except AssertionError:
-                    portval += self.fiat
-                    self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
+                    # if fiat_pool is negative, deduce it from portval and clip
+                    try:
+                        assert self.fiat >= convert_to.decimal('0E-8')
+                    except AssertionError:
+                        portval += self.fiat
+                        self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
 
-                with localcontext() as ctx:
-                    ctx.rounding = ROUND_UP
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_UP
 
-                    fee = self.tax[symbol] * portval * change
+                        fee = self.tax[symbol] * portval * change
 
-                try:
-                    crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
-                except DivisionByZero:
-                    crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
-                except InvalidOperation:
-                    crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
+                    try:
+                        crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
+                    except DivisionByZero:
+                        crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
+                    except InvalidOperation:
+                        crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
 
-                self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
-        # Log executed action
-        self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
+            # Log executed action and final balance
+            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
+            final_balance = self.balance
+            final_balance['timestamp'] = timestamp
+            self.balance = final_balance
+
+        except Exception as e:
+            self.logger.error(PaperTradingEnvironment.simulate_trade, self.parse_error(e))
+            if hasattr(self, 'email') and hasattr(self, 'psw'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
 
     def step(self, action):
         try:
@@ -1039,52 +1074,64 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
-            done = False
+            done = True
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
         except Exception as e:
-            self.logger.error(TradingEnvironment.step, self.parse_error(e))
+            self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
-            return False
+            raise e
 
 
 class BacktestEnvironment(PaperTradingEnvironment):
     """
     Backtest environment for financial strategies history testing
     """
-    def __init__(self, freq, obs_steps, tapi, name):
+    def __init__(self, period, obs_steps, tapi, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
         self.index = obs_steps
-        super().__init__(freq, obs_steps, tapi, name)
-        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+        super().__init__(period, obs_steps, tapi, name)
+        self.data_length = None
+        self.training = False
 
     @property
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
 
-    def reset(self, reset_funds=False):
+    def reset(self, reset_dfs=False):
         """
         Setup env with initial values
         :return:
         """
+        # Reset index
 
-        if reset_funds:
+        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+
+        if self.training:
+            self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
+        else:
+            self.index = self.obs_steps
+        # Reset log dfs
+        if reset_dfs:
             self.obs_df = pd.DataFrame()
-            self.portfolio_df = pd.DataFrame(index=[self.timestamp])
-            self.action_df = pd.DataFrame(index=[self.timestamp])
-
-        self.index = self.obs_steps
+            self.portfolio_df = pd.DataFrame()
+            self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
+        # Set spaces
         self.set_observation_space()
         self.set_action_space()
+        # Reset balance
         self.balance = self.get_balance()
+        # Get fee values
         for symbol in self.symbols:
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
         obs = self.get_observation(True)
+        # Get assets order
         self.set_action_vector()
+        # Reset portfolio value
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs
 
@@ -1105,7 +1152,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
-            if self.index >= self.data_length - 1:
+            if self.index >= self.data_length - 2:
                 done = True
                 self.status["OOD"] += 1
             else:

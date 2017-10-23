@@ -7,6 +7,9 @@ import optunity as ot
 import pandas as pd
 import talib as tl
 from decimal import InvalidOperation, DivisionByZero
+from datetime import timedelta
+
+#TODO FIX GET_OBSERVATION PORTFOLIO NAN VALUES
 
 class APrioriAgent(Agent):
     """
@@ -17,10 +20,10 @@ class APrioriAgent(Agent):
     model: a instance of a sklearn/keras like model, with train and test methods
     """
 
-    def __init__(self):
+    def __init__(self, fiat):
         super().__init__()
         self.epsilon = 1e-8
-        self.fiat = None
+        self.fiat = fiat
 
     def act(self, obs):
         """
@@ -36,24 +39,31 @@ class APrioriAgent(Agent):
         Test agent on environment
         """
         try:
+            # Get env params
+            self.fiat = env._fiat
+
+            # Reset observations
+            env.reset_status()
+            obs = env.reset(reset_dfs=True)
+
+            # Get max episode length
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.data_length
-            self.fiat = env._fiat
-            env.reset_status()
-            obs = env.reset()
-            t0 = 0
+
+            #Reset counters
+            t0 = time()
             self.step = 0
             episode_reward = 0
 
             while True:
                 try:
-                    t0 += time()
-
                     action = self.act(obs)
                     obs, reward, _, status = env.step(action)
                     episode_reward += np.float64(reward)
 
                     self.step += 1
+
+                    t0 += time()
 
                     if visualize:
                         env.render()
@@ -61,7 +71,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps + 1,
+                            nb_max_episode_steps - env.obs_steps - 1,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
                             str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - self.step) / self.step))
@@ -89,43 +99,53 @@ class APrioriAgent(Agent):
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
 
-    def trade(self, env, freq, obs_steps, timeout, verbose=False, render=False):
+    def trade(self, env, timeout=None, verbose=False, render=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
-        env._reset_status()
 
-        # Get initial obs
-        obs = env._get_obs(obs_steps, freq)
+        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period, env.calc_total_portval()))
+
+        self.fiat = env._fiat
+
+        # Reset env and get initial env
+        env.reset_status()
+        obs = env.reset()
 
         try:
-            t0 = 0
-            step = 0
-            actions = 0
+            t0 = time()
+            self.step = 0
             episode_reward = 0
+            action = np.zeros(len(env.symbols))
+            status = env.status
+            last_action_time = datetime.fromtimestamp(time()) - timedelta(minutes=env.period)
             while True:
                 try:
-                    t_step = time()
+                    if datetime.fromtimestamp(time()) >= last_action_time + timedelta(minutes=env.period) and \
+                            datetime.fromtimestamp(time()).minute % env.period == 0:
 
-                    action = self.forward(obs)
-                    obs, reward, done, status = env.step(action)
-                    episode_reward += np.float64(reward)
-                    step += 1
-                    t0 += time()
-                    if done:
-                        actions += 1
+                        action = self.act(obs)
+                        obs, reward, done, status = env.step(action)
+                        episode_reward += np.float64(reward)
+
+                        if done:
+                            self.step += 1
+                            last_action_time = datetime.fromtimestamp(time())
+
+                    else:
+                        obs = env.get_observation(True)
 
                     if render:
                         env.render()
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto price: {2} Actions counter: {3} Cumulative Reward: {4}".format(
-                                step,
-                                str(pd.to_timedelta(t0)),
-                                obs.iloc[-1].close,
-                                actions,
-                                episode_reward
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Portfolio vector: {4}".format(
+                                self.step,
+                                str(pd.to_timedelta(time() - t0)),
+                                [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
+                                env.calc_total_portval(),
+                                env.action_df.iloc[-1].astype('f').to_dict()
                             ), end="\r", flush=True)
 
                     if status['Error']:
@@ -134,16 +154,21 @@ class APrioriAgent(Agent):
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
 
-
-                    sleep(freq * 59.5)
+                    sleep(3)
 
                 except Exception as e:
                     print("Agent Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    print(obs)
+                    print(env.portfolio_df.iloc[-5:])
+                    print(env.action_df.iloc[-5:])
+                    print("Action taken:", action)
+
                     break
+
         except KeyboardInterrupt:
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
-                  "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(step,
+                  "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(self.step,
                                                                                                       str(
                                                                                                           pd.to_timedelta(
                                                                                                               t0)),
@@ -199,11 +224,11 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
-    def __init__(self, mean_type='kama'):
+    def __init__(self, fiat, mean_type='kama'):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
-        super().__init__()
+        super().__init__(fiat=fiat)
         self.mean_type = mean_type
         self.ma_span = None
         self.std_span = None
@@ -211,6 +236,7 @@ class MomentumTrader(APrioriAgent):
 
     # GET INDICATORS FUNCTIONS
     def get_portfolio_vector(self, obs):
+        # print(obs.iloc[-1])
         coin_val = {}
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
@@ -227,15 +253,15 @@ class MomentumTrader(APrioriAgent):
             try:
                 port_vec[symbol] = coin_val[symbol] / portval
             except DivisionByZero:
-                port_vec[symbol] = coin_val[symbol] / (portval + Decimal('1E-8'))
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
             except InvalidOperation:
-                port_vec[symbol] = coin_val[symbol] / (portval + Decimal('1E-8'))
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
         try:
             port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
         except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + Decimal('1E-8'))
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
         except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + Decimal('1E-8'))
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
 
         return port_vec
 
@@ -263,16 +289,18 @@ class MomentumTrader(APrioriAgent):
         Performs a single step on the environment
         """
         try:
+            obs = obs.astype(np.float64).ffill()
             prev_posit = self.get_portfolio_vector(obs)
+            # print(prev_posit)
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
-                df = obs[symbol].astype(np.float64).ffill().copy()
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
                 # Get action
                 if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
                     self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = np.zeros(1)
+                    action = 0.0
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
@@ -280,30 +308,32 @@ class MomentumTrader(APrioriAgent):
                              (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
                               self.epsilon)
 
-
                 else:
                     action = np.float64(prev_posit[symbol.split("_")[1]])
 
                 position[key] = action
-
-            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+            # print(position)
+            position[-1] = np.clip(1 - position[:-1].sum(), a_max=np.inf, a_min=0.0)
+            # print(position)
 
             return array_normalize(position)
 
-        except TypeError:
+        except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
         try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
             i = 0
             t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.training = True
+
 
             @ot.constraints.violations_defaulted(-np.inf)
             @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
@@ -319,7 +349,27 @@ class MomentumTrader(APrioriAgent):
                 # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 batch_reward = []
+
+                # eval = partial(self.test,
+                #                 nb_episodes=1,
+                #                 action_repetition=action_repetition,
+                #                 callbacks=callbacks,
+                #                 visualize=visualize,
+                #                 nb_max_episode_steps=nb_max_episode_steps,
+                #                 nb_max_start_steps=nb_max_start_steps,
+                #                 start_step_policy=start_step_policy,
+                #                 verbose=False)
+                #
+                # with Pool(n_workers) as pool:
+                #     for batch in range(int(batch_size/n_workers)):
+                #         rewards = [pool.apply_async(eval, (deepcopy(env),)) for i in range(n_workers)]
+                #         batch_reward.append(sum([r.get() for r in rewards]))
+
+
                 for batch in range(batch_size):
+                    # Reset env
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
                     # run test on the main process
                     r = self.test(env,
                                     nb_episodes=1,
@@ -344,6 +394,8 @@ class MomentumTrader(APrioriAgent):
 
                 return sum(batch_reward)
 
+
+
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
                                               ma1=[2, env.obs_steps],
@@ -358,10 +410,11 @@ class MomentumTrader(APrioriAgent):
                     opt_params[key] = round(value)
 
             self.set_params(**opt_params)
-            env.set_training_stage(False)
+            env.training = False
             return opt_params, info
 
         except KeyboardInterrupt:
+            env.training = False
             print("\nOptimization interrupted by user.")
 
 
@@ -421,7 +474,7 @@ class MesaMomentumTrader(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
@@ -565,7 +618,7 @@ class PAMR(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
