@@ -1160,7 +1160,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
-
             # Get reward for previous action
             reward = self.get_reward()
 
