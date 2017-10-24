@@ -68,10 +68,10 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps - 2,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
+                            nb_max_episode_steps - env.obs_steps - 1,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
                             episode_reward,
-                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps) - self.step), unit='s'))
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps- 1) - self.step), unit='s'))
                         ), end="\r", flush=True)
                         t0 = time()
 
@@ -116,12 +116,12 @@ class APrioriAgent(Agent):
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
-            last_action_time = datetime.fromtimestamp(time()) - timedelta(minutes=env.period)
+            last_action_time = datetime.utcnow() - timedelta(minutes=env.period)
             can_act = True
             while True:
                 try:
-                    if datetime.fromtimestamp(time()) >= last_action_time + timedelta(minutes=env.period) and \
-                            datetime.fromtimestamp(time()).minute % env.period == 0:
+                    if datetime.utcnow() >= last_action_time + timedelta(minutes=env.period) and \
+                                            datetime.utcnow().minute % env.period == 0:
                         can_act = True
 
                     if can_act:
@@ -131,7 +131,7 @@ class APrioriAgent(Agent):
 
                         if done:
                             self.step += 1
-                            last_action_time = datetime.fromtimestamp(time())
+                            last_action_time = datetime.utcnow()
                             can_act = False
 
                     else:

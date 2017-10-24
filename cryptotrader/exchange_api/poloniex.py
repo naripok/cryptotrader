@@ -35,6 +35,7 @@ from json import loads as _loads
 from hmac import new as _new
 from hashlib import sha512 as _sha512
 from time import time, sleep
+from datetime import datetime
 from itertools import chain as _chain
 from functools import wraps as _wraps
 import logging
@@ -125,7 +126,7 @@ class Poloniex(object):
         if self.coach is True:
             self.coach = Coach()
         # create nonce
-        self._nonce = int("{:.6f}".format(time()).replace('.', ''))
+        self._nonce = int("{:.6f}".format(datetime.utcnow().timestamp()).replace('.', ''))
         # json number datatypes
         self.jsonNums = jsonNums
         # grab keys, set timeout
@@ -325,9 +326,9 @@ class Poloniex(object):
         if period not in [300, 900, 1800, 7200, 14400, 86400]:
             raise PoloniexError("%s invalid candle period" % str(period))
         if not start:
-            start = time() - self.DAY
+            start = datetime.utcnow().timestamp() - self.DAY
         if not end:
-            end = time()
+            end = datetime.utcnow().timestamp()
         return self.__call__('returnChartData', {
             'currencyPair': str(currencyPair).upper(),
             'period': str(period),
@@ -373,9 +374,9 @@ class Poloniex(object):
         specified by the "start" and "end" parameters, both of which should be
         given as UNIX timestamps. (defaults to 1 month)"""
         if not start:
-            start = time() - self.MONTH
+            start = datetime.utcnow().timestamp() - self.MONTH
         if not end:
-            end = time()
+            end = datetime.utcnow().timestamp()
         args = {'start': str(start), 'end': str(end)}
         return self.__call__('returnDepositsWithdrawals', args)
 
@@ -615,9 +616,9 @@ class Poloniex(object):
         be specified to limit the number of rows returned. (defaults to the last
         months history)"""
         if not start:
-            start = time() - self.MONTH
+            start = datetime.utcnow().timestamp() - self.MONTH
         if not end:
-            end = time()
+            end = datetime.utcnow().timestamp()
         args = {'start': str(start), 'end': str(end)}
         if limit:
             args['limit'] = str(limit)
