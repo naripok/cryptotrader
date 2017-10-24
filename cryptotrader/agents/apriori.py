@@ -156,7 +156,7 @@ class APrioriAgent(Agent):
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
 
-                    sleep(3)
+                    sleep(10)
 
                 except Exception as e:
                     print("Agent Error:",
