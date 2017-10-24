@@ -739,8 +739,6 @@ class TradingEnvironment(Env):
 
         obs = self.get_history(start, end)
 
-        print(obs)
-
         self.results['benchmark'] = convert_to.decimal('0e-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
