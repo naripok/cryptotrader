@@ -752,11 +752,7 @@ class TradingEnvironment(Env):
         Calculate arbiter desired actions statistics
         :return:
         """
-
-        end = self.portfolio_df.index[-1]
-        start = self.portfolio_df.index[0]
-
-        self.results = self.get_sampled_portfolio(start, end).join(self.get_sampled_actions(start, end), rsuffix='_posit').ffill()
+        self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
 
         end = self.results.index[-1]
         start = self.results.index[0]
