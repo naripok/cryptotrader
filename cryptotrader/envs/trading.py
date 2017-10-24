@@ -492,6 +492,10 @@ class TradingEnvironment(Env):
         try:
             self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
+        except PoloniexError:
+            sleep(5)
+            self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
+            return self.obs_df
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
             raise e
