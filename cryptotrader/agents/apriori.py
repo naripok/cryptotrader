@@ -9,7 +9,6 @@ import talib as tl
 from decimal import InvalidOperation, DivisionByZero
 from datetime import timedelta
 
-#TODO FIX INEX DIVERGENCE FOR 120MIN PERIOD
 
 class APrioriAgent(Agent):
     """

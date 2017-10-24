@@ -758,7 +758,7 @@ class TradingEnvironment(Env):
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
         init_portval = Decimal('0E-8')
-        init_time = self.results.index[1]
+        init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
@@ -1147,8 +1147,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
-            # Get new index
-            self.index += 1
 
             # Get reward for previous action
             reward = self.get_reward()
@@ -1167,6 +1165,9 @@ class BacktestEnvironment(PaperTradingEnvironment):
                 self.status["OOD"] += 1
             else:
                 done = False
+
+            # Get new index
+            self.index += 1
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
