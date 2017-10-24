@@ -748,10 +748,10 @@ class TradingEnvironment(Env):
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
         init_portval = Decimal('0E-8')
-        init_time = self.results.index[0]
+        init_time = self.results.index[1]
         for symbol in self._crypto:
             init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
-                           obs[self._fiat + '_' + symbol].get_value(init_time, 'close')
+                           obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
         init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, self._fiat)
 
         for symbol in self.pairs:

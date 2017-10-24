@@ -9,7 +9,7 @@ import talib as tl
 from decimal import InvalidOperation, DivisionByZero
 from datetime import timedelta
 
-#TODO FIX GET_OBSERVATION PORTFOLIO NAN VALUES
+#TODO FIX INEX DIVERGENCE FOR 120MIN PERIOD
 
 class APrioriAgent(Agent):
     """
@@ -69,7 +69,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps - 1,
+                            nb_max_episode_steps - env.obs_steps - 2,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
                             episode_reward,
                             str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps) - self.step), unit='s'))
