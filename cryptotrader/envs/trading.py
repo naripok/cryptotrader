@@ -81,7 +81,7 @@ class BacktestDataFeed(object):
 
 class PaperTradingDataFeed(object):
     """
-    Data feeder for backtesting with TradingEnvironment.
+    Data feeder for paper trading with TradingEnvironment.
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], portifolio={}):
@@ -718,11 +718,21 @@ class TradingEnvironment(Env):
         return obs
 
     ## Analytics methods
-    def get_sampled_portfolio(self, start, end):
-        return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
+    def get_sampled_portfolio(self, start=None, end=None):
+        if not start:
+            start = self.portfolio_df.index[-1]
+        if not end:
+            start = self.portfolio_df.index[0]
+        # TODO 1 FIND A BETTER WAY
+        return self.portfolio_df.loc[start:end].resample("%dmin" % self.period, base=60).last()
 
-    def get_sampled_actions(self, start, end):
-        return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
+    def get_sampled_actions(self, start=None, end=None):
+        if not start:
+            start = self.portfolio_df.index[-1]
+        if not end:
+            start = self.portfolio_df.index[0]
+        # TODO 1 FIND A BETTER WAY
+        return self.action_df.loc[start:end].resample("%dmin" % self.period, base=60).last()
 
     def get_results(self, window=7):
         """
