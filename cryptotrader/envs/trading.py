@@ -81,7 +81,7 @@ class BacktestDataFeed(object):
 
 class PaperTradingDataFeed(object):
     """
-    Data feeder for backtesting with TradingEnvironment.
+    Data feeder for paper trading with TradingEnvironment.
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], portifolio={}):
@@ -301,8 +301,7 @@ class TradingEnvironment(Env):
     @property
     def timestamp(self):
         #TODO FIX FOR DAYLIGHT SAVING TIME
-        # return datetime.utcnow() - timedelta(hours=2)
-        return datetime.fromtimestamp(time())
+        return datetime.utcnow()
 
     def add_pairs(self, *args):
 
@@ -408,29 +407,22 @@ class TradingEnvironment(Env):
     def get_ohlc(self, symbol, start=None, end=None):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
-        if start or end:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
-                                                  start=datetime.timestamp(start), end=datetime.timestamp(end)
-                                                  )
-        else:
-            ohlc_data = self.tapi.returnChartData(symbol, period=self.period * 60,
-                                                  start=datetime.timestamp(self.timestamp -
-                                                                           timedelta(
-                                                                               minutes=self.period * (self.obs_steps))),
-                                                  end=datetime.timestamp(self.timestamp)
-                                                  )
+        if not start:
+            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps))
+        if not end:
+            end = self.timestamp
 
-        ohlc_df = pd.DataFrame.from_records(ohlc_data)
+        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
+                                                                        period=self.period * 60,
+                                                                        start=datetime.timestamp(start),
+                                                                        end=datetime.timestamp(end)))
+
         ohlc_df['date'] = ohlc_df.date.apply(
-            lambda x: datetime.fromtimestamp(x))
+            lambda x: datetime.utcfromtimestamp(x))
         ohlc_df.set_index('date', inplace=True)
 
         return ohlc_df[['open','high','low','close',
                         'volume']].apply(convert_and_clean)
-
-        # return ohlc_df[['open', 'high', 'low', 'close',
-        #                 'quoteVolume']].asfreq("%dT" % self.freq).apply(convert_and_clean).rename(
-        #     columns={'quoteVolume': 'volume'})
 
     def get_pair_history(self, pair, start=None, end=None):
         """
@@ -498,6 +490,10 @@ class TradingEnvironment(Env):
 
     def get_observation(self, portfolio_vector=False):
         try:
+            self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
+            return self.obs_df
+        except PoloniexError:
+            sleep(5)
             self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
         except Exception as e:
@@ -718,10 +714,20 @@ class TradingEnvironment(Env):
         return obs
 
     ## Analytics methods
-    def get_sampled_portfolio(self, start, end):
+    def get_sampled_portfolio(self, start=None, end=None):
+        if not start:
+            start = self.portfolio_df.index[-1]
+        if not end:
+            start = self.portfolio_df.index[0]
+        # TODO 1 FIND A BETTER WAY
         return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_sampled_actions(self, start, end):
+    def get_sampled_actions(self, start=None, end=None):
+        if not start:
+            start = self.portfolio_df.index[-1]
+        if not end:
+            start = self.portfolio_df.index[0]
+        # TODO 1 FIND A BETTER WAY
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
     def get_results(self, window=7):
@@ -735,7 +741,7 @@ class TradingEnvironment(Env):
 
         self.results = self.get_sampled_portfolio(start, end).join(self.get_sampled_actions(start, end), rsuffix='_posit').ffill()
 
-        obs = self.get_history(end=end, start=start)
+        obs = self.get_history(start, end)
 
         self.results['benchmark'] = convert_to.decimal('0e-8')
         self.results['returns'] = convert_to.decimal(np.nan)
@@ -748,7 +754,7 @@ class TradingEnvironment(Env):
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
         init_portval = Decimal('0E-8')
-        init_time = self.results.index[1]
+        init_time = self.results.index[2]
         for symbol in self._crypto:
             init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
@@ -1056,7 +1062,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.logger.error(PaperTradingEnvironment.simulate_trade, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             raise e
 
@@ -1082,7 +1088,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             raise e
 
@@ -1100,7 +1106,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     @property
     def timestamp(self):
-        return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
+        return datetime.utcfromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
 
     def reset(self, reset_dfs=False):
         """
@@ -1137,8 +1143,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     def step(self, action):
         try:
-            # Get new index
-            self.index += 1
 
             # Get reward for previous action
             reward = self.get_reward()
@@ -1158,13 +1162,16 @@ class BacktestEnvironment(PaperTradingEnvironment):
             else:
                 done = False
 
+            # Get new index
+            self.index += 1
+
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(datetime.fromtimestamp(time()), "%Y-%m-%d %H:%M:%S")),
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             print(action)
             raise e
