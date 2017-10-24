@@ -3,10 +3,31 @@ Trading environment class
 data: 12/10/2017
 author: Tau
 """
-from .driver import *
+from ..core import Env
+from ..spaces import *
+from ..utils import Logger
+from .utils import *
+
+import os
+import smtplib
+from datetime import datetime, timedelta, timezone
+from decimal import getcontext, localcontext, ROUND_UP, Decimal
+from time import sleep, time
+import pandas as pd
+import empyrical as ec
+from bokeh.layouts import column
+from bokeh.palettes import inferno
+from bokeh.plotting import figure, show
+
 from decimal import DivisionByZero, InvalidOperation
 from ..exchange_api.poloniex import PoloniexError
 import json
+
+# Decimal precision
+getcontext().prec = 24
+
+# Debug flag
+debug = True
 
 class BacktestDataFeed(object):
     """
@@ -301,7 +322,7 @@ class TradingEnvironment(Env):
     @property
     def timestamp(self):
         #TODO FIX FOR DAYLIGHT SAVING TIME
-        return datetime.utcnow()
+        return datetime.now(timezone.utc)
 
     def add_pairs(self, *args):
 
@@ -416,9 +437,8 @@ class TradingEnvironment(Env):
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
                                                                         end=datetime.timestamp(end)))
-
-        ohlc_df['date'] = ohlc_df.date.apply(
-            lambda x: datetime.utcfromtimestamp(x))
+        # TODO 1 FIND A BETTER WAY
+        ohlc_df['date'] = ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc))
         ohlc_df.set_index('date', inplace=True)
 
         return ohlc_df[['open','high','low','close',
@@ -428,7 +448,6 @@ class TradingEnvironment(Env):
         """
         Pools symbol's trade data from exchange api
         """
-        # TODO RETURN POSITION ON OBS
         try:
             if self.period < 5:
                 df = self.get_ohlc_from_trades(pair)
@@ -473,9 +492,7 @@ class TradingEnvironment(Env):
                 history = self.get_pair_history(symbol, start=start, end=end)
 
                 if portifolio_vector:
-                    history = pd.concat([history,
-                                         port_vec[symbol.split('_')[1]]],
-                                         axis=1)
+                    history = pd.concat([history, port_vec[symbol.split('_')[1]]], axis=1)
                 obs_list.append(history)
 
             if portifolio_vector:
@@ -754,7 +771,7 @@ class TradingEnvironment(Env):
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
         init_portval = Decimal('0E-8')
-        init_time = self.results.index[2]
+        init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
@@ -1106,7 +1123,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
     @property
     def timestamp(self):
-        return datetime.utcfromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index])
+        return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
 
     def reset(self, reset_dfs=False):
         """
