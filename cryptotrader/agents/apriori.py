@@ -533,14 +533,14 @@ class PAMR(APrioriAgent):
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
 
-    def __init__(self, sensitivity=0.5, C=500, variant='PAMR'):
+    def __init__(self, sensitivity=0.025, C=5000, variant='PAMR2', fiat='USDT'):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
         :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
         :
         """
-        super().__init__()
+        super().__init__(fiat=fiat)
         self.sensitivity = sensitivity
         self.C = C
         self.variant = variant
@@ -555,12 +555,12 @@ class PAMR(APrioriAgent):
             action[-1] = 0
             return array_normalize(action)
         else:
-            price_relative = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-                df = obs[symbol].astype(np.float64).copy()
-                price_relative[key] = (df.close.iat[-2] - df.close.iat[-1]) / df.close.iat[-2]
-                last_b[key] = np.float64(df['position'].iat[-1])
+            prev_posit = self.get_portfolio_vector(obs)
+            price_relative = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
+            last_b = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'close')) - obs.get_value(obs.index[-2], (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
+                last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
         return self.update(last_b, price_relative)
 
     def update(self, b, x):
@@ -583,7 +583,37 @@ class PAMR(APrioriAgent):
         b = b - lam * (x - x_mean)
 
         # project it onto simplex
-        return self.simplex_proj(b)
+        return np.append(self.simplex_proj(b),0)
+
+    def get_portfolio_vector(self, obs):
+        # print(obs.iloc[-1])
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[-2], (symbol, 'close'))
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[-1].values
+
+        port_vec = {}
+        for symbol in coin_val:
+            try:
+                port_vec[symbol] = coin_val[symbol] / portval
+            except DivisionByZero:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+            except InvalidOperation:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+        try:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+        except DivisionByZero:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+        except InvalidOperation:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+
+        return port_vec
 
     def simplex_proj(self, y):
         """ Projection of y onto simplex. """
@@ -606,28 +636,33 @@ class PAMR(APrioriAgent):
         return np.maximum(y - tmax, 0.)
 
     def set_params(self, **kwargs):
-        self.ma_span = kwargs['sensitivity']
-        # self.C = kwargs['C']
+        self.sensitivity = kwargs['sensitivity']
+        if 'C' in kwargs:
+            self.C = kwargs['C']
+        self.variant = kwargs['variant']
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
+
         try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
             i = 0
             t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
-            env.reset(reset_dfs=True)
+            env.training = True
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                nonlocal i, nb_steps, env, t0, nb_max_episode_steps
 
                 self.set_params(**kwargs)
 
                 batch_reward = []
+
                 for batch in range(batch_size):
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
                     # run test on the main process
                     r = self.test(env,
                                     nb_episodes=1,
@@ -652,17 +687,23 @@ class PAMR(APrioriAgent):
 
                 return sum(batch_reward)
 
-            opt_params, info, _ = ot.maximize(find_hp,
+            opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
-                                              sensitivity=[0, 1],
-                                              # C=[50, 5000],
+                                              search_space={'variant':{
+                                                  'PAMR':{'sensitivity':[0, 0.1]},
+                                                  'PAMR1':{'sensitivity':[0, 0.1],
+                                                           'C':[500, 5000]},
+                                                  'PAMR2':{'sensitivity':[0, 0.1],
+                                                           'C':[500, 5000]}}
+                                              }
                                               )
 
             self.set_params(**opt_params)
-            env.set_training_stage(False)
+            env.training = False
             return opt_params, info
 
         except KeyboardInterrupt:
+            env.training = False
             print("\nOptimization interrupted by user.")
 
 
