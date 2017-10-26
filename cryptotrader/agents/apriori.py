@@ -766,10 +766,13 @@ class FibonacciTrader(APrioriAgent):
         action = np.zeros(pairs.shape[0])
         for i, pair in enumerate(pairs):
             if pair is not self.fiat:
-                pattern = self.is_gartley(obs[pair])
-                if pattern == 1:
+                pattern = np.array([pattern(obs[pair]) for pattern in [self.is_gartley,
+                                                                       self.is_butterfly,
+                                                                       self.is_bat,
+                                                                       self.is_crab]]).sum()
+                if pattern > 0:
                     action[i] = 1
-                elif pattern == -1:
+                elif pattern < 0:
                     action[i] = 0
                 else:
                     action[i] = prev_port[pair.split('_')[1]]
