@@ -568,7 +568,7 @@ class PAMRTrader(APrioriAgent):
         """
         Performs a single step on the environment
         """
-        if self.step == 1:
+        if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0

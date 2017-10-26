@@ -757,10 +757,7 @@ class TradingEnvironment(Env):
         """
         self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
 
-        end = self.results.index[-1]
-        start = self.results.index[0]
-
-        obs = self.get_history(start, end)
+        obs = self.get_history(self.results.index[0], self.results.index[-1])
 
         self.results['benchmark'] = convert_to.decimal('0E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
@@ -775,15 +772,17 @@ class TradingEnvironment(Env):
         init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
         for symbol in self._crypto:
-            init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
+            init_portval += self.results.get_value(init_time, symbol) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
-        init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, self._fiat)
+        init_portval += self.results.get_value(init_time, self._fiat)
 
-        for symbol in self.pairs:
-            self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
-                                        init_portval / (obs.at[init_time,
-                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
-            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+        with localcontext() as ctx:
+            ctx.rounding = ROUND_UP
+            for symbol in self.pairs:
+                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
+                                            init_portval / (obs.get_value(init_time,
+                                            (symbol, 'close')) * Decimal(self.action_space.low.shape[0] - 1))
+                self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
@@ -791,14 +790,14 @@ class TradingEnvironment(Env):
                                               self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
                                               window=window,
-                                              risk_free=0.001
+                                              risk_free=0.002
                                               )
         self.results['beta'] = ec.utils.roll(self.results.returns,
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
         self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.001)
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.002)
 
         return self.results
 
