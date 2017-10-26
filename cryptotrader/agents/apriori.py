@@ -120,6 +120,7 @@ class APrioriAgent(Agent):
                         print("Env error:",
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
+
                 except Exception as e:
                     print("Model Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -132,7 +133,7 @@ class APrioriAgent(Agent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
-
+            return False
 
     def trade(self, env, timeout=None, verbose=False, render=False):
         """
@@ -348,43 +349,46 @@ class MomentumTrader(APrioriAgent):
             @ot.constraints.violations_defaulted(-np.inf)
             @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                try:
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                for key, value in kwargs.items():
-                    if key not in ('std_weight_up', 'std_weight_down'):
-                        kwargs[key] = round(value)
+                    for key, value in kwargs.items():
+                        if key not in ('std_weight_up', 'std_weight_down'):
+                            kwargs[key] = round(value)
 
-                self.set_params(**kwargs)
+                    self.set_params(**kwargs)
 
-                # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
+                    # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
-                batch_reward = []
-                for batch in range(batch_size):
-                    # Reset env
-                    env.reset_status()
-                    env.reset(reset_dfs=True)
-                    # run test on the main process
-                    r = self.test(env,
-                                    nb_episodes=1,
-                                    action_repetition=action_repetition,
-                                    callbacks=callbacks,
-                                    visualize=visualize,
-                                    nb_max_episode_steps=nb_max_episode_steps,
-                                    nb_max_start_steps=nb_max_start_steps,
-                                    start_step_policy=start_step_policy,
-                                    verbose=False)
+                    batch_reward = []
+                    for batch in range(batch_size):
+                        # Reset env
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
 
-                    batch_reward.append(r)
+                        batch_reward.append(r)
 
-                i += 1
-                if verbose:
-                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                        nb_steps,
-                                                                        sum(batch_reward),
-                                                                        str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                          end="\r")
-                    t0 = time()
-                return sum(batch_reward)
+                    i += 1
+                    if verbose:
+                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                            nb_steps,
+                                                                            sum(batch_reward),
+                                                                            str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                              end="\r")
+                        t0 = time()
+                    return sum(batch_reward)
+                except KeyboardInterrupt:
+                    raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
@@ -615,39 +619,42 @@ class PAMRTrader(APrioriAgent):
             env.training = True
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, env, t0, nb_max_episode_steps
+                try:
+                    nonlocal i, nb_steps, env, t0, nb_max_episode_steps
 
-                self.set_params(**kwargs)
+                    self.set_params(**kwargs)
 
-                batch_reward = []
+                    batch_reward = []
 
-                for batch in range(batch_size):
-                    env.reset_status()
-                    env.reset(reset_dfs=True)
-                    # run test on the main process
-                    r = self.test(env,
-                                    nb_episodes=1,
-                                    action_repetition=action_repetition,
-                                    callbacks=callbacks,
-                                    visualize=visualize,
-                                    nb_max_episode_steps=nb_max_episode_steps,
-                                    nb_max_start_steps=nb_max_start_steps,
-                                    start_step_policy=start_step_policy,
-                                    verbose=False)
+                    for batch in range(batch_size):
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
 
-                    batch_reward.append(r)
+                        batch_reward.append(r)
 
-                i += 1
-                if verbose:
-                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                        nb_steps,
-                                                                        sum(batch_reward),
-                                                                        str(pd.to_timedelta(
-                                                                              (time() - t0) * (
-                                                                              nb_steps - i), unit='s'))),
-                                                                        end="\r")
-                    t0 = time()
-                return sum(batch_reward)
+                    i += 1
+                    if verbose:
+                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                            nb_steps,
+                                                                            sum(batch_reward),
+                                                                            str(pd.to_timedelta(
+                                                                                  (time() - t0) * (
+                                                                                  nb_steps - i), unit='s'))),
+                                                                            end="\r")
+                        t0 = time()
+                    return sum(batch_reward)
+                except KeyboardInterrupt:
+                    raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
@@ -667,6 +674,7 @@ class PAMRTrader(APrioriAgent):
         except KeyboardInterrupt:
             env.training = False
             print("\nOptimization interrupted by user.")
+            return opt_params, info
 
 
 class FibonacciTrader(APrioriAgent):
@@ -786,37 +794,41 @@ class FibonacciTrader(APrioriAgent):
             env.training = True
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                try:
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                self.set_params(**kwargs)
+                    self.set_params(**kwargs)
 
-                batch_reward = []
-                for batch in range(batch_size):
-                    # Reset env
-                    env.reset_status()
-                    env.reset(reset_dfs=True)
-                    # run test on the main process
-                    r = self.test(env,
-                                    nb_episodes=1,
-                                    action_repetition=action_repetition,
-                                    callbacks=callbacks,
-                                    visualize=visualize,
-                                    nb_max_episode_steps=nb_max_episode_steps,
-                                    nb_max_start_steps=nb_max_start_steps,
-                                    start_step_policy=start_step_policy,
-                                    verbose=False)
+                    batch_reward = []
+                    for batch in range(batch_size):
+                        # Reset env
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
 
-                    batch_reward.append(r)
+                        batch_reward.append(r)
 
-                i += 1
-                if verbose:
-                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                        nb_steps,
-                                                                        sum(batch_reward),
-                                                                        str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                          end="\r")
-                    t0 = time()
-                return sum(batch_reward)
+                    i += 1
+                    if verbose:
+                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                            nb_steps,
+                                                                            sum(batch_reward),
+                                                                            str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                              end="\r")
+                        t0 = time()
+                    return sum(batch_reward)
+
+                except KeyboardInterrupt:
+                    raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
@@ -832,3 +844,4 @@ class FibonacciTrader(APrioriAgent):
         except KeyboardInterrupt:
             env.training = False
             print("\nOptimization interrupted by user.")
+            return opt_params, info

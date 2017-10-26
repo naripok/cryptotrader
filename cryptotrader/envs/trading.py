@@ -1180,6 +1180,10 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
+        except KeyboardInterrupt:
+            return self.get_observation(True).astype(np.float64), np.float64(0), False, self.status
+
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
