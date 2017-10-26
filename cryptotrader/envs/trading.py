@@ -177,6 +177,7 @@ class TradingEnvironment(Env):
         self.results = None
         self.action_space = None
         self.observation_space = None
+        self.init_balance = None
 
     ## Env properties
     @property
@@ -725,7 +726,7 @@ class TradingEnvironment(Env):
         """
         self.set_observation_space()
         self.set_action_space()
-        self.balance = self.get_balance()
+        self.balance = self.init_balance = self.get_balance()
         for symbol in self.symbols:
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
         obs = self.get_observation(True)
@@ -771,11 +772,10 @@ class TradingEnvironment(Env):
         # Calc init portval
         init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
-        init_balance = self.get_balance()
         for symbol in self._crypto:
-            init_portval += convert_to.decimal(init_balance[symbol]) * \
+            init_portval += convert_to.decimal(self.init_balance[symbol]) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
-        init_portval += convert_to.decimal(init_balance[self._fiat])
+        init_portval += convert_to.decimal(self.init_balance[self._fiat])
 
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
@@ -1150,7 +1150,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             self.set_observation_space()
             self.set_action_space()
             # Reset balance
-            self.balance = self.get_balance()
+            self.balance = self.init_balance = self.get_balance()
             # Get fee values
             for symbol in self.symbols:
                 self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
