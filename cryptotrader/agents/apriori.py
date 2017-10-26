@@ -523,7 +523,7 @@ class MesaMomentumTrader(APrioriAgent):
             print("\nOptimization interrupted by user.")
 
 
-class PAMR(APrioriAgent):
+class PAMRTrader(APrioriAgent):
     """
     Passive aggressive mean reversion strategy for portfolio selection.
 
@@ -564,8 +564,10 @@ class PAMR(APrioriAgent):
         return self.update(last_b, price_relative)
 
     def update(self, b, x):
-        """ Update portfolio weights to satisfy constraint b * x <= eps
-        and minimize distance to previous portifolio. """
+        """
+        Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portifolio.
+        """
         x_mean = np.mean(x)
         le = max(0., np.dot(b, x) - self.sensitivity)
 
@@ -586,7 +588,11 @@ class PAMR(APrioriAgent):
         return np.append(self.simplex_proj(b),0)
 
     def get_portfolio_vector(self, obs):
-        # print(obs.iloc[-1])
+        """
+        Calculate portifolio vector for passed observation from assets amounts and price
+        :param obs: pandas DataFrame: Observation
+        :return: numpy array: Portifolio vector with assets ranging [0, 1]
+        """
         coin_val = {}
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
@@ -708,5 +714,5 @@ class PAMR(APrioriAgent):
 
 
 class FibonacciTrader(APrioriAgent):
-    def init(self):
-        pass
+    def __init__(self, fiat="USDT"):
+        super().__init__(fiat)

@@ -728,7 +728,7 @@ class TradingEnvironment(Env):
         obs = self.get_observation(True)
         self.set_action_vector()
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
-        return obs
+        return obs.astype(np.float64)
 
     ## Analytics methods
     def get_sampled_portfolio(self, start=None, end=None):
@@ -1155,7 +1155,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
         self.set_action_vector()
         # Reset portfolio value
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
-        return obs
+        return obs.astype(np.float64)
 
     def step(self, action):
         try:
