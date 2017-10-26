@@ -284,7 +284,7 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
-    def __init__(self, fiat, mean_type='kama'):
+    def __init__(self, fiat="USDT", mean_type='kama'):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
@@ -335,9 +335,9 @@ class MomentumTrader(APrioriAgent):
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
-                             (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
-                              self.epsilon)
+                    action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])# / \
+                             # (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
+                             #  self.epsilon)
 
                 else:
                     action = np.float64(prev_posit[symbol.split("_")[1]])
@@ -694,10 +694,10 @@ class PAMRTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
                                               search_space={'variant':{
-                                                  'PAMR':{'sensitivity':[0, 1]},
-                                                  'PAMR1':{'sensitivity':[0, 1],
+                                                  'PAMR':{'sensitivity':[0, .3]},
+                                                  'PAMR1':{'sensitivity':[0, .3],
                                                            'C':[500, 5000]},
-                                                  'PAMR2':{'sensitivity':[0, 1],
+                                                  'PAMR2':{'sensitivity':[0, .3],
                                                            'C':[500, 5000]}}
                                               }
                                               )
@@ -721,7 +721,7 @@ class PAMRTrader(APrioriAgent):
 
 
 class FibonacciTrader(APrioriAgent):
-    def __init__(self, peak_order=2, err_allowed=0.5, std_window=33, fiat="USDT"):
+    def __init__(self, peak_order=7, err_allowed=0.05, fiat="USDT"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
@@ -731,7 +731,6 @@ class FibonacciTrader(APrioriAgent):
         super().__init__(fiat)
         self.err_allowed = err_allowed
         self.peak_order = peak_order
-        self.std_window = std_window
 
     def find_extreme(self, obs):
         max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
@@ -806,7 +805,6 @@ class FibonacciTrader(APrioriAgent):
     def set_params(self, **kwargs):
         self.err_allowed = kwargs['err_allowed']
         self.peak_order = int(kwargs['peak_order'])
-        self.std_window = int(kwargs['std_window'])
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -865,8 +863,7 @@ class FibonacciTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
                                               err_allowed=[0, .1],
-                                              peak_order=[1, 20],
-                                              std_window=[2, env.obs_steps]
+                                              peak_order=[1, 20]
                                               )
 
             self.set_params(**opt_params)
@@ -878,3 +875,23 @@ class FibonacciTrader(APrioriAgent):
             print("\nOptimization interrupted by user.")
             return opt_params, info
 
+
+class FactorAgent(APrioriAgent):
+    def __init__(self, factors, std_window=123, fiat="USDT"):
+        super().__init__(fiat)
+        assert isinstance(factors, list), "factors must be a list containing factor model instances"
+        for factor in factors:
+            assert isinstance(factor, APrioriAgent), "Factors must be APrioriAgent instances"
+        self.factors = factors
+        self.std_window = std_window
+
+    def act(self, obs):
+        action = np.zeros(obs.columns.levels[0].shape[0])
+        for factor in self.factors:
+            action += factor.act(obs)
+        for i, symbol in enumerate(obs.columns.levels[0]):
+            if symbol is not self.fiat:
+                action[i] /= (obs[symbol].close.rolling(self.std_window, min_periods=1, center=True).std().iat[-1] / \
+                              obs.get_value(obs.index[-1], (symbol, 'close')) +
+                              self.epsilon)
+        return array_normalize(action)
