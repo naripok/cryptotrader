@@ -927,7 +927,7 @@ class TradingEnvironment(Env):
 
         results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
 
-        print("################### > Portifolio Performance Analysis < ###################\n")
+        print("\n################### > Portifolio Performance Analysis < ###################\n")
         print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
         print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
                                                                      ec.sharpe_ratio(df.benchmark_returns)))
