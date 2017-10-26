@@ -571,40 +571,6 @@ class PAMRTrader(APrioriAgent):
         # project it onto simplex
         return np.append(self.simplex_proj(b),0)
 
-    def get_portfolio_vector(self, obs):
-        """
-        Calculate portifolio vector for passed observation from assets amounts and price
-        :param obs: pandas DataFrame: Observation
-        :return: numpy array: Portifolio vector with assets ranging [0, 1]
-        """
-        coin_val = {}
-        for symbol in obs.columns.levels[0]:
-            if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[-2], (symbol, 'close'))
-
-        portval = 0
-        for symbol in coin_val:
-            portval += coin_val[symbol]
-        portval += obs[self.fiat].iloc[-1].values
-
-        port_vec = {}
-        for symbol in coin_val:
-            try:
-                port_vec[symbol] = coin_val[symbol] / portval
-            except DivisionByZero:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
-            except InvalidOperation:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
-        try:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
-        except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
-        except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
-
-        return port_vec
-
     def simplex_proj(self, y):
         """ Projection of y onto simplex. """
         m = len(y)
