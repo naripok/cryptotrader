@@ -771,10 +771,11 @@ class TradingEnvironment(Env):
         # Calc init portval
         init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
+        init_balance = self.get_balance()
         for symbol in self._crypto:
-            init_portval += self.results.get_value(init_time, symbol) * \
+            init_portval += convert_to.decimal(init_balance[symbol]) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
-        init_portval += self.results.get_value(init_time, self._fiat)
+        init_portval += convert_to.decimal(init_balance[self._fiat])
 
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
@@ -1158,6 +1159,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             self.set_action_vector()
             # Reset portfolio value
             self.portval = self.calc_total_portval(self.obs_df.index[-1])
+
             return obs.astype(np.float64)
         except IndexError:
             print("Insufficient tapi data. You must choose a bigger time span.")

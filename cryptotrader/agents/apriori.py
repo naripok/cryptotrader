@@ -279,6 +279,7 @@ class Benchmark(APrioriAgent):
 
             return last_b
 
+
 class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
@@ -793,9 +794,7 @@ class FibonacciTrader(APrioriAgent):
                                                                        self.is_bat,
                                                                        self.is_crab]]).sum()
                 if pattern > 0:
-                    action[i] = pattern / \
-                             (obs[pair].close.rolling(self.std_window, min_periods=1, center=True).std().iat[-1] +
-                              self.epsilon)
+                    action[i] = pattern
                 elif pattern < 0:
                     action[i] = 0
                 else:
@@ -878,3 +877,4 @@ class FibonacciTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
+
