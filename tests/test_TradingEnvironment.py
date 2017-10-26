@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from decimal import Decimal
 from poloniex import Poloniex
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Mocks
 tapi = mock.Mock(spec=Poloniex)
@@ -9620,7 +9620,7 @@ def test_fiat(fresh_env):
         env.fiat = value
         assert env.fiat == convert_to.decimal(value)
 
-    timestamp = datetime.utcnow()
+    timestamp = env.timestamp
     env.fiat = {"USDT": 10, 'timestamp': timestamp}
     assert env.portfolio_df.get_value(timestamp, "USDT") == 10
 
@@ -9641,7 +9641,7 @@ def test_crypto(fresh_env):
         assert symbol in env.symbols
         assert env._fiat not in env.crypto
 
-    timestamp = datetime.utcnow()
+    timestamp = env.timestamp
     env.crypto = {"BTC": 10, 'timestamp': timestamp}
     assert env.portfolio_df.get_value(timestamp, "BTC") == Decimal('10')
 
@@ -9749,7 +9749,7 @@ def test_get_reward(ready_env):
 @pytest.mark.incremental
 class Test_env_step(object):
     @classmethod
-    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(1507990500))
+    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(1507990500).astimezone(timezone.utc))
     def setup_class(cls):
         cls.env = PaperTradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
         cls.env.add_pairs("USDT_BTC", "USDT_ETH")

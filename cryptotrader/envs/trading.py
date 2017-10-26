@@ -173,6 +173,11 @@ class TradingEnvironment(Env):
         self.period = period
         self.obs_steps = obs_steps
 
+        # Init attributes for key sharing
+        self.results = None
+        self.action_space = None
+        self.observation_space = None
+
     ## Env properties
     @property
     def obs_steps(self):
@@ -475,17 +480,15 @@ class TradingEnvironment(Env):
 
     def get_history(self, start=None, end=None, portifolio_vector=False):
         try:
-
-            if not end:
-                end = self.timestamp
-            if not start:
-                start = end - timedelta(minutes=self.period * (self.obs_steps))
-
             obs_list = []
             keys = []
 
             if portifolio_vector:
-                port_vec = self.get_sampled_portfolio(start, end)
+                if not start and not end:
+                    port_vec = self.get_sampled_portfolio(self.timestamp - timedelta(minutes=self.period * self.obs_steps),
+                                                          self.timestamp).iloc[-self.obs_steps:]
+                else:
+                    port_vec = self.get_sampled_portfolio(start, end)
 
             for symbol in self.pairs:
                 keys.append(symbol)
@@ -728,7 +731,7 @@ class TradingEnvironment(Env):
         obs = self.get_observation(True)
         self.set_action_vector()
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
-        return obs
+        return obs.astype(np.float64)
 
     ## Analytics methods
     def get_sampled_portfolio(self, start=None, end=None):
@@ -754,12 +757,9 @@ class TradingEnvironment(Env):
         """
         self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
 
-        end = self.results.index[-1]
-        start = self.results.index[0]
+        obs = self.get_history(self.results.index[0], self.results.index[-1])
 
-        obs = self.get_history(start, end)
-
-        self.results['benchmark'] = convert_to.decimal('0e-8')
+        self.results['benchmark'] = convert_to.decimal('0E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)
@@ -771,16 +771,19 @@ class TradingEnvironment(Env):
         # Calc init portval
         init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
+        init_balance = self.get_balance()
         for symbol in self._crypto:
-            init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, symbol) * \
+            init_portval += convert_to.decimal(init_balance[symbol]) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
-        init_portval += self.get_sampled_portfolio(start, end).get_value(init_time, self._fiat)
+        init_portval += convert_to.decimal(init_balance[self._fiat])
 
-        for symbol in self.pairs:
-            self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
-                                        init_portval / (obs.at[init_time,
-                                        (symbol, 'close')] * (self.action_space.low.shape[0] - 1))
-            self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+        with localcontext() as ctx:
+            ctx.rounding = ROUND_UP
+            for symbol in self.pairs:
+                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
+                                            init_portval / (obs.get_value(init_time,
+                                            (symbol, 'close')) * Decimal(self.action_space.low.shape[0] - 1))
+                self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
@@ -788,14 +791,14 @@ class TradingEnvironment(Env):
                                               self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
                                               window=window,
-                                              risk_free=0.001
+                                              risk_free=0.002
                                               )
         self.results['beta'] = ec.utils.roll(self.results.returns,
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
         self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.001)
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.002)
 
         return self.results
 
@@ -927,7 +930,7 @@ class TradingEnvironment(Env):
 
         results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
 
-        print("################### > Portifolio Performance Analysis < ###################\n")
+        print("\n################### > Portifolio Performance Analysis < ###################\n")
         print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
         print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
                                                                      ec.sharpe_ratio(df.benchmark_returns)))
@@ -1130,32 +1133,37 @@ class BacktestEnvironment(PaperTradingEnvironment):
         :return:
         """
         # Reset index
+        try:
+            self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
 
-        self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
 
-        if self.training:
-            self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
-        else:
-            self.index = self.obs_steps
-        # Reset log dfs
-        if reset_dfs:
-            self.obs_df = pd.DataFrame()
-            self.portfolio_df = pd.DataFrame()
-            self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
-        # Set spaces
-        self.set_observation_space()
-        self.set_action_space()
-        # Reset balance
-        self.balance = self.get_balance()
-        # Get fee values
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
-        obs = self.get_observation(True)
-        # Get assets order
-        self.set_action_vector()
-        # Reset portfolio value
-        self.portval = self.calc_total_portval(self.obs_df.index[-1])
-        return obs
+            if self.training:
+                self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
+            else:
+                self.index = self.obs_steps
+            # Reset log dfs
+            if reset_dfs:
+                self.obs_df = pd.DataFrame()
+                self.portfolio_df = pd.DataFrame()
+                self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
+            # Set spaces
+            self.set_observation_space()
+            self.set_action_space()
+            # Reset balance
+            self.balance = self.get_balance()
+            # Get fee values
+            for symbol in self.symbols:
+                self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+            obs = self.get_observation(True)
+            # Get assets order
+            self.set_action_vector()
+            # Reset portfolio value
+            self.portval = self.calc_total_portval(self.obs_df.index[-1])
+
+            return obs.astype(np.float64)
+        except IndexError:
+            print("Insufficient tapi data. You must choose a bigger time span.")
+            raise IndexError
 
     def step(self, action):
         try:
@@ -1182,6 +1190,12 @@ class BacktestEnvironment(PaperTradingEnvironment):
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
+        except KeyboardInterrupt:
+            self.status["OOD"] += 1
+            # return self.get_observation(True).astype(np.float64), np.float64(0), False, self.status
+            raise KeyboardInterrupt
+
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
