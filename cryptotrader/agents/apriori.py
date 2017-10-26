@@ -120,7 +120,8 @@ class APrioriAgent(Agent):
             can_act = True
             while True:
                 try:
-                    if datetime.utcnow() >= last_action_time + timedelta(minutes=env.period) and \
+                    loop_time = datetime.utcnow()
+                    if loop_time >= last_action_time + timedelta(minutes=env.period) and \
                                             datetime.utcnow().minute % env.period == 0:
                         can_act = True
 
@@ -131,7 +132,10 @@ class APrioriAgent(Agent):
 
                         if done:
                             self.step += 1
-                            last_action_time = datetime.utcnow()
+                            t = datetime.utcnow()
+                            last_action_time = t - timedelta(minutes=t.minute % env.period,
+                                                             seconds=t.second,
+                                                             microseconds=t.microsecond)
                             can_act = False
 
                     else:
@@ -170,13 +174,9 @@ class APrioriAgent(Agent):
 
         except KeyboardInterrupt:
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
-                  "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(self.step,
-                                                                                                      str(
-                                                                                                          pd.to_timedelta(
-                                                                                                              time() - t0, unit='s')),
-                                                                                                      actions,
-                                                                                                      episode_reward
-                                                                                                      ))
+                  "\nElapsed steps: {0}\nUptime: {1}\nFinal Portval: {2}\n".format(self.step,
+                                                               str(pd.to_timedelta(time() - t0, unit='s')),
+                                                               env.calc_total_portval()))
 
 
 class DummyTrader(APrioriAgent):
