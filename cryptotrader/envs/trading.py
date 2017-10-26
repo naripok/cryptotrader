@@ -173,6 +173,11 @@ class TradingEnvironment(Env):
         self.period = period
         self.obs_steps = obs_steps
 
+        # Init attributes for key sharing
+        self.results = None
+        self.action_space = None
+        self.observation_space = None
+
     ## Env properties
     @property
     def obs_steps(self):
@@ -757,7 +762,7 @@ class TradingEnvironment(Env):
 
         obs = self.get_history(start, end)
 
-        self.results['benchmark'] = convert_to.decimal('0e-8')
+        self.results['benchmark'] = convert_to.decimal('0E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)

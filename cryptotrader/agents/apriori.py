@@ -25,6 +25,7 @@ class APrioriAgent(Agent):
         super().__init__()
         self.epsilon = 1e-8
         self.fiat = fiat
+        self.step = 0
 
     def act(self, obs):
         """
@@ -249,7 +250,7 @@ class DummyTrader(APrioriAgent):
 
 
 class EqualyDistributedTrader(APrioriAgent):
-    def __init__(self, fiat):
+    def __init__(self, fiat="USDT"):
         super().__init__(fiat)
 
     def act(self, obs):
@@ -258,7 +259,26 @@ class EqualyDistributedTrader(APrioriAgent):
         action[-1] = 0
         return array_normalize(action)
 
-    
+
+class Benchmark(APrioriAgent):
+    def __init__(self, fiat="USDT"):
+        super().__init__(fiat)
+
+    def act(self, obs):
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs)
+            last_b = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
+                last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
+            last_b[-1] = max(0, 1 - last_b.sum())
+
+            return last_b
+
 class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
@@ -532,7 +552,7 @@ class PAMRTrader(APrioriAgent):
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
 
-    def __init__(self, sensitivity=0.025, C=5000, variant='PAMR2', fiat='USDT'):
+    def __init__(self, sensitivity=0.025, C=5000, variant="PAMR2", fiat="USDT"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
@@ -555,10 +575,11 @@ class PAMRTrader(APrioriAgent):
             return array_normalize(action)
         else:
             prev_posit = self.get_portfolio_vector(obs)
-            price_relative = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
+            price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+            last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'close')) - obs.get_value(obs.index[-2], (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
+                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'close')) - obs.get_value(obs.index[-2],
+                                                (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
                 last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
         return self.update(last_b, price_relative)
 
@@ -584,7 +605,7 @@ class PAMRTrader(APrioriAgent):
         b = b - lam * (x - x_mean)
 
         # project it onto simplex
-        return np.append(self.simplex_proj(b),0)
+        return np.append(self.simplex_proj(b), 0)
 
     def simplex_proj(self, y):
         """ Projection of y onto simplex. """
@@ -689,6 +710,7 @@ class PAMRTrader(APrioriAgent):
                 env.training = False
                 return None, None
             else:
+                env.training = False
                 raise e
 
         except KeyboardInterrupt:
@@ -759,21 +781,6 @@ class FibonacciTrader(APrioriAgent):
 
     def is_crab(self, obs):
         return self.find_pattern(obs, c1=(0.382, 0.618), c2=(0.382, 0.886), c3=(2.24, 3.618))
-
-    def trailing_stop(self, obs, pct):
-        """
-        Trailing stop function
-        :param obs: pandas DataFrame: Observation
-        :param pct:
-        :return:
-        """
-        # Calculate portfolio vector
-        port_vec = pd.DataFrame(columns=obs.columns.levels[0])
-        for index in range(obs.shape[0] - 1):
-            port_vec.append(self.get_portfolio_vector(obs, index))
-
-        max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
-
 
     def act(self, obs):
         pairs = obs.columns.levels[0]
@@ -858,7 +865,7 @@ class FibonacciTrader(APrioriAgent):
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
-                                              err_allowed=[0, .5],
+                                              err_allowed=[0, .1],
                                               peak_order=[1, 20],
                                               std_window=[2, env.obs_steps]
                                               )
