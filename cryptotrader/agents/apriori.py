@@ -684,6 +684,13 @@ class PAMRTrader(APrioriAgent):
             env.training = False
             return opt_params, info
 
+        except KeyError as e:
+            if 'C' in e.__str__():
+                env.training = False
+                return None, None
+            else:
+                raise e
+
         except KeyboardInterrupt:
             env.training = False
             print("\nOptimization interrupted by user.")
