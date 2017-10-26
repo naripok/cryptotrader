@@ -9,6 +9,8 @@ import talib as tl
 from decimal import InvalidOperation, DivisionByZero
 from datetime import timedelta
 
+from scipy.signal import argrelextrema
+
 
 class APrioriAgent(Agent):
     """
@@ -352,23 +354,6 @@ class MomentumTrader(APrioriAgent):
                 # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 batch_reward = []
-
-                # eval = partial(self.test,
-                #                 nb_episodes=1,
-                #                 action_repetition=action_repetition,
-                #                 callbacks=callbacks,
-                #                 visualize=visualize,
-                #                 nb_max_episode_steps=nb_max_episode_steps,
-                #                 nb_max_start_steps=nb_max_start_steps,
-                #                 start_step_policy=start_step_policy,
-                #                 verbose=False)
-                #
-                # with Pool(n_workers) as pool:
-                #     for batch in range(int(batch_size/n_workers)):
-                #         rewards = [pool.apply_async(eval, (deepcopy(env),)) for i in range(n_workers)]
-                #         batch_reward.append(sum([r.get() for r in rewards]))
-
-
                 for batch in range(batch_size):
                     # Reset env
                     env.reset_status()
@@ -395,8 +380,6 @@ class MomentumTrader(APrioriAgent):
                           end="\r")
                     t0 = time()
                 return sum(batch_reward)
-
-
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
@@ -716,5 +699,142 @@ class PAMRTrader(APrioriAgent):
 
 
 class FibonacciTrader(APrioriAgent):
-    def __init__(self, fiat="USDT"):
+    def __init__(self, peak_order=2, err_allowed=0.5, fiat="USDT"):
+        """
+        Fibonacci trader init method
+        :param peak_order: Extreme finder movement magnitude threshold
+        :param err_allowed: Pattern error margin to be accepted
+        :param fiat: Fiat symbol to use in trading
+        """
         super().__init__(fiat)
+        self.err_allowed = err_allowed
+        self.peak_order = peak_order
+
+    def find_extreme(self, obs):
+        max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
+        min_idx = argrelextrema(obs.close.values, np.less, order=self.peak_order)[0]
+        extreme_idx = np.concatenate([max_idx, min_idx, [obs.shape[0] - 1]])
+        extreme_idx.sort()
+        return obs.close.iloc[extreme_idx]
+
+    def calc_intervals(self, extremes):
+        XA = extremes.iloc[-2] - extremes.iloc[-1]
+        AB = extremes.iloc[-3] - extremes.iloc[-2]
+        BC = extremes.iloc[-4] - extremes.iloc[-3]
+        CD = extremes.iloc[-5] - extremes.iloc[-4]
+
+        return XA, AB, BC, CD
+
+    def find_pattern(self, obs, c1, c2, c3):
+        try:
+            XA, AB, BC, CD = self.calc_intervals(self.find_extreme(obs))
+
+            # Gartley fibonacci pattern
+            AB_range = np.array([c1[0] - self.err_allowed, c1[1] + self.err_allowed]) * abs(XA)
+            BC_range = np.array([c2[0] - self.err_allowed, c2[1] + self.err_allowed]) * abs(AB)
+            CD_range = np.array([c3[0] - self.err_allowed, c3[1] + self.err_allowed]) * abs(BC)
+
+            if AB_range[0] < abs(AB) < AB_range[1] and \
+                                    BC_range[0] < abs(BC) < BC_range[1] and \
+                                    CD_range[0] < abs(CD) < CD_range[1]:
+                if XA > 0 and AB < 0 and BC > 0 and CD < 0:
+                    return 1
+                elif XA < 0 and AB > 0 and BC < 0 and CD > 0:
+                    return -1
+                else:
+                    return 0
+            else:
+                return 0
+        except IndexError:
+            return 0
+
+    def is_gartley(self, obs):
+        return self.find_pattern(obs, c1=(0.618, 0.618), c2=(0.382, 0.886), c3=(1.27, 1.618))
+
+    def is_butterfly(self, obs):
+        return self.find_pattern(obs, c1=(0.786, 0.786), c2=(0.382, 0.886), c3=(1.618, 2.618))
+
+    def is_bat(self, obs):
+        return self.find_pattern(obs, c1=(0.382, 0.5), c2=(0.382, 0.886), c3=(1.618, 2.618))
+
+    def is_crab(self, obs):
+        return self.find_pattern(obs, c1=(0.382, 0.618), c2=(0.382, 0.886), c3=(2.24, 3.618))
+
+    def act(self, obs):
+        pairs = obs.columns.levels[0]
+        prev_port = self.get_portfolio_vector(obs)
+        action = np.zeros(pairs.shape[0])
+        for i, pair in enumerate(pairs):
+            if pair is not self.fiat:
+                pattern = self.is_gartley(obs[pair])
+                if pattern == 1:
+                    action[i] = 1
+                elif pattern == -1:
+                    action[i] = 0
+                else:
+                    action[i] = prev_port[pair.split('_')[1]]
+        action[-1] = max(0, 1 - action.sum())
+
+        return array_normalize(action)
+
+    def set_params(self, **kwargs):
+        self.err_allowed = kwargs['err_allowed']
+        self.peak_order = int(kwargs['peak_order'])
+
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None, n_workers=1):
+        try:
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
+            i = 0
+            t0 = time()
+            env.training = True
+
+            def find_hp(**kwargs):
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                self.set_params(**kwargs)
+
+                batch_reward = []
+                for batch in range(batch_size):
+                    # Reset env
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
+                    # run test on the main process
+                    r = self.test(env,
+                                    nb_episodes=1,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    verbose=False)
+
+                    batch_reward.append(r)
+
+                i += 1
+                if verbose:
+                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                        nb_steps,
+                                                                        sum(batch_reward),
+                                                                        str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                          end="\r")
+                    t0 = time()
+                return sum(batch_reward)
+
+            opt_params, info, _ = ot.maximize(find_hp,
+                                              num_evals=nb_steps,
+                                              err_allowed=[0, .5],
+                                              peak_order=[1, 20],
+                                              )
+
+            self.set_params(**opt_params)
+            env.training = False
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            env.training = False
+            print("\nOptimization interrupted by user.")
