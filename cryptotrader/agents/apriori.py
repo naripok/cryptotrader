@@ -34,18 +34,23 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
-    def get_portfolio_vector(self, obs):
-        # print(obs.iloc[-1])
+    def get_portfolio_vector(self, obs, index=-1):
+        """
+        Calculate portfolio vector from observation
+        :param obs: pandas DataFrame: Observation
+        :param index: int: Index to vector retrieve. -1 = last
+        :return: numpy array: Portfolio vector with values ranging [0, 1] and norm 1
+        """
         coin_val = {}
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[-1], (symbol, 'close'))
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[index], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[index], (symbol, 'close'))
 
         portval = 0
         for symbol in coin_val:
             portval += coin_val[symbol]
-        portval += obs[self.fiat].iloc[-1].values
+        portval += obs[self.fiat].iloc[index].values
 
         port_vec = {}
         for symbol in coin_val:
@@ -56,11 +61,11 @@ class APrioriAgent(Agent):
             except InvalidOperation:
                 port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
         try:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / portval
         except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + 1E-8)
         except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + 1E-8)
 
         return port_vec
 
@@ -665,7 +670,7 @@ class PAMRTrader(APrioriAgent):
 
 
 class FibonacciTrader(APrioriAgent):
-    def __init__(self, peak_order=2, err_allowed=0.5, fiat="USDT"):
+    def __init__(self, peak_order=2, err_allowed=0.5, std_window=33, fiat="USDT"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
@@ -675,6 +680,7 @@ class FibonacciTrader(APrioriAgent):
         super().__init__(fiat)
         self.err_allowed = err_allowed
         self.peak_order = peak_order
+        self.std_window = std_window
 
     def find_extreme(self, obs):
         max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
@@ -726,6 +732,21 @@ class FibonacciTrader(APrioriAgent):
     def is_crab(self, obs):
         return self.find_pattern(obs, c1=(0.382, 0.618), c2=(0.382, 0.886), c3=(2.24, 3.618))
 
+    def trailing_stop(self, obs, pct):
+        """
+        Trailing stop function
+        :param obs: pandas DataFrame: Observation
+        :param pct:
+        :return:
+        """
+        # Calculate portfolio vector
+        port_vec = pd.DataFrame(columns=obs.columns.levels[0])
+        for index in range(obs.shape[0] - 1):
+            port_vec.append(self.get_portfolio_vector(obs, index))
+
+        max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
+
+
     def act(self, obs):
         pairs = obs.columns.levels[0]
         prev_port = self.get_portfolio_vector(obs)
@@ -737,7 +758,9 @@ class FibonacciTrader(APrioriAgent):
                                                                        self.is_bat,
                                                                        self.is_crab]]).sum()
                 if pattern > 0:
-                    action[i] = 1
+                    action[i] = pattern / \
+                             (obs[pair].close.rolling(self.std_window, min_periods=1, center=True).std().iat[-1] +
+                              self.epsilon)
                 elif pattern < 0:
                     action[i] = 0
                 else:
@@ -749,6 +772,7 @@ class FibonacciTrader(APrioriAgent):
     def set_params(self, **kwargs):
         self.err_allowed = kwargs['err_allowed']
         self.peak_order = int(kwargs['peak_order'])
+        self.std_window = int(kwargs['std_window'])
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -798,6 +822,7 @@ class FibonacciTrader(APrioriAgent):
                                               num_evals=nb_steps,
                                               err_allowed=[0, .5],
                                               peak_order=[1, 20],
+                                              std_window=[2, env.obs_steps]
                                               )
 
             self.set_params(**opt_params)

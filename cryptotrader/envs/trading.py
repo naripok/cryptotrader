@@ -475,17 +475,15 @@ class TradingEnvironment(Env):
 
     def get_history(self, start=None, end=None, portifolio_vector=False):
         try:
-
-            if not end:
-                end = self.timestamp
-            if not start:
-                start = end - timedelta(minutes=self.period * (self.obs_steps))
-
             obs_list = []
             keys = []
 
             if portifolio_vector:
-                port_vec = self.get_sampled_portfolio(start, end)
+                if not start and not end:
+                    port_vec = self.get_sampled_portfolio(end - timedelta(minutes=self.period * self.obs_steps),
+                                                          self.timestamp)[-self.obs_steps:]
+                else:
+                    port_vec = self.get_sampled_portfolio(start, end)
 
             for symbol in self.pairs:
                 keys.append(symbol)
