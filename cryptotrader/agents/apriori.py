@@ -133,7 +133,6 @@ class APrioriAgent(Agent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
-            return False
 
     def trade(self, env, timeout=None, verbose=False, render=False):
         """
@@ -387,6 +386,7 @@ class MomentumTrader(APrioriAgent):
                               end="\r")
                         t0 = time()
                     return sum(batch_reward)
+
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
@@ -410,6 +410,7 @@ class MomentumTrader(APrioriAgent):
         except KeyboardInterrupt:
             env.training = False
             print("\nOptimization interrupted by user.")
+            return opt_params, info
 
 
 class MesaMomentumTrader(APrioriAgent):
@@ -794,41 +795,42 @@ class FibonacciTrader(APrioriAgent):
             env.training = True
 
             def find_hp(**kwargs):
-                try:
-                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                    self.set_params(**kwargs)
+                self.set_params(**kwargs)
 
-                    batch_reward = []
-                    for batch in range(batch_size):
-                        # Reset env
-                        env.reset_status()
-                        env.reset(reset_dfs=True)
-                        # run test on the main process
-                        r = self.test(env,
-                                        nb_episodes=1,
-                                        action_repetition=action_repetition,
-                                        callbacks=callbacks,
-                                        visualize=visualize,
-                                        nb_max_episode_steps=nb_max_episode_steps,
-                                        nb_max_start_steps=nb_max_start_steps,
-                                        start_step_policy=start_step_policy,
-                                        verbose=False)
+                batch_reward = []
+                for batch in range(batch_size):
+                    # Reset env
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
+                    # run test on the main process
+                    r = self.test(env,
+                                    nb_episodes=1,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    verbose=False)
 
-                        batch_reward.append(r)
+                    batch_reward.append(r)
 
-                    i += 1
-                    if verbose:
+                i += 1
+                if verbose:
+                    try:
                         print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                             nb_steps,
                                                                             sum(batch_reward),
                                                                             str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                               end="\r")
                         t0 = time()
-                    return sum(batch_reward)
+                    except TypeError:
+                        print("\nOptimization aborted by the user.")
+                        raise ot.api.fun.MaximumEvaluationsException(0)
 
-                except KeyboardInterrupt:
-                    raise ot.api.fun.MaximumEvaluationsException(0)
+                return sum(batch_reward)
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,

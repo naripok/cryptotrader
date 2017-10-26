@@ -1157,7 +1157,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             return obs.astype(np.float64)
         except IndexError:
             print("Insufficient tapi data. You must choose a bigger time span.")
-            raise KeyboardInterrupt
+            raise IndexError
 
     def step(self, action):
         try:
@@ -1186,7 +1186,9 @@ class BacktestEnvironment(PaperTradingEnvironment):
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
 
         except KeyboardInterrupt:
-            return self.get_observation(True).astype(np.float64), np.float64(0), False, self.status
+            self.status["OOD"] += 1
+            # return self.get_observation(True).astype(np.float64), np.float64(0), False, self.status
+            raise KeyboardInterrupt
 
         except Exception as e:
             self.logger.error(TradingEnvironment.step, self.parse_error(e))
