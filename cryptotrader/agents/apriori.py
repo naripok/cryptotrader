@@ -379,15 +379,20 @@ class MomentumTrader(APrioriAgent):
 
                     i += 1
                     if verbose:
-                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                            nb_steps,
-                                                                            sum(batch_reward),
-                                                                            str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                              end="\r")
-                        t0 = time()
+                        try:
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                                nb_steps,
+                                                                                sum(batch_reward),
+                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                                  end="\r")
+                            t0 = time()
+                        except TypeError:
+                            print("\nOptimization aborted by the user.")
+                            raise ot.api.fun.MaximumEvaluationsException(0)
                     return sum(batch_reward)
 
                 except KeyboardInterrupt:
+                    print("\nOptimization aborted by the user.")
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize(find_hp,
@@ -645,16 +650,23 @@ class PAMRTrader(APrioriAgent):
 
                     i += 1
                     if verbose:
-                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                            nb_steps,
-                                                                            sum(batch_reward),
-                                                                            str(pd.to_timedelta(
-                                                                                  (time() - t0) * (
-                                                                                  nb_steps - i), unit='s'))),
-                                                                            end="\r")
-                        t0 = time()
+                        try:
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                                nb_steps,
+                                                                                sum(batch_reward),
+                                                                                str(pd.to_timedelta(
+                                                                                      (time() - t0) * (
+                                                                                      nb_steps - i), unit='s'))),
+                                                                                end="\r")
+                            t0 = time()
+                        except TypeError:
+                            print("\nOptimization aborted by the user.")
+                            raise ot.api.fun.MaximumEvaluationsException(0)
+
                     return sum(batch_reward)
+
                 except KeyboardInterrupt:
+                    print("\nOptimization aborted by the user.")
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
@@ -795,42 +807,47 @@ class FibonacciTrader(APrioriAgent):
             env.training = True
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                try:
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                self.set_params(**kwargs)
+                    self.set_params(**kwargs)
 
-                batch_reward = []
-                for batch in range(batch_size):
-                    # Reset env
-                    env.reset_status()
-                    env.reset(reset_dfs=True)
-                    # run test on the main process
-                    r = self.test(env,
-                                    nb_episodes=1,
-                                    action_repetition=action_repetition,
-                                    callbacks=callbacks,
-                                    visualize=visualize,
-                                    nb_max_episode_steps=nb_max_episode_steps,
-                                    nb_max_start_steps=nb_max_start_steps,
-                                    start_step_policy=start_step_policy,
-                                    verbose=False)
+                    batch_reward = []
+                    for batch in range(batch_size):
+                        # Reset env
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
 
-                    batch_reward.append(r)
+                        batch_reward.append(r)
 
-                i += 1
-                if verbose:
-                    try:
-                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                            nb_steps,
-                                                                            sum(batch_reward),
-                                                                            str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                              end="\r")
-                        t0 = time()
-                    except TypeError:
-                        print("\nOptimization aborted by the user.")
-                        raise ot.api.fun.MaximumEvaluationsException(0)
+                    i += 1
+                    if verbose:
+                        try:
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                                nb_steps,
+                                                                                sum(batch_reward),
+                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                                  end="\r")
+                            t0 = time()
+                        except TypeError:
+                            print("\nOptimization aborted by the user.")
+                            raise ot.api.fun.MaximumEvaluationsException(0)
 
-                return sum(batch_reward)
+                    return sum(batch_reward)
+
+                except KeyboardInterrupt:
+                    print("\nOptimization aborted by the user.")
+                    raise ot.api.fun.MaximumEvaluationsException(0)
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
