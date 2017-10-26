@@ -6,8 +6,9 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-from copy import deepcopy
-from multiprocessing import Pool
+from decimal import InvalidOperation, DivisionByZero
+from datetime import timedelta
+
 
 class APrioriAgent(Agent):
     """
@@ -18,9 +19,10 @@ class APrioriAgent(Agent):
     model: a instance of a sklearn/keras like model, with train and test methods
     """
 
-    def __init__(self):
+    def __init__(self, fiat):
         super().__init__()
         self.epsilon = 1e-8
+        self.fiat = fiat
 
     def act(self, obs):
         """
@@ -36,18 +38,24 @@ class APrioriAgent(Agent):
         Test agent on environment
         """
         try:
+            # Get env params
+            self.fiat = env._fiat
+
+            # Reset observations
+            env.reset_status()
+            obs = env.reset(reset_dfs=True)
+
+            # Get max episode length
             if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - 1
-            env._reset_status()
-            obs = env.reset(reset_funds=True, reset_results=True)
-            t0 = 0
+                nb_max_episode_steps = env.data_length
+
+            #Reset counters
+            t0 = time()
             self.step = 0
             episode_reward = 0
 
             while True:
                 try:
-                    t0 += time()
-
                     action = self.act(obs)
                     obs, reward, _, status = env.step(action)
                     episode_reward += np.float64(reward)
@@ -60,11 +68,12 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps + 1,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps)),
+                            nb_max_episode_steps - env.obs_steps - 1,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
                             episode_reward,
-                            str(pd.to_timedelta(t0 * ((nb_max_episode_steps - env.obs_steps) - self.step) / self.step))
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps- 1) - self.step), unit='s'))
                         ), end="\r", flush=True)
+                        t0 = time()
 
                     if status['OOD'] or self.step == nb_max_episode_steps:
                         return episode_reward
@@ -77,7 +86,7 @@ class APrioriAgent(Agent):
                 except Exception as e:
                     print("Model Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    break
+                    raise e
 
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order to test.")
@@ -88,43 +97,57 @@ class APrioriAgent(Agent):
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
 
-    def trade(self, env, freq, obs_steps, timeout, verbose=False, render=False):
+    def trade(self, env, timeout=None, verbose=False, render=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
-        env._reset_status()
 
-        # Get initial obs
-        obs = env._get_obs(obs_steps, freq)
+        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period, env.calc_total_portval()))
+
+        self.fiat = env._fiat
+
+        # Reset env and get initial env
+        env.reset_status()
+        obs = env.reset()
 
         try:
-            t0 = 0
-            step = 0
-            actions = 0
+            t0 = time()
+            self.step = 0
             episode_reward = 0
+            action = np.zeros(len(env.symbols))
+            status = env.status
+            last_action_time = datetime.utcnow() - timedelta(minutes=env.period)
+            can_act = True
             while True:
                 try:
-                    t_step = time()
+                    if datetime.utcnow() >= last_action_time + timedelta(minutes=env.period) and \
+                                            datetime.utcnow().minute % env.period == 0:
+                        can_act = True
 
-                    action = self.forward(obs)
-                    obs, reward, done, status = env.step(action)
-                    episode_reward += np.float64(reward)
-                    step += 1
-                    t0 += time()
-                    if done:
-                        actions += 1
+                    if can_act:
+                        action = self.act(obs)
+                        obs, reward, done, status = env.step(action)
+                        episode_reward += np.float64(reward)
+
+                        if done:
+                            self.step += 1
+                            last_action_time = datetime.utcnow()
+                            can_act = False
+
+                    else:
+                        obs = env.get_observation(True)
 
                     if render:
                         env.render()
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto price: {2} Actions counter: {3} Cumulative Reward: {4}".format(
-                                step,
-                                str(pd.to_timedelta(t0)),
-                                obs.iloc[-1].close,
-                                actions,
-                                episode_reward
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}".format(
+                                self.step,
+                                str(pd.to_timedelta(time() - t0, unit='s')),
+                                [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
+                                env.calc_total_portval(),
+                                env.action_df.iloc[-1].astype('f').to_dict()
                             ), end="\r", flush=True)
 
                     if status['Error']:
@@ -133,19 +156,24 @@ class APrioriAgent(Agent):
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
 
-
-                    sleep(freq * 59.5)
+                    sleep(10)
 
                 except Exception as e:
                     print("Agent Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    print(obs)
+                    print(env.portfolio_df.iloc[-5:])
+                    print(env.action_df.iloc[-5:])
+                    print("Action taken:", action)
+
                     break
+
         except KeyboardInterrupt:
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
-                  "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(step,
+                  "\nElapsed steps: {0}\nUptime: {1}\nActions counter: {2}\nTotal Reward: {3}".format(self.step,
                                                                                                       str(
                                                                                                           pd.to_timedelta(
-                                                                                                              t0)),
+                                                                                                              time() - t0, unit='s')),
                                                                                                       actions,
                                                                                                       episode_reward
                                                                                                       ))
@@ -155,14 +183,14 @@ class DummyTrader(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
     """
-    def __init__(self, random_process=None, activation='softmax'):
+    def __init__(self, random_process=None, activation='softmax', fiat="USDT"):
         """
         Initialization method
         :param env: Apocalipse driver instance
         :param random_process: Random process used to sample actions from
         :param activation: Portifolio activation function
         """
-        super().__init__()
+        super().__init__(fiat)
 
         self.random_process = random_process
         self.activation = activation
@@ -184,8 +212,8 @@ class DummyTrader(APrioriAgent):
 
 
 class EqualyDistributedTrader(APrioriAgent):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, fiat):
+        super().__init__(fiat)
 
     def act(self, obs):
         n_pairs = obs.columns.levels[0].shape[0]
@@ -198,17 +226,47 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
-    def __init__(self, mean_type='kama'):
+    def __init__(self, fiat, mean_type='kama'):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
-        super().__init__()
+        super().__init__(fiat=fiat)
         self.mean_type = mean_type
         self.ma_span = None
         self.std_span = None
         self.opt_params = None
 
     # GET INDICATORS FUNCTIONS
+    def get_portfolio_vector(self, obs):
+        # print(obs.iloc[-1])
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[-1], (symbol, 'close'))
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[-1].values
+
+        port_vec = {}
+        for symbol in coin_val:
+            try:
+                port_vec[symbol] = coin_val[symbol] / portval
+            except DivisionByZero:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+            except InvalidOperation:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+        try:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+        except DivisionByZero:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+        except InvalidOperation:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+
+        return port_vec
+
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
@@ -233,15 +291,18 @@ class MomentumTrader(APrioriAgent):
         Performs a single step on the environment
         """
         try:
+            obs = obs.astype(np.float64).ffill()
+            prev_posit = self.get_portfolio_vector(obs)
+            # print(prev_posit)
             position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-                df = obs[symbol].astype(np.float64).copy()
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
                 # Get action
                 if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
                     self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = np.zeros(1)
+                    action = 0.0
 
                 elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
                     self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
@@ -249,30 +310,32 @@ class MomentumTrader(APrioriAgent):
                              (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
                               self.epsilon)
 
-
                 else:
-                    action = np.float64(df['position'].iat[-1])
+                    action = np.float64(prev_posit[symbol.split("_")[1]])
 
                 position[key] = action
-
-            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
+            # print(position)
+            position[-1] = np.clip(1 - position[:-1].sum(), a_max=np.inf, a_min=0.0)
+            # print(position)
 
             return array_normalize(position)
 
-        except TypeError:
+        except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
         try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
             i = 0
             t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.training = True
+
 
             @ot.constraints.violations_defaulted(-np.inf)
             @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
@@ -288,7 +351,27 @@ class MomentumTrader(APrioriAgent):
                 # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                 batch_reward = []
+
+                # eval = partial(self.test,
+                #                 nb_episodes=1,
+                #                 action_repetition=action_repetition,
+                #                 callbacks=callbacks,
+                #                 visualize=visualize,
+                #                 nb_max_episode_steps=nb_max_episode_steps,
+                #                 nb_max_start_steps=nb_max_start_steps,
+                #                 start_step_policy=start_step_policy,
+                #                 verbose=False)
+                #
+                # with Pool(n_workers) as pool:
+                #     for batch in range(int(batch_size/n_workers)):
+                #         rewards = [pool.apply_async(eval, (deepcopy(env),)) for i in range(n_workers)]
+                #         batch_reward.append(sum([r.get() for r in rewards]))
+
+
                 for batch in range(batch_size):
+                    # Reset env
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
                     # run test on the main process
                     r = self.test(env,
                                     nb_episodes=1,
@@ -304,14 +387,15 @@ class MomentumTrader(APrioriAgent):
 
                 i += 1
                 if verbose:
-                    t0 += time()
                     print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                         nb_steps,
                                                                         sum(batch_reward),
-                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
+                                                                        str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                           end="\r")
-
+                    t0 = time()
                 return sum(batch_reward)
+
+
 
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
@@ -327,10 +411,11 @@ class MomentumTrader(APrioriAgent):
                     opt_params[key] = round(value)
 
             self.set_params(**opt_params)
-            env.set_training_stage(False)
+            env.training = False
             return opt_params, info
 
         except KeyboardInterrupt:
+            env.training = False
             print("\nOptimization interrupted by user.")
 
 
@@ -390,7 +475,7 @@ class MesaMomentumTrader(APrioriAgent):
             t0 = time()
             env._reset_status()
             env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.reset(reset_dfs=True)
 
             def find_hp(**kwargs):
                 nonlocal i, nb_steps, t0, env, nb_max_episode_steps
@@ -448,14 +533,14 @@ class PAMR(APrioriAgent):
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
 
-    def __init__(self, sensitivity=0.5, C=500, variant='PAMR'):
+    def __init__(self, sensitivity=0.025, C=5000, variant='PAMR2', fiat='USDT'):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
         :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
         :
         """
-        super().__init__()
+        super().__init__(fiat=fiat)
         self.sensitivity = sensitivity
         self.C = C
         self.variant = variant
@@ -470,12 +555,12 @@ class PAMR(APrioriAgent):
             action[-1] = 0
             return array_normalize(action)
         else:
-            price_relative = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape, dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-                df = obs[symbol].astype(np.float64).copy()
-                price_relative[key] = (df.close.iat[-2] - df.close.iat[-1]) / df.close.iat[-2]
-                last_b[key] = np.float64(df['position'].iat[-1])
+            prev_posit = self.get_portfolio_vector(obs)
+            price_relative = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
+            last_b = np.empty(obs.columns.levels[0].shape[0]-1, dtype=np.float64)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'close')) - obs.get_value(obs.index[-2], (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
+                last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
         return self.update(last_b, price_relative)
 
     def update(self, b, x):
@@ -498,7 +583,37 @@ class PAMR(APrioriAgent):
         b = b - lam * (x - x_mean)
 
         # project it onto simplex
-        return self.simplex_proj(b)
+        return np.append(self.simplex_proj(b),0)
+
+    def get_portfolio_vector(self, obs):
+        # print(obs.iloc[-1])
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[-2], (symbol, 'close'))
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[-1].values
+
+        port_vec = {}
+        for symbol in coin_val:
+            try:
+                port_vec[symbol] = coin_val[symbol] / portval
+            except DivisionByZero:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+            except InvalidOperation:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+        try:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+        except DivisionByZero:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+        except InvalidOperation:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+
+        return port_vec
 
     def simplex_proj(self, y):
         """ Projection of y onto simplex. """
@@ -521,28 +636,33 @@ class PAMR(APrioriAgent):
         return np.maximum(y - tmax, 0.)
 
     def set_params(self, **kwargs):
-        self.ma_span = kwargs['sensitivity']
-        # self.C = kwargs['C']
+        self.sensitivity = kwargs['sensitivity']
+        if 'C' in kwargs:
+            self.C = kwargs['C']
+        self.variant = kwargs['variant']
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
+
         try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
             i = 0
             t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
-            env.reset(reset_funds=True, reset_results=True, reset_global_step=True)
+            env.training = True
 
             def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                nonlocal i, nb_steps, env, t0, nb_max_episode_steps
 
                 self.set_params(**kwargs)
 
                 batch_reward = []
+
                 for batch in range(batch_size):
+                    env.reset_status()
+                    env.reset(reset_dfs=True)
                     # run test on the main process
                     r = self.test(env,
                                     nb_episodes=1,
@@ -567,16 +687,26 @@ class PAMR(APrioriAgent):
 
                 return sum(batch_reward)
 
-            opt_params, info, _ = ot.maximize(find_hp,
+            opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
-                                              sensitivity=[0, 1],
-                                              # C=[50, 5000],
+                                              search_space={'variant':{
+                                                  'PAMR':{'sensitivity':[0, 0.1]},
+                                                  'PAMR1':{'sensitivity':[0, 0.1],
+                                                           'C':[500, 5000]},
+                                                  'PAMR2':{'sensitivity':[0, 0.1],
+                                                           'C':[500, 5000]}}
+                                              }
                                               )
 
             self.set_params(**opt_params)
-            env.set_training_stage(False)
+            env.training = False
             return opt_params, info
 
         except KeyboardInterrupt:
+            env.training = False
             print("\nOptimization interrupted by user.")
 
+
+class FibonacciTrader(APrioriAgent):
+    def init(self):
+        pass

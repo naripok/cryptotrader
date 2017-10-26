@@ -7,7 +7,6 @@ import pytest
 import mock
 from hypothesis import given, example, settings, strategies as st
 from hypothesis.extra.numpy import arrays, array_shapes
-from cryptotrader.envs.utils import *
 from cryptotrader.envs.driver import TrainingEnvironment
 from cryptotrader.envs.utils import SinusoidalProcess, sample_trades
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
@@ -107,7 +106,7 @@ class Test_env_setup(object):
             assert keys[i] in self.env.symbols
         # TODO other test cases
 
-    @given(amount=st.floats(max_value=1e18, allow_infinity=False, allow_nan=False))
+    @given(amount=st.floats(max_value=1e12, allow_infinity=False, allow_nan=False))
     def test_set_init_crypto(self, amount):
         symbols = self.env.df.columns.levels[0][:-1]
         for symbol in symbols:
@@ -118,7 +117,7 @@ class Test_env_setup(object):
                 with pytest.raises(AssertionError):
                     self.env.set_init_crypto(amount, symbol)
 
-    @given(amount=st.floats(max_value=1e18, allow_infinity=False, allow_nan=False))
+    @given(amount=st.floats(max_value=1e12, allow_infinity=False, allow_nan=False))
     def test_set_init_fiat(self, amount):
         if amount >= Decimal('0.0'):
             self.env.set_init_fiat(amount)
@@ -151,8 +150,8 @@ class Test_env_setup(object):
         assert isinstance(self.env.action_space, Box)
         assert self.env.action_space.low.shape[0] == len(self.env.symbols)
 
-    @given(init_fiat=st.floats(max_value=1e18, min_value=0.1, allow_infinity=False, allow_nan=False),
-           init_crypto=st.floats(max_value=1e18, min_value=0.0, allow_infinity=False, allow_nan=False),
+    @given(init_fiat=st.floats(max_value=1e8, min_value=0.1, allow_infinity=False, allow_nan=False),
+           init_crypto=st.floats(max_value=1e8, min_value=0.0, allow_infinity=False, allow_nan=False),
            )
     @settings(max_examples=10)
     def test_reset(self, init_fiat, init_crypto):
@@ -191,12 +190,16 @@ class Test_env_setup(object):
 
         assert self.env.df.iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].fiat.amount.values.all() == \
                convert_to.decimal(init_fiat)
+
+        start = self.env.step_idx - self.env.obs_steps
+        end = self.env.step_idx
         for symbol in self.env.df.columns.levels[0]:
             if symbol is not 'fiat':
                 assert symbol in self.env.symbols
                 assert self.env.df[symbol].iloc[self.env.step_idx - self.env.obs_steps:self.env.step_idx].\
                            amount.values.all() == convert_to.decimal(init_crypto)
-                for step in range(self.env.step_idx - self.env.obs_steps, self.env.step_idx):
+                for step in range(start, end):
+                    self.env.step_idx = step
                     assert self.env.df[symbol].at[self.env.df.index[step], 'position'] -\
                            self.env._calc_step_posit(symbol) <= Decimal('3e-2')
 
