@@ -32,6 +32,36 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
+    def get_portfolio_vector(self, obs):
+        # print(obs.iloc[-1])
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
+                                                 obs.get_value(obs.index[-1], (symbol, 'close'))
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[-1].values
+
+        port_vec = {}
+        for symbol in coin_val:
+            try:
+                port_vec[symbol] = coin_val[symbol] / portval
+            except DivisionByZero:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+            except InvalidOperation:
+                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+        try:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
+        except DivisionByZero:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+        except InvalidOperation:
+            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
+
+        return port_vec
+
     def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
         """
@@ -237,35 +267,6 @@ class MomentumTrader(APrioriAgent):
         self.opt_params = None
 
     # GET INDICATORS FUNCTIONS
-    def get_portfolio_vector(self, obs):
-        # print(obs.iloc[-1])
-        coin_val = {}
-        for symbol in obs.columns.levels[0]:
-            if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[-1], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[-1], (symbol, 'close'))
-
-        portval = 0
-        for symbol in coin_val:
-            portval += coin_val[symbol]
-        portval += obs[self.fiat].iloc[-1].values
-
-        port_vec = {}
-        for symbol in coin_val:
-            try:
-                port_vec[symbol] = coin_val[symbol] / portval
-            except DivisionByZero:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
-            except InvalidOperation:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
-        try:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / portval
-        except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
-        except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[-1].values / (portval + 1E-8)
-
-        return port_vec
 
     def get_ma(self, df):
         if self.mean_type == 'exp':
@@ -697,10 +698,10 @@ class PAMRTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
                                               search_space={'variant':{
-                                                  'PAMR':{'sensitivity':[0, 0.1]},
-                                                  'PAMR1':{'sensitivity':[0, 0.1],
+                                                  'PAMR':{'sensitivity':[0, 1]},
+                                                  'PAMR1':{'sensitivity':[0, 1],
                                                            'C':[500, 5000]},
-                                                  'PAMR2':{'sensitivity':[0, 0.1],
+                                                  'PAMR2':{'sensitivity':[0, 1],
                                                            'C':[500, 5000]}}
                                               }
                                               )
