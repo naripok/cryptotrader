@@ -480,8 +480,8 @@ class TradingEnvironment(Env):
 
             if portifolio_vector:
                 if not start and not end:
-                    port_vec = self.get_sampled_portfolio(end - timedelta(minutes=self.period * self.obs_steps),
-                                                          self.timestamp)[-self.obs_steps:]
+                    port_vec = self.get_sampled_portfolio(self.timestamp - timedelta(minutes=self.period * self.obs_steps),
+                                                          self.timestamp).iloc[-self.obs_steps:]
                 else:
                     port_vec = self.get_sampled_portfolio(start, end)
 
