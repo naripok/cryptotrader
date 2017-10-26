@@ -684,13 +684,14 @@ class PAMRTrader(APrioriAgent):
 
                 i += 1
                 if verbose:
-                    t0 += time()
                     print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
                                                                         nb_steps,
                                                                         sum(batch_reward),
-                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
-                          end="\r")
-
+                                                                        str(pd.to_timedelta(
+                                                                              (time() - t0) * (
+                                                                              nb_steps - i), unit='s'))),
+                                                                        end="\r")
+                    t0 = time()
                 return sum(batch_reward)
 
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
