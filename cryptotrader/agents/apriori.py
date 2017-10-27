@@ -694,10 +694,10 @@ class PAMRTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
                                               search_space={'variant':{
-                                                  'PAMR':{'sensitivity':[0, .3]},
-                                                  'PAMR1':{'sensitivity':[0, .3],
+                                                  'PAMR':{'sensitivity':[0, .1]},
+                                                  'PAMR1':{'sensitivity':[0, .1],
                                                            'C':[500, 5000]},
-                                                  'PAMR2':{'sensitivity':[0, .3],
+                                                  'PAMR2':{'sensitivity':[0, .1],
                                                            'C':[500, 5000]}}
                                               }
                                               )
