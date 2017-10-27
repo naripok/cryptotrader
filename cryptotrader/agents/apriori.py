@@ -221,6 +221,9 @@ class DummyTrader(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
     """
+    def __repr__(self):
+        return "DummyTrader"
+
     def __init__(self, random_process=None, activation='softmax', fiat="USDT"):
         """
         Initialization method
@@ -249,7 +252,13 @@ class DummyTrader(APrioriAgent):
                 return np.random.random(obs.columns.levels[0].shape[0])
 
 
-class EqualyDistributedTrader(APrioriAgent):
+class ConstantRebalanceTrader(APrioriAgent):
+    """
+    Equally distribute portfolio every step
+    """
+    def __repr__(self):
+        return "ContantRebalanceTrader"
+
     def __init__(self, fiat="USDT"):
         super().__init__(fiat)
 
@@ -261,6 +270,12 @@ class EqualyDistributedTrader(APrioriAgent):
 
 
 class Benchmark(APrioriAgent):
+    """
+    Equally distribute cash at the first step and hold
+    """
+    def __repr__(self):
+        return "Benchmark"
+
     def __init__(self, fiat="USDT"):
         super().__init__(fiat)
 
@@ -284,6 +299,9 @@ class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
     """
+    def __repr__(self):
+        return "MomentumTrader"
+
     def __init__(self, fiat="USDT", mean_type='kama'):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -552,6 +570,8 @@ class PAMRTrader(APrioriAgent):
         Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
+    def __repr__(self):
+        return "PAMRTrader"
 
     def __init__(self, sensitivity=0.025, C=5000, variant="PAMR2", fiat="USDT"):
         """
@@ -694,10 +714,10 @@ class PAMRTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize_structured(f=find_hp,
                                               num_evals=nb_steps,
                                               search_space={'variant':{
-                                                  'PAMR':{'sensitivity':[0, .3]},
-                                                  'PAMR1':{'sensitivity':[0, .3],
+                                                  'PAMR':{'sensitivity':[0, .1]},
+                                                  'PAMR1':{'sensitivity':[0, .1],
                                                            'C':[500, 5000]},
-                                                  'PAMR2':{'sensitivity':[0, .3],
+                                                  'PAMR2':{'sensitivity':[0, .1],
                                                            'C':[500, 5000]}}
                                               }
                                               )
@@ -720,7 +740,13 @@ class PAMRTrader(APrioriAgent):
             return opt_params, info
 
 
-class FibonacciTrader(APrioriAgent):
+class HarmonicTrader(APrioriAgent):
+    """
+    Fibonacci harmonic pattern trader
+    """
+    def __repr__(self):
+        return "HarmonicTrader"
+
     def __init__(self, peak_order=7, err_allowed=0.05, fiat="USDT"):
         """
         Fibonacci trader init method
@@ -876,7 +902,13 @@ class FibonacciTrader(APrioriAgent):
             return opt_params, info
 
 
-class FactorAgent(APrioriAgent):
+class FactorTrader(APrioriAgent):
+    """
+    Compound factor trader
+    """
+    def __repr__(self):
+        return "FactorTrader"
+
     def __init__(self, factors, std_window=123, fiat="USDT"):
         super().__init__(fiat)
         assert isinstance(factors, list), "factors must be a list containing factor model instances"
@@ -884,14 +916,96 @@ class FactorAgent(APrioriAgent):
             assert isinstance(factor, APrioriAgent), "Factors must be APrioriAgent instances"
         self.factors = factors
         self.std_window = std_window
+        self.std_weight = 1
+        self.weights = np.ones(len(self.factors))
 
     def act(self, obs):
-        action = np.zeros(obs.columns.levels[0].shape[0])
-        for factor in self.factors:
-            action += factor.act(obs)
+        action = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
+        for weight, factor in zip(self.weights, self.factors):
+            action += weight * factor.act(obs)
         for i, symbol in enumerate(obs.columns.levels[0]):
             if symbol is not self.fiat:
-                action[i] /= (obs[symbol].close.rolling(self.std_window, min_periods=1, center=True).std().iat[-1] / \
-                              obs.get_value(obs.index[-1], (symbol, 'close')) +
+                action[i] /= (self.std_weight * obs[symbol].close.rolling(self.std_window, min_periods=1,
+                              center=True).std().iat[-1] / obs.get_value(obs.index[-1], (symbol, 'close')) +
                               self.epsilon)
         return array_normalize(action)
+
+    def set_params(self, **kwargs):
+        self.std_window = int(kwargs['std_window'])
+        self.std_weight = kwargs['std_weight']
+        for i, factor in enumerate(self.factors):
+            self.weights[i] = kwargs[str(factor) + '_weight']
+
+    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None, n_workers=1):
+        try:
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
+            i = 0
+            t0 = time()
+            env.training = True
+
+            def find_hp(**kwargs):
+                try:
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                    self.set_params(**kwargs)
+
+                    batch_reward = []
+                    for batch in range(batch_size):
+                        # Reset env
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
+
+                        batch_reward.append(r)
+
+                    i += 1
+                    if verbose:
+                        try:
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                                                                                nb_steps,
+                                                                                sum(batch_reward),
+                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                                  end="\r")
+                            t0 = time()
+                        except TypeError:
+                            print("\nOptimization aborted by the user.")
+                            raise ot.api.fun.MaximumEvaluationsException(0)
+
+                    return sum(batch_reward)
+
+                except KeyboardInterrupt:
+                    print("\nOptimization aborted by the user.")
+                    raise ot.api.fun.MaximumEvaluationsException(0)
+
+            factor_weights = {}
+            for factor in self.factors:
+                factor_weights[str(factor) + "_weight"] = [0.00001, 1]
+
+            opt_params, info, _ = ot.maximize(find_hp,
+                                              num_evals=nb_steps,
+                                              std_window=[2, env.obs_steps],
+                                              std_weight=[0.0001, 3],
+                                              **factor_weights
+                                              )
+
+            self.set_params(**opt_params)
+            env.training = False
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            env.training = False
+            print("\nOptimization interrupted by user.")
+            return opt_params, info
