@@ -107,9 +107,11 @@ class convert_to(object):
         try:
             # if isinstance(data, Decimal):
             #     return data.quantize(convert_to._quantizer)
-            if isinstance(data, np.float32) or isinstance(data, float):
-                data = np.float64(data)
-                return Decimal.from_float(data).quantize(convert_to._quantizer)
+            # if isinstance(data, np.float32) or isinstance(data, float):
+            #     data = np.float64(data)
+            #     return Decimal.from_float(data).quantize(convert_to._quantizer)
+            return Decimal(data).quantize(convert_to._quantizer)
+        except TypeError:
             if isinstance(data, np.ndarray):
                 shape = data.shape
                 output = np.empty(data.flatten().shape, dtype=np.dtype(Decimal))
@@ -117,7 +119,8 @@ class convert_to(object):
                     output[i] = Decimal(np.float64(item)).quantize(convert_to._quantizer)
                 return output.reshape(shape)
             else:
-                return Decimal(data).quantize(convert_to._quantizer)
+                data = np.float64(data)
+                return Decimal.from_float(data).quantize(convert_to._quantizer)
         except InvalidOperation:
             if abs(data) > Decimal('1e15'):
                 raise InvalidOperation("Numeric overflow in convert_to.decimal")
