@@ -435,7 +435,7 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
         if not start:
-            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps))
+            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps - 1))
         if not end:
             end = self.timestamp
 
@@ -486,7 +486,8 @@ class TradingEnvironment(Env):
 
             if portifolio_vector:
                 if not start and not end:
-                    port_vec = self.get_sampled_portfolio(self.timestamp - timedelta(minutes=self.period * self.obs_steps),
+                    port_vec = self.get_sampled_portfolio(self.timestamp -
+                                                          timedelta(minutes=self.period * (self.obs_steps - 1)),
                                                           self.timestamp).iloc[-self.obs_steps:]
                 else:
                     port_vec = self.get_sampled_portfolio(start, end)

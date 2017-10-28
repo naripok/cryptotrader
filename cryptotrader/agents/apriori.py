@@ -58,15 +58,15 @@ class APrioriAgent(Agent):
             try:
                 port_vec[symbol] = coin_val[symbol] / portval
             except DivisionByZero:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+                port_vec[symbol] = coin_val[symbol] / (portval + self.epsilon)
             except InvalidOperation:
-                port_vec[symbol] = coin_val[symbol] / (portval + 1E-8)
+                port_vec[symbol] = coin_val[symbol] / (portval + self.epsilon)
         try:
             port_vec[self.fiat] = obs[self.fiat].iloc[index].values / portval
         except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + 1E-8)
+            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
         except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + 1E-8)
+            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
 
         return port_vec
 
