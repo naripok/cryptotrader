@@ -505,7 +505,7 @@ class TradingEnvironment(Env):
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
-            return pd.concat(obs_list, keys=keys, axis=1).ffill().bfill()
+            return pd.concat(obs_list, keys=keys, axis=1).ffill()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -1137,7 +1137,6 @@ class BacktestEnvironment(PaperTradingEnvironment):
         # Reset index
         try:
             self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
-
 
             if self.training:
                 self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
