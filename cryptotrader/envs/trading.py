@@ -464,6 +464,7 @@ class TradingEnvironment(Env):
                 # If df is large enough, return
                 while not df.shape[0] >= self.obs_steps:
                     sleep(2)
+                    print("Insufficient data")
                     if self.period < 5:
                         df = self.get_ohlc_from_trades(pair)
                     else:
