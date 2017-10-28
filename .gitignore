@@ -109,3 +109,5 @@ notebooks/logs
 /notebooks/momentum_dev.ipynb
 /notebooks/driver_debug_nb.ipynb
 
+/notebooks/cn_models_dev_nb.ipynb
+/notebooks/apriori_agents_dev.ipynb
