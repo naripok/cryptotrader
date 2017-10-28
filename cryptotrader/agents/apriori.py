@@ -418,12 +418,10 @@ class MomentumTrader(APrioriAgent):
                                   end="\r")
                             t0 = time()
                         except TypeError:
-                            print("\nOptimization aborted by the user.")
                             raise ot.api.fun.MaximumEvaluationsException(0)
                     return sum(batch_reward)
 
                 except KeyboardInterrupt:
-                    print("\nOptimization aborted by the user.")
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
             hp = {
