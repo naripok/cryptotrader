@@ -131,7 +131,7 @@ from bokeh.layouts import column
 
 # TODO \/ #################### WORKING NOW ###################\/
 
-# class PortifolioVector(Layer):
+# class PortfolioVector(Layer):
 #     def __init__(self, **kwargs):
 #         super().__init__(**kwargs)
 #
@@ -1113,7 +1113,7 @@ class EIIE(ArenaDDPGAgent):
                          gamma=gamma,
                          target_model_update=target_model_update,
                          custom_model_objects={
-                             'PortifolioVector': PortifolioVector,
+                             'PortfolioVector': PortifolioVector,
                              'ProcessObs': ProcessObs,
                              'CashBias': CashBias
                          }

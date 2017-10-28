@@ -12,7 +12,6 @@ from datetime import timedelta
 from time import time
 
 import chainer
-from chainer import report, Reporter, get_current_reporter
 from chainer import functions as F
 from chainer import links as L
 from chainerrl.agents import a3c

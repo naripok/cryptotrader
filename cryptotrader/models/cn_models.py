@@ -79,36 +79,37 @@ class ProcessObs(chainer.Link):
         xp = chainer.cuda.get_array_module(x)
         obs = []
 
-        self.n_cols = int(x.shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
+        n_cols = int(x.shape[-1])
+        n_pairs = int((n_cols - 1) / 6)
 
-        indexes = [i for i in range(self.n_cols - 1) if i % 6 == 0]
-        for j in range(self.n_pairs):
+        indexes = [i for i in range(n_cols - 1) if i % 6 == 0]
+        for j in range(n_pairs):
             i = indexes[j]
             pair = []
-            pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + 1e-8) - 1., -2))
-            pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + 1e-8) - 1., -2))
-            pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + 1e-8) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + eps) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + eps) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + eps) - 1., -2))
             obs.append(xp.concatenate(pair, axis=1))
 
         # shape[batch_size, features, n_pairs, timesteps]
         return self.bn(xp.concatenate(obs, axis=-2))
 
 
-class PortifolioVector(chainer.Link):
-    def __init__(self, input_shape):
+class PortfolioVector(chainer.Link):
+    def __init__(self):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
 
     def __call__(self, x):
-        xp = chainer.cuda.get_array_module(x)
-        out = []
-        for i in [i - 1 for i in range(1, self.n_cols) if (i % 6) == 0]:
-            out.append(xp.expand_dims(x[:,:,-1, i], -1))
-#         out.append(x[:,-1])
+        n_cols = int(x.shape[-1])
+        n_pairs = int((n_cols - 1) / 6)
 
-        return chainer.Variable(xp.reshape(xp.concatenate(out, axis=-1), [-1,1,self.n_pairs,1]))
+        xp = chainer.cuda.get_array_module(x)
+        cv = np.zeros((1, n_pairs))
+        for i, j in enumerate([i - 1 for i in range(1, n_cols) if (i % 6) == 0]):
+            cv[0, i] = xp.expand_dims(x[:,:,-1, j] * x[:,:,-1, j - 2], -1)
+
+        return chainer.Variable(xp.reshape(xp.concatenate(cv / (cv.sum() + x[:,:,-1, n_cols - 1]), axis=-1),
+                                           [-1,1,n_pairs,1]))
 
 
 class CashBias(chainer.Link):
@@ -169,7 +170,7 @@ class EIIE(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.vision = VisionModel(timesteps, vn_number, pn_number)
-            # self.portvec = PortifolioVector(input_shape)
+            # self.portvec = PortfolioVector(input_shape)
             self.conv = L.Convolution2D(pn_number, 1, 1, 1, nobias=False, initialW=LeCunNormal())
             # self.cashbias = CashBias()
 
