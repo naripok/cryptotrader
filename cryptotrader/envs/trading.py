@@ -435,7 +435,7 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
         if not start:
-            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps - 1))
+            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps))
         if not end:
             end = self.timestamp
 
@@ -463,6 +463,7 @@ class TradingEnvironment(Env):
             if not start and not end:
                 # If df is large enough, return
                 while not df.shape[0] >= self.obs_steps:
+                    print(df.shape[0])
                     sleep(1)
                     if self.period < 5:
                         df = self.get_ohlc_from_trades(pair)
@@ -504,7 +505,7 @@ class TradingEnvironment(Env):
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
-            return pd.concat(obs_list, keys=keys, axis=1).ffill().bfill()
+            return pd.concat(obs_list, keys=keys, axis=1)#.ffill().bfill()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
