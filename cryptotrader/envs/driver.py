@@ -4,12 +4,11 @@ Gym-like environment implementation for cryptocurrency trading and trade simulat
 author: Fernando H'.' Canteruccio, José Olímpio Mendes
 date: 17/07/2017
 """
-
 from .. import error
 from .. import seeding
 from ..core import Env
 from ..spaces import *
-from ..utils import Logger
+from ..utils import Logger, convert_to
 from .utils import *
 
 import os
@@ -20,11 +19,9 @@ from time import sleep, time
 import pandas as pd
 import empyrical as ec
 import pymongo as pm
-from bitstamp.client import Trading
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
-
 
 # Decimal precision
 getcontext().prec = 24
