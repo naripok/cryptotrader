@@ -246,7 +246,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             if epoch % test_interval == 0 and epoch != 0:
                 test_losses = []
                 test_scores = []
-                print("\nRunning test epochs...")
+                print()
                 for j in range(test_epochs):
                     test_batch, target_test = make_batch(test_env, batch_size)
 
@@ -266,7 +266,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
                     test_loss_log.append(np.mean(test_losses))
                     test_r2_log.append(np.mean(test_scores))
 
-                    print("Test epoch: %d, loss: %f, r2: %f" % (j + 1, np.mean(test_losses), np.mean(test_scores)), end='\r')
+                    print("Test epoch: %d, loss: %f, r2: %f" % (j + 1, loss_test.data, test_r2.data), end='\r')
 
                 if np.mean(test_scores) > best_score:
                     best_score = np.mean(test_scores)
