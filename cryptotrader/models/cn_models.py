@@ -70,21 +70,14 @@ class ProcessObs(chainer.Link):
     """
     def __init__(self):
         super().__init__()
-        self.out_channels = 3
-
-        with self.init_scope():
-            self.bn = L.BatchNormalization(self.out_channels)
+        # with self.init_scope():
+        #     self.bn = L.BatchNormalization(self.out_channels)
 
     def __call__(self, x):
         xp = chainer.cuda.get_array_module(x)
         obs = []
 
-        n_cols = int(x.shape[-1])
-        n_pairs = int((n_cols - 1) / 6)
-
-        indexes = [i for i in range(n_cols - 1) if i % 6 == 0]
-        for j in range(n_pairs):
-            i = indexes[j]
+        for i in [i for i in range(int(x.shape[-1]) - 1) if i % 6 == 0]:
             pair = []
             pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + eps) - 1., -2))
             pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + eps) - 1., -2))
@@ -92,7 +85,8 @@ class ProcessObs(chainer.Link):
             obs.append(xp.concatenate(pair, axis=1))
 
         # shape[batch_size, features, n_pairs, timesteps]
-        return self.bn(xp.concatenate(obs, axis=-2))
+        # return self.bn(xp.concatenate(obs, axis=-2))
+        return xp.concatenate(obs, axis=-2)
 
 
 class PortfolioVector(chainer.Link):
@@ -181,6 +175,34 @@ class EIIE(chainer.Chain):
         # h = self.cashbias(h)
         return h
 
+
+# Train functions
+def get_target(obs):
+    n_cols = int(obs.shape[-1])
+    n_pairs = int((n_cols - 1) / 6)
+    target = np.zeros((1, n_pairs))
+    for i, j in enumerate([i for i in range(n_cols - 1) if i % 6 == 0]):
+        target[0, i] = np.expand_dims(obs[j + 3] / (obs[j] + 1e-8) - 1., -1)
+    return target
+
+
+def make_batch(env, batch_size):
+    obs_batch = []
+    target_batch = []
+    for i in range(batch_size):
+        # Choose some random index
+        env.index = np.random.randint(high=env.data_length, low=env.obs_steps)
+        # Get obs and target and append it to their batches
+        obs = env.get_observation(True).astype(np.float32).values
+        xp = chainer.cuda.get_array_module(obs)
+        print(obs.shape)
+        obs_batch.append(obs[:-1])
+        target_batch.append(get_target(obs[-1]))
+
+    obs_batch = batch_states(obs_batch, xp, phi)
+    target_batch = np.swapaxes(batch_states(target_batch, xp, phi), 3, 2)
+
+    return obs_batch, target_batch
 
 def train_EIIE():
     pass
