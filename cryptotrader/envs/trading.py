@@ -1012,7 +1012,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.log_action_vector(timestamp, action, False)
 
             # Calculate position change given action
-            posit_change = (convert_to.decimal(action) - self.calc_portfolio_vector())[:-1]
+            posit_change = (action - self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
             portval = self.calc_total_portval()

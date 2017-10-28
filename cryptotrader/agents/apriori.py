@@ -453,6 +453,10 @@ class MomentumTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
+        except KeyError:
+            env.training = False
+            print("\nOptimization interrupted by user.")
+            return None, None
 
 
 class MesaMomentumTrader(APrioriAgent):
@@ -907,7 +911,7 @@ class FactorTrader(APrioriAgent):
     def __repr__(self):
         return "FactorTrader"
 
-    def __init__(self, factors, std_window=123, fiat="USDT"):
+    def __init__(self, factors, std_window=3, fiat="USDT"):
         super().__init__(fiat)
         assert isinstance(factors, list), "factors must be a list containing factor model instances"
         for factor in factors:

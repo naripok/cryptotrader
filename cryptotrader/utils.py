@@ -93,7 +93,8 @@ def array_normalize(x):
 
 
 class convert_to(object):
-    _quantize = partialmethod(Decimal.quantize, Decimal('1e-8'))
+    _quantizer = Decimal('0E-8')
+    _quantize = partialmethod(Decimal.quantize, Decimal('0e-8'))
 
     @staticmethod
     def decimal128(data):
@@ -104,26 +105,57 @@ class convert_to(object):
     @staticmethod
     def decimal(data):
         try:
-            if isinstance(data, Decimal):
-                return data.quantize(Decimal('1e-8'))
-            elif isinstance(data, np.float32) or isinstance(data, float):
+            # if isinstance(data, Decimal):
+            #     return data.quantize(convert_to._quantizer)
+            if isinstance(data, np.float32) or isinstance(data, float):
                 data = np.float64(data)
-                return Decimal.from_float(data).quantize(Decimal('1e-8'))
+                return Decimal.from_float(data).quantize(convert_to._quantizer)
             if isinstance(data, np.ndarray):
-                output = []
                 shape = data.shape
-                for item in data.flatten():
-                    item = np.float64(item)
-                    output.append(Decimal(item).quantize(Decimal('1e-8')))
-                return np.array(output).reshape(shape)
+                output = np.empty(data.flatten().shape, dtype=np.dtype(Decimal))
+                for i, item in enumerate(data.flatten()):
+                    output[i] = Decimal(np.float64(item)).quantize(convert_to._quantizer)
+                return output.reshape(shape)
             else:
-                return Decimal(data).quantize(Decimal('1e-8'))
+                return Decimal(data).quantize(convert_to._quantizer)
         except InvalidOperation:
             if abs(data) > Decimal('1e15'):
                 raise InvalidOperation("Numeric overflow in convert_to.decimal")
             elif data == np.nan or math.nan:
                 raise InvalidOperation("NaN encountered in convert_to.decimal")
 
+# class convert_to(object):
+#     _quantizer = Decimal('1E-8')
+#     _quantize = partialmethod(Decimal.quantize, _quantizer)
+#
+#     @staticmethod
+#     def decimal128(data):
+#         if isinstance(data, np.float32):
+#             data = np.float64(data)
+#         return Decimal128(convert_to._quantize(Decimal(data)))
+#
+#     @staticmethod
+#     def decimal(data):
+#         try:
+#             return data.quantize(convert_to._quantizer)
+#         except AttributeError as e:
+#             if 'numpy.ndarray' in str(e):
+#                 output = []
+#                 shape = data.shape
+#                 for item in data.flatten():
+#                     item = np.float64(item)
+#                     output.append(Decimal(item).quantize(convert_to._quantizer))
+#                 return np.array(output).reshape(shape)
+#             elif 'float' or 'int' in str(e):
+#                 try:
+#                     return Decimal(data).quantize(convert_to._quantizer)
+#                 except TypeError:
+#                     return Decimal(np.float64(data)).quantize(convert_to._quantizer)
+#         except InvalidOperation:
+#             if abs(data) > Decimal('1e15'):
+#                 raise InvalidOperation("Numeric overflow in convert_to.decimal")
+#             elif data == np.nan or math.nan:
+#                 raise InvalidOperation("NaN encountered in convert_to.decimal")
 
 def write(_socket, msg, flags=0, block=True):
     if block:
