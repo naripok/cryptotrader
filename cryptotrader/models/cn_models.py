@@ -195,7 +195,6 @@ def make_batch(env, batch_size):
         # Get obs and target and append it to their batches
         obs = env.get_observation(True).astype(np.float32).values
         xp = chainer.cuda.get_array_module(obs)
-        print(obs.shape)
         obs_batch.append(obs[:-1])
         target_batch.append(get_target(obs[-1]))
 
