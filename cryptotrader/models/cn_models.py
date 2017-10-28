@@ -273,7 +273,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, train_epochs, test_interv
                     test_loss_log.append(np.mean(test_losses))
                     test_r2_log.append(np.mean(test_scores))
 
-                    print("\nTest epoch: %d, loss: %f, r2: %f" % (j + 1, loss_test.data, test_r2))
+                    print("\nTest epoch: %d, loss: %f, r2: %f" % (j + 1, loss_test.data, test_r2.data))
 
                 if np.mean(test_scores) > best_score:
                     best_score = np.mean(test_scores)
