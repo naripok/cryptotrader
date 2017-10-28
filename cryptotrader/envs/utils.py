@@ -200,10 +200,10 @@ def make_dfs(process_idx, files, demo=False, freq=30):
 
 
 def convert_and_clean(x):
-    x = x.apply(convert_to.decimal)
+    # x = x.apply(convert_to.decimal)
     f = x.rolling(10, center=True, min_periods=1).mean()#.apply(convert_to.decimal)
-    x = x.apply(lambda x: x if x.is_finite() else np.nan)
-    return x.combine_first(f)
+    # x = x.apply(lambda x: x if x.is_finite() else np.nan)
+    return x.combine_first(f).apply(convert_to.decimal)
 
 
 def sample_trades(df, freq):

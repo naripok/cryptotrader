@@ -312,8 +312,6 @@ class MomentumTrader(APrioriAgent):
         self.std_span = None
         self.opt_params = None
 
-    # GET INDICATORS FUNCTIONS
-
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
@@ -327,11 +325,6 @@ class MomentumTrader(APrioriAgent):
         else:
             raise TypeError("Wrong mean_type param")
         return df
-
-    def set_params(self, **kwargs):
-        self.ma_span = [kwargs['ma1'],kwargs['ma2']]
-        # self.hysteresis = [kwargs['dh'], kwargs['uh']]
-        self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
 
     def act(self, obs):
         """
@@ -371,6 +364,11 @@ class MomentumTrader(APrioriAgent):
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
             raise e
 
+    def set_params(self, **kwargs):
+        self.mean_type = kwargs['mean_type']
+        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
+        self.std_args = [int(kwargs['std_span']), kwargs['std_weight_down'], kwargs['std_weight_up']]
+
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None, n_workers=1):
@@ -385,18 +383,12 @@ class MomentumTrader(APrioriAgent):
 
 
             @ot.constraints.violations_defaulted(-np.inf)
-            @ot.constraints.constrained([lambda ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
+            @ot.constraints.constrained([lambda mean_type, ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
             def find_hp(**kwargs):
                 try:
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
-                    for key, value in kwargs.items():
-                        if key not in ('std_weight_up', 'std_weight_down'):
-                            kwargs[key] = round(value)
-
                     self.set_params(**kwargs)
-
-                    # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
 
                     batch_reward = []
                     for batch in range(batch_size):
@@ -426,26 +418,30 @@ class MomentumTrader(APrioriAgent):
                                   end="\r")
                             t0 = time()
                         except TypeError:
-                            print("\nOptimization aborted by the user.")
                             raise ot.api.fun.MaximumEvaluationsException(0)
                     return sum(batch_reward)
 
                 except KeyboardInterrupt:
-                    print("\nOptimization aborted by the user.")
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
-            opt_params, info, _ = ot.maximize(find_hp,
-                                              num_evals=nb_steps,
-                                              ma1=[2, env.obs_steps],
-                                              ma2=[2, env.obs_steps],
-                                              std_span=[1, env.obs_steps],
-                                              std_weight_down=[0.0, 3.0],
-                                              std_weight_up=[0.0, 3.0]
-                                              )
+            hp = {
+                'ma1': [2, env.obs_steps],
+                'ma2': [2, env.obs_steps],
+                'std_span': [1, env.obs_steps],
+                'std_weight_down': [0.0, 3.0],
+                'std_weight_up': [0.0, 3.0]
+                }
 
-            for key, value in opt_params.items():
-                if key not in ('std_weight_up', 'std_weight_down'):
-                    opt_params[key] = round(value)
+            search_space = {'mean_type':{'simple': hp,
+                                         'exp': hp,
+                                         'kama': hp
+                                         }
+                            }
+
+            opt_params, info, _ = ot.maximize_structured(find_hp,
+                                              num_evals=nb_steps,
+                                              search_space=search_space
+                                              )
 
             self.set_params(**opt_params)
             env.training = False
@@ -455,6 +451,10 @@ class MomentumTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
+        except KeyError:
+            env.training = False
+            print("\nOptimization interrupted by user.")
+            return None, None
 
 
 class MesaMomentumTrader(APrioriAgent):
@@ -909,7 +909,7 @@ class FactorTrader(APrioriAgent):
     def __repr__(self):
         return "FactorTrader"
 
-    def __init__(self, factors, std_window=123, fiat="USDT"):
+    def __init__(self, factors, std_window=3, fiat="USDT"):
         super().__init__(fiat)
         assert isinstance(factors, list), "factors must be a list containing factor model instances"
         for factor in factors:
