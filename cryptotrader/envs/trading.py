@@ -463,7 +463,7 @@ class TradingEnvironment(Env):
             if not start and not end:
                 # If df is large enough, return
                 while not df.shape[0] >= self.obs_steps:
-                    sleep(5)
+                    sleep(1)
                     if self.period < 5:
                         df = self.get_ohlc_from_trades(pair)
                     else:
@@ -515,7 +515,7 @@ class TradingEnvironment(Env):
             self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
         except PoloniexError:
-            sleep(5)
+            sleep(1)
             self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
             return self.obs_df
         except Exception as e:
