@@ -100,3 +100,15 @@ dist/
 historical_data/
 notebooks/logs
 .cache/
+/notebooks/online_trading_env_nb.ipynb
+/notebooks/papertrading_nb.ipynb
+/notebooks/datafeed_nb.ipynb
+/notebooks/pytrends.ipynb
+/notebooks/backtest_nb.ipynb
+/notebooks/fibonaccitrader_nb.ipynb
+/notebooks/mesa_dev.ipynb
+/notebooks/momentum_dev.ipynb
+/notebooks/portfolio_optimizer_nb.ipynb
+/notebooks/momentum_nb.ipynb
+/notebooks/driver_debug_nb.ipynb
+/notebooks/pamr_nb.ipynb

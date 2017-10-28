@@ -16,7 +16,7 @@ def phi(obs):
     Feature extraction function
     """
     xp = chainer.cuda.get_array_module(obs)
-    obs = xp.expand_dims(obs,0)
+    obs = xp.expand_dims(obs, 0)
     return obs.astype(np.float32)
 
 
