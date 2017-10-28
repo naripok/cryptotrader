@@ -101,7 +101,7 @@ historical_data/
 notebooks/logs
 .cache/
 /notebooks/online_trading_env_nb.ipynb
-/notebooks/papertrading_nb.ipynb
+
 /notebooks/datafeed_nb.ipynb
 /notebooks/pytrends.ipynb
 /notebooks/backtest_nb.ipynb
@@ -111,3 +111,4 @@ notebooks/logs
 
 /notebooks/cn_models_dev_nb.ipynb
 /notebooks/apriori_agents_dev.ipynb
+
