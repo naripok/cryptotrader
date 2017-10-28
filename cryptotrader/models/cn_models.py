@@ -2,12 +2,12 @@ import numpy as np
 np.random.seed(42)
 
 import chainer
-from chainer import report, Reporter, get_current_reporter
 from chainer import functions as F
 from chainer import links as L
 from chainer import initializer
 from chainer.initializers import Normal
 
+from time import time
 
 eps = 1e-8
 
@@ -203,5 +203,86 @@ def make_batch(env, batch_size):
 
     return obs_batch, target_batch
 
-def train_EIIE():
-    pass
+
+def train_nn(nn, env, test_env, optimizer, batch_size, train_epochs, test_interval, test_epochs, save_dir, name):
+    ## Training loop
+    t0 = 1e-8
+    best_score = -np.inf
+    train_r2_log = []
+    train_loss_log = []
+    test_r2_log = []
+    test_loss_log = []
+    for epoch in range(train_epochs):
+        try:
+            t1 = time()
+
+            if epoch == 0:
+                optimizer.hyperparam.alpha = 3e-3
+            elif epoch == 2000:
+                optimizer.hyperparam.alpha = 5e-4
+            elif epoch == 6000:
+                optimizer.hyperparam.alpha = 7e-5
+            elif epoch == 9000:
+                optimizer.hyperparam.alpha = 9e-6
+            elif epoch == 12000:
+                optimizer.hyperparam.alpha = 1e-6
+
+            obs_batch, target_train = make_batch(env, batch_size)
+
+            prediction_train = nn(obs_batch)
+
+            loss = F.mean_squared_error(prediction_train, target_train)
+
+            nn.cleargrads()
+            loss.backward()
+
+            optimizer.update()
+
+            train_r2 = F.r2_score(prediction_train, target_train)
+
+            train_loss_log.append(loss.data)
+            train_r2_log.append(train_r2.data)
+
+            t0 += time() - t1
+            print("Training epoch %d/%d, loss: %.08f, r2: %f, samples/sec: %f" % (epoch + 1,
+                                                                                  train_epochs,
+                                                                                  loss.data,
+                                                                                  train_r2.data,
+                                                                                  (epoch + 1) * batch_size / t0),
+                  end='\r')
+
+            if epoch % test_interval == 0 and epoch != 0:
+                test_losses = []
+                test_scores = []
+                for j in range(test_epochs):
+                    test_batch, target_test = make_batch(test_env, batch_size)
+
+                    # Forward the test data
+                    prediction_test = nn(test_batch)
+
+                    # Calculate the loss
+                    loss_test = F.mean_squared_error(prediction_test, target_test)
+                    loss_test.to_cpu()
+                    test_losses.append(loss_test.data)
+
+                    # Calculate the accuracy
+                    test_r2 = F.r2_score(prediction_test, target_test)
+                    test_r2.to_cpu()
+                    test_scores.append(test_r2.data)
+
+                    test_loss_log.append(np.mean(test_losses))
+                    test_r2_log.append(np.mean(test_scores))
+
+                    print("\nTest epoch: %d, loss: %f, r2: %f" % (j + 1, loss_test.data, test_r2))
+
+                if np.mean(test_scores) > best_score:
+                    best_score = np.mean(test_scores)
+                    print("\nNew best score:", best_score, end='\r')
+                    chainer.serializers.save_npz(save_dir + name + '.npz', nn, compression=True)
+
+                print('\nval loss: {:.04f}, val r2 score: {:.04f}'.format(
+                    np.mean(test_losses), np.mean(test_scores)))
+
+        except KeyboardInterrupt:
+            print("\nInterrupted by the user. Best score:", best_score)
+            break
