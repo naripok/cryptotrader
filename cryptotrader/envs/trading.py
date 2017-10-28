@@ -125,7 +125,11 @@ class PaperTradingDataFeed(object):
         return self.portfolio
 
     def returnFeeInfo(self):
-        return self.tapi.returnFeeInfo()
+        # return self.tapi.returnFeeInfo()
+        return {'makerFee': '0.00150000',
+                'nextTier': '600.00000000',
+                'takerFee': '0.00250000',
+                'thirtyDayVolume': '0.00000000'}
 
     def returnCurrencies(self):
         return self.tapi.returnCurrencies()
