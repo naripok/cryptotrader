@@ -246,6 +246,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             if epoch % test_interval == 0 and epoch != 0:
                 test_losses = []
                 test_scores = []
+                print()
                 for j in range(test_epochs):
                     test_batch, target_test = make_batch(test_env, batch_size)
 
