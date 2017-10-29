@@ -9562,25 +9562,42 @@ class Test_env_setup(object):
 
 def test_get_ohlc(ready_env):
     env = ready_env
-    df = env.get_ohlc("USDT_BTC")
-    assert isinstance(df, pd.DataFrame)
-    assert df.shape[0] == env.obs_steps
-    assert df.index.freqstr == '%dT' % env.period
+    for data in tapi.returnChartData():
+        for pair in env.pairs:
+            df = env.get_ohlc(pair, end=datetime.fromtimestamp(data['date']))
+            assert isinstance(df, pd.DataFrame)
+            assert df.shape[0] == env.obs_steps
+            assert list(df.columns) == ['open','high','low','close','volume']
+            assert df.index.freqstr == '%dT' % env.period
 
 def test_get_symbol_history(ready_env):
     env = ready_env
-    df = env.get_pair_history("USDT_BTC")
-    assert isinstance(df, pd.DataFrame)
-    assert df.shape[0] == env.obs_steps
-    assert df.index.freqstr == '%dT' % env.period
+    for data in tapi.returnChartData():
+        for pair in env.pairs:
+            df = env.get_pair_history(pair, end=datetime.fromtimestamp(data['date']))
+            assert isinstance(df, pd.DataFrame)
+            assert df.shape[0] == env.obs_steps
+            assert list(df.columns) == ['open', 'high', 'low', 'close', 'volume']
+            assert df.index.freqstr == '%dT' % env.period
 
 def test_get_history(ready_env):
     env = ready_env
     df = env.get_history()
     assert isinstance(df, pd.DataFrame)
     assert df.shape[0] == env.obs_steps
-    assert df.index.freqstr == '%dT' % env.period
     assert set(df.columns.levels[0]) == set(env.pairs)
+    assert list(df.columns.levels[1]) == ['open', 'high', 'low', 'close', 'volume']
+    assert df.index.freqstr == '%dT' % env.period
+    assert type(df.values.all()) == Decimal
+
+    for data in tapi.returnChartData():
+        df = env.get_history(end=datetime.fromtimestamp(data['date']))
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape[0] == env.obs_steps
+        assert set(df.columns.levels[0]) == set(env.pairs)
+        assert list(df.columns.levels[1]) == ['open', 'high', 'low', 'close', 'volume']
+        assert df.index.freqstr == '%dT' % env.period
+        assert type(df.values.all()) == Decimal
 
 def test_get_balance(ready_env):
     env = ready_env
@@ -9664,15 +9681,19 @@ def test_balance(fresh_env):
 def test_get_close_price(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
+
     price = env.get_close_price("BTC")
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
+
     price = env.get_close_price("BTC", 'last')
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
-    price = env.get_close_price("BTC", env.obs_df.index[0])
-    assert isinstance(price, Decimal)
-    assert price == env.obs_df["USDT_BTC"].close.iloc[0]
+
+    for i in range(env.obs_df.shape[0]):
+        price = env.get_close_price("BTC", env.obs_df.index[i])
+        assert isinstance(price, Decimal)
+        assert price == env.obs_df["USDT_BTC"].close.iloc[i]
 
 def test_get_fee(ready_env):
     env = ready_env
@@ -9728,10 +9749,23 @@ class Test_env_reset(object):
 
     def test_reset(self):
         obs = self.env.reset()
-        assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] >= self.env.obs_steps
-        assert set(self.env.tax.keys()) == self.env.symbols
-        assert set(self.env.portfolio_df.columns).issuperset(self.env.symbols)
-        # assert np.all(obs.values) == np.all(self.env.obs_df.values)
+        # Assert observation
+        assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] == self.env.obs_steps
+        assert isinstance(obs, pd.DataFrame) and obs.shape[0] == self.env.obs_steps
+        # Assert taxes
+        assert list(self.env.tax.keys()) == self.env.symbols
+        # Assert portfolio log
+        assert isinstance(self.env.portfolio_df, pd.DataFrame) and self.env.portfolio_df.shape[0] == 2
+        assert list(self.env.portfolio_df.columns) == list(self.env.symbols) + ['portval']
+        # Assert action log
+        assert isinstance(self.env.action_df, pd.DataFrame) and self.env.action_df.shape[0] == 1
+        assert list(self.env.action_df.columns) == list(self.env.symbols) + ['online']
+        # Assert balance
+        assert list(self.env.balance.keys()) == list(self.env.symbols)
+        for symbol in self.env.balance:
+            assert isinstance(self.env.balance[symbol], Decimal)
+        # Assert action_vetor
+        # assert self.env.action_vector == list(self.env.symbols)
 
 def test_get_reward(ready_env):
     env = ready_env
@@ -9773,11 +9807,11 @@ class Test_env_step(object):
         self.env.simulate_trade(action, timestamp)
 
         # Assert position
-        for i, symbol in enumerate(self.env.action_vector):
+        for i, symbol in enumerate(self.env.symbols):
             assert self.env.action_df.get_value(timestamp, symbol) - convert_to.decimal(action[i]) <= Decimal('5E-4')
 
         # Assert amount
-        for i, symbol in enumerate(self.env.action_vector):
+        for i, symbol in enumerate(self.env.symbols):
             if symbol not in self.env._fiat:
                 assert self.env.portfolio_df.get_value(self.env.portfolio_df[symbol].last_valid_index(), symbol) - \
                        self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \

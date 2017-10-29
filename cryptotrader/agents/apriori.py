@@ -201,8 +201,9 @@ class APrioriAgent(Agent):
                     sleep(10)
 
                 except Exception as e:
-                    print("Agent Error:",
+                    print("\nAgent Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    print(env.timestamp)
                     print(obs)
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
