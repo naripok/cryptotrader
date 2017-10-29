@@ -185,7 +185,6 @@ def get_target(obs):
         target[0, i] = np.expand_dims(obs[j + 3] / (obs[j] + 1e-8) - 1., -1)
     return target
 
-
 def make_batch(env, batch_size):
     obs_batch = []
     target_batch = []
@@ -236,7 +235,8 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             train_r2_log.append(train_r2.data)
 
             t0 += time() - t1
-            print("Training epoch %d/%d, loss: %.08f, r2: %f, samples/sec: %f" % (epoch + 1,
+            print("Training epoch %d/%d, loss: %.08f, r2: %f, samples/sec: %f                                          "
+                                                                                % (epoch + 1,
                                                                                   train_epochs,
                                                                                   loss.data,
                                                                                   train_r2.data,
@@ -266,14 +266,15 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
                     test_loss_log.append(np.mean(test_losses))
                     test_r2_log.append(np.mean(test_scores))
 
-                    print("Test epoch: %d, loss: %f, r2: %f" % (j + 1, loss_test.data, test_r2.data), end='\r')
+                    print("Test epoch: %d, loss: %.08f, r2: %.08f                             "
+                          % (j + 1, loss_test.data, test_r2.data), end='\r')
 
                 if np.mean(test_scores) > best_score:
                     best_score = np.mean(test_scores)
                     print("\nNew best score:", best_score, end='\r')
                     chainer.serializers.save_npz(save_dir + name + '.npz', nn, compression=True)
 
-                print('\nval loss: {:.04f}, val r2 score: {:.04f}'.format(
+                print('\nval loss: {:.08f}, val r2 score: {:.08f}'.format(
                     np.mean(test_losses), np.mean(test_scores)))
 
         except KeyboardInterrupt:
