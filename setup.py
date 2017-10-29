@@ -16,7 +16,7 @@ config = {
                          'hypothesis-numpy',
                          'numpy',
                          'pandas',
-                         'pymongo',
+                         # 'pymongo',
                          'matplotlib',
                          'bokeh',
                          'chainer',

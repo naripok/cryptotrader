@@ -182,6 +182,7 @@ class TradingEnvironment(Env):
         self.action_space = None
         self.observation_space = None
         self.init_balance = None
+        self._symbols = []
 
     ## Env properties
     @property
@@ -206,13 +207,23 @@ class TradingEnvironment(Env):
 
     @property
     def symbols(self):
-        symbols = []
-        for pair in self.pairs:
-            symbol = pair.split('_')
-            for s in symbol:
-                symbols.append(s)
+        if not self._symbols:
+            symbols = []
+            for pair in self.pairs:
+                symbols.append(pair.split('_')[1])
+            symbols.append(self._fiat)
+            self._symbols = symbols
+            return self._symbols
+        else:
+            return self._symbols
 
-        return set(symbols)
+        # symbols = []
+        # for pair in self.pairs:
+        #     symbol = pair.split('_')
+        #     for s in symbol:
+        #         symbols.append(s)
+        #
+        # return set(symbols)
 
     @property
     def fiat(self):
@@ -229,9 +240,13 @@ class TradingEnvironment(Env):
     def fiat(self, value):
         try:
             if isinstance(value, str):
-                assert value in self.symbols, "Fiat not in symbols."
+                symbols = []
+                for symbol in self.pairs:
+                    symbols += symbol.split('_')
+                symbols = set(symbols)
+                assert value in symbols, "Fiat not in symbols."
                 self._fiat = value
-                self._crypto = self.symbols.difference([self._fiat])
+                self._crypto = symbols.difference([self._fiat])
 
             elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
                 self.portfolio_df.at[self.timestamp, self._fiat] = convert_to.decimal(value)
@@ -289,7 +304,7 @@ class TradingEnvironment(Env):
 
     @property
     def balance(self):
-        return self.portfolio_df.ffill().iloc[-1, :].to_dict()
+        return self.portfolio_df.ffill().loc[self.portfolio_df.index[-1], self.symbols].to_dict()
 
     @balance.setter
     def balance(self, values):
@@ -356,8 +371,8 @@ class TradingEnvironment(Env):
             else:
                 self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
-        self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
-        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
+        # self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
+        # self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
 
     def get_pair_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
@@ -509,7 +524,14 @@ class TradingEnvironment(Env):
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
-            return pd.concat(obs_list, keys=keys, axis=1).ffill()
+            obs = pd.concat(obs_list, keys=keys, axis=1).ffill()
+
+            if not start and not end:
+                obs = obs.iloc[-self.obs_steps:]
+
+            return obs
+
+
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -587,7 +609,7 @@ class TradingEnvironment(Env):
 
     def calc_portfolio_vector(self):
         portfolio = []
-        for symbol in self.action_vector:
+        for symbol in self.symbols:
             portfolio.append(self.calc_posit(symbol))
         return np.array(portfolio)
 
@@ -670,7 +692,7 @@ class TradingEnvironment(Env):
             self.action_df.at[timestamp, symbol] = convert_to.decimal(value)
 
     def log_action_vector(self, timestamp, vector, online):
-        for i, symbol in enumerate(self.action_vector):
+        for i, symbol in enumerate(self.symbols):
             self.log_action(timestamp, symbol, vector[i])
         self.log_action(timestamp, 'online', online)
 
@@ -715,13 +737,6 @@ class TradingEnvironment(Env):
         self.action_space = Box(0., 1., len(self.symbols))
         # self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
-    def set_action_vector(self):
-        action_vector = []
-        for pair in self.pairs:
-            action_vector.append(pair.split('_')[1])
-        action_vector.append(self._fiat)
-        self.action_vector = action_vector
-
     def reset_status(self):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
 
@@ -736,7 +751,7 @@ class TradingEnvironment(Env):
         for symbol in self.symbols:
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
         obs = self.get_observation(True)
-        self.set_action_vector()
+        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp]))
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
         return obs.astype(np.float64)
 
@@ -1027,7 +1042,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             for i, change in enumerate(posit_change):
                 if change < convert_to.decimal('0E-8'):
 
-                    symbol = self.action_vector[i]
+                    symbol = self.symbols[i]
 
                     try:
                         crypto_pool = portval * action[i] / self.get_close_price(symbol)
@@ -1052,7 +1067,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             for i, change in enumerate(posit_change):
                 if change > convert_to.decimal('0E-8'):
 
-                    symbol = self.action_vector[i]
+                    symbol = self.symbols[i]
 
                     self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
 
@@ -1133,39 +1148,45 @@ class BacktestEnvironment(PaperTradingEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
 
-    def reset(self, reset_dfs=False):
+    def reset(self, reset_dfs=True):
         """
         Setup env with initial values
-        :return:
+        :param reset_dfs: bool: Reset log dfs
+        :return: pandas DataFrame: Initial observation
         """
-        # Reset index
         try:
+            # Reset index
             self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
 
             if self.training:
                 self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
             else:
                 self.index = self.obs_steps
+
             # Reset log dfs
             if reset_dfs:
                 self.obs_df = pd.DataFrame()
                 self.portfolio_df = pd.DataFrame()
                 self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
+
             # Set spaces
             self.set_observation_space()
             self.set_action_space()
+
             # Reset balance
             self.balance = self.init_balance = self.get_balance()
+
             # Get fee values
             for symbol in self.symbols:
                 self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
             obs = self.get_observation(True)
-            # Get assets order
-            self.set_action_vector()
+
             # Reset portfolio value
             self.portval = self.calc_total_portval(self.obs_df.index[-1])
 
+            # Return first observation
             return obs.astype(np.float64)
+
         except IndexError:
             print("Insufficient tapi data. You must choose a bigger time span.")
             raise IndexError

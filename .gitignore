@@ -112,3 +112,5 @@ notebooks/logs
 /notebooks/cn_models_dev_nb.ipynb
 /notebooks/apriori_agents_dev.ipynb
 
+/cryptotrader/envs/driver.py
+/tests/test_TrainingEnvironment.py
