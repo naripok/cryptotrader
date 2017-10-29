@@ -9801,15 +9801,15 @@ class Test_env_step(object):
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
     @settings(max_examples=50)
     def test_simulate_trade(self, action):
-        action = array_softmax(action)
+        # Normalize action vector
+        action = array_normalize(action)
+        # Get timestamp
         timestamp = self.env.obs_df.index[-1]
-
+        # Call method
         self.env.simulate_trade(action, timestamp)
-
         # Assert position
         for i, symbol in enumerate(self.env.symbols):
-            assert self.env.action_df.get_value(timestamp, symbol) - convert_to.decimal(action[i]) <= Decimal('5E-4')
-
+            assert self.env.action_df.get_value(timestamp, symbol) - convert_to.decimal(action[i]) <= Decimal('1E-8')
         # Assert amount
         for i, symbol in enumerate(self.env.symbols):
             if symbol not in self.env._fiat:
@@ -9827,12 +9827,12 @@ class Test_env_step(object):
 
         # Assert returned obs
         assert isinstance(obs, pd.DataFrame)
-        # assert obs.shape[0] == self.env.obs_steps
-        # TODO FIX THIS
-        # assert set(obs.columns.levels[0].values) == set(self.env.pairs)
+        assert obs.shape[0] == self.env.obs_steps
+        assert set(obs.columns.levels[0]) == set(list(self.env.pairs) + [self.env._fiat])
 
         # Assert reward
         assert isinstance(reward, np.float64)
+        assert reward not in (np.nan, np.inf)
 
         # Assert done
         assert isinstance(done, bool)
