@@ -9858,8 +9858,6 @@ def test_returnFeeInfo(data_feed):
     assert fee['makerFee'] == '0.00150000'
 
 
-
-
 if __name__ == '__main__':
     pytest.main()
 

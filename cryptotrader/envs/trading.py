@@ -40,6 +40,7 @@ class BacktestDataFeed(object):
         self.portfolio = portifolio
         self.pairs = pairs
         self.period = period
+        self.data_length = 0
 
     @property
     def balance(self):
@@ -65,11 +66,17 @@ class BacktestDataFeed(object):
 
     def download_data(self, start=None, end=None):
         # TODO WRITE TEST
-
         for pair in self.pairs:
-            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
+            data = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                start=start, end=end
                                                               ))
+            self.ohlc_data[pair] = data
+
+            if not self.data_length:
+                self.data_length = data.shape[0]
+            else:
+                assert data.shape[0] == self.data_length, (data.shape[0], self.data_length)
+
             # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
             #     lambda x: datetime.fromtimestamp(int(x)))
             self.ohlc_data[pair].set_index('date', inplace=True, drop=False)
@@ -1156,7 +1163,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
         """
         try:
             # Reset index
-            self.data_length = self.tapi.ohlc_data[list(self.tapi.ohlc_data.keys())[0]].shape[0]
+            self.data_length = self.tapi.data_length
 
             if self.training:
                 self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
