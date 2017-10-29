@@ -35,6 +35,9 @@ class APrioriAgent(Agent):
         """
         raise NotImplementedError()
 
+    def rebalance(self, obs):
+        return NotImplementedError()
+
     def get_portfolio_vector(self, obs, index=-1):
         """
         Calculate portfolio vector from observation
@@ -53,20 +56,20 @@ class APrioriAgent(Agent):
             portval += coin_val[symbol]
         portval += obs[self.fiat].iloc[index].values
 
-        port_vec = {}
-        for symbol in coin_val:
+        port_vec = np.zeros(obs.columns.levels[0].shape)
+        for i, symbol in enumerate(coin_val):
             try:
-                port_vec[symbol] = coin_val[symbol] / portval
+                port_vec[i] = coin_val[symbol] / portval
             except DivisionByZero:
-                port_vec[symbol] = coin_val[symbol] / (portval + self.epsilon)
+                port_vec[i] = coin_val[symbol] / (portval + self.epsilon)
             except InvalidOperation:
-                port_vec[symbol] = coin_val[symbol] / (portval + self.epsilon)
+                port_vec[i] = coin_val[symbol] / (portval + self.epsilon)
         try:
-            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / portval
+            port_vec[-1] = obs[self.fiat].iloc[index].values / portval
         except DivisionByZero:
-            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
+            port_vec[-1] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
         except InvalidOperation:
-            port_vec[self.fiat] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
+            port_vec[-1] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
 
         return port_vec
 
@@ -94,7 +97,7 @@ class APrioriAgent(Agent):
 
             while True:
                 try:
-                    action = self.act(obs)
+                    action = self.rebalance(obs)
                     obs, reward, _, status = env.step(action)
                     episode_reward += np.float64(reward)
 
@@ -164,7 +167,7 @@ class APrioriAgent(Agent):
                         can_act = True
 
                     if can_act:
-                        action = self.act(obs)
+                        action = self.rebalance(obs)
                         obs, reward, done, status = env.step(action)
                         episode_reward += np.float64(reward)
 
@@ -252,6 +255,9 @@ class DummyTrader(APrioriAgent):
             else:
                 return np.random.random(obs.columns.levels[0].shape[0])
 
+    def rebalance(self, obs):
+        return self.act(obs)
+
 
 class ConstantRebalanceTrader(APrioriAgent):
     """
@@ -268,6 +274,9 @@ class ConstantRebalanceTrader(APrioriAgent):
         action = np.ones(n_pairs)
         action[-1] = 0
         return array_normalize(action)
+
+    def rebalance(self, obs):
+        return self.act(obs)
 
 
 class Benchmark(APrioriAgent):
@@ -287,13 +296,10 @@ class Benchmark(APrioriAgent):
             action[-1] = 0
             return array_normalize(action)
         else:
-            prev_posit = self.get_portfolio_vector(obs)
-            last_b = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in self.fiat]):
-                last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
-            last_b[-1] = max(0, 1 - last_b.sum())
+            return self.get_portfolio_vector(obs)
 
-            return last_b
+    def rebalance(self, obs):
+        return self.act(obs)
 
 
 class MomentumTrader(APrioriAgent):
@@ -312,6 +318,7 @@ class MomentumTrader(APrioriAgent):
         self.ma_span = None
         self.std_span = None
         self.opt_params = None
+        self.alpha = [1.0, 1.0]
 
     def get_ma(self, df):
         if self.mean_type == 'exp':
@@ -332,32 +339,35 @@ class MomentumTrader(APrioriAgent):
         Performs a single step on the environment
         """
         try:
-            obs = obs.astype(np.float64).ffill()
-            prev_posit = self.get_portfolio_vector(obs)
-            # print(prev_posit)
-            position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
+            obs = obs.astype(np.float64)
+            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                # Get action
-                if df['%d_ma' % self.ma_span[0]].iat[-1] < df['%d_ma' % self.ma_span[1]].iat[-1] - \
-                    self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = 0.0
+                factor[key] = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
+                              (df.close.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
 
-                elif df['%d_ma' % self.ma_span[0]].iat[-1] > df['%d_ma' % self.ma_span[1]].iat[-1] + \
-                    self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])# / \
-                             # (obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1] +
-                             #  self.epsilon)
+            return factor
 
+        except TypeError as e:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
+
+    def rebalance(self, obs):
+        try:
+            obs = obs.astype(np.float64).ffill()
+            prev_posit = self.get_portfolio_vector(obs)
+            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
+            factor = self.act(obs)
+            for i in range(position.shape[0] - 1):
+
+                if factor[i] >= 0.0:
+                    position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i])
                 else:
-                    action = np.float64(prev_posit[symbol.split("_")[1]])
+                    position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i])
 
-                position[key] = action
-            # print(position)
-            position[-1] = np.clip(1 - position[:-1].sum(), a_max=np.inf, a_min=0.0)
-            # print(position)
+            position[-1] = max(0., 1 - position[:-1].sum())
 
             return array_normalize(position)
 
@@ -366,9 +376,10 @@ class MomentumTrader(APrioriAgent):
             raise e
 
     def set_params(self, **kwargs):
+        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
         self.mean_type = kwargs['mean_type']
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
-        self.std_args = [int(kwargs['std_span']), kwargs['std_weight_down'], kwargs['std_weight_up']]
+        self.std_span = int(kwargs['std_span'])
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -384,7 +395,12 @@ class MomentumTrader(APrioriAgent):
 
 
             @ot.constraints.violations_defaulted(-np.inf)
-            @ot.constraints.constrained([lambda mean_type, ma1, ma2, std_span, std_weight_down, std_weight_up: ma1 < ma2])
+            @ot.constraints.constrained([lambda mean_type,
+                                                ma1,
+                                                ma2,
+                                                std_span,
+                                                alpha_up,
+                                                alpha_down: ma1 < ma2])
             def find_hp(**kwargs):
                 try:
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
@@ -412,7 +428,7 @@ class MomentumTrader(APrioriAgent):
                     i += 1
                     if verbose:
                         try:
-                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
                                                                                 nb_steps,
                                                                                 sum(batch_reward),
                                                                                 str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
@@ -428,9 +444,9 @@ class MomentumTrader(APrioriAgent):
             hp = {
                 'ma1': [2, env.obs_steps],
                 'ma2': [2, env.obs_steps],
-                'std_span': [1, env.obs_steps],
-                'std_weight_down': [0.0, 3.0],
-                'std_weight_up': [0.0, 3.0]
+                'std_span': [2, env.obs_steps],
+                'alpha_up': [1e-6, 1e2],
+                'alpha_down': [1e-6, 1e2]
                 }
 
             search_space = {'mean_type':{'simple': hp,
@@ -456,110 +472,6 @@ class MomentumTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return None, None
-
-
-class MesaMomentumTrader(APrioriAgent):
-    """
-    Momentum trading agent that uses MESA adaptative moving averages as momentum factor
-    """
-    def __init__(self):
-        super().__init__()
-        self.mesa_span = None
-        # self.std_span = None
-        self.opt_params = None
-
-
-    def set_params(self, **kwargs):
-        self.mesa_args = [kwargs['ma1'], kwargs['ma2']]
-        # self.std_args = [kwargs['std_span'], kwargs['std_weight_down'], kwargs['std_weight_up']]
-
-    def act(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        try:
-            position = np.empty(obs.columns.levels[0].shape, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s not in 'fiat']):
-                df = obs[symbol].astype(np.float64).copy()
-                df['mama'], df['fama'] = tl.MAMA(df.close.values, fastlimit=self.mesa_args[0], slowlimit=self.mesa_args[1])
-
-                # Get action
-                if df['mama'].iat[-1] < df['fama'].iat[-1]:# - \
-                    # self.std_args[1] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = np.zeros(1)
-
-                elif df['mama'].iat[-1] > df['fama'].iat[-1]:# + \
-                    # self.std_args[2] * obs[symbol].close.rolling(self.std_args[0], min_periods=1, center=True).std().iat[-1]:
-                    action = df['mama'].iat[-1] - df['fama'].iat[-1]
-
-                else:
-                    action = np.float64(df['position'].iat[-1])
-
-                position[key] = action
-
-            position[-1] = np.clip(np.ones(1) - position.sum(), a_max=np.inf, a_min=0.0)
-
-            return array_normalize(position)
-
-        except TypeError:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-
-    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
-            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None, n_workers=1):
-        try:
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.df.shape[0] - env.obs_steps
-            i = 0
-            t0 = time()
-            env._reset_status()
-            env.set_training_stage(True)
-            env.reset(reset_dfs=True)
-
-            def find_hp(**kwargs):
-                nonlocal i, nb_steps, t0, env, nb_max_episode_steps
-
-                self.set_params(**kwargs)
-
-                # self.set_params(**{key:round(kwarg) for key, kwarg in kwargs.items()})
-
-                # run test on the main process
-                r = self.test(env,
-                                nb_episodes=1,
-                                action_repetition=action_repetition,
-                                callbacks=callbacks,
-                                visualize=visualize,
-                                nb_max_episode_steps=nb_max_episode_steps,
-                                nb_max_start_steps=nb_max_start_steps,
-                                start_step_policy=start_step_policy,
-                                verbose=False)
-
-                i += 1
-                if verbose:
-                    t0 += time()
-                    print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                        nb_steps,
-                                                                        r,
-                                                                        str(pd.to_timedelta(t0 * (nb_steps - i) / i))),
-                          end="\r")
-
-                return r
-
-            opt_params, info, _ = ot.maximize(find_hp,
-                                              num_evals=nb_steps,
-                                              ma1=[1e-2, 99e-2],
-                                              ma2=[1e-2, 99e-2],
-                                              # std_span=[1, env.obs_steps],
-                                              # std_weight_down=[0.0, 3.0],
-                                              # std_weight_up=[0.0, 3.0]
-                                              )
-
-            self.set_params(**opt_params)
-            env.set_training_stage(False)
-            return opt_params, info
-
-        except KeyboardInterrupt:
-            print("\nOptimization interrupted by user.")
 
 
 class PAMRTrader(APrioriAgent):
@@ -604,6 +516,9 @@ class PAMRTrader(APrioriAgent):
                                                 (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
                 last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
         return self.update(last_b, price_relative)
+
+    def rebalance(self, obs):
+        return self.act(obs)
 
     def update(self, b, x):
         """
@@ -758,6 +673,7 @@ class HarmonicTrader(APrioriAgent):
         super().__init__(fiat)
         self.err_allowed = err_allowed
         self.peak_order = peak_order
+        self.alpha = [1., 1.]
 
     def find_extreme(self, obs):
         max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
@@ -811,27 +727,37 @@ class HarmonicTrader(APrioriAgent):
 
     def act(self, obs):
         pairs = obs.columns.levels[0]
-        prev_port = self.get_portfolio_vector(obs)
-        action = np.zeros(pairs.shape[0])
+        action = np.zeros(pairs.shape[0] - 1)
         for i, pair in enumerate(pairs):
             if pair is not self.fiat:
                 pattern = np.array([pattern(obs[pair]) for pattern in [self.is_gartley,
                                                                        self.is_butterfly,
                                                                        self.is_bat,
                                                                        self.is_crab]]).sum()
-                if pattern > 0:
-                    action[i] = pattern
-                elif pattern < 0:
-                    action[i] = 0
-                else:
-                    action[i] = prev_port[pair.split('_')[1]]
-        action[-1] = max(0, 1 - action.sum())
 
-        return array_normalize(action)
+                action[i] = pattern
+
+        return action
+
+    def rebalance(self, obs):
+        pairs = obs.columns.levels[0]
+        prev_port = self.get_portfolio_vector(obs)
+        action = self.act(obs)
+        port_vec = np.zeros(pairs.shape[0])
+        for i in range(pairs.shape[0] - 1):
+            if action[i] >= 0:
+                port_vec[i] = max(0., prev_port[i] + self.alpha[0] * action[i])
+            else:
+                port_vec[i] = max(0., prev_port[i] + self.alpha[1] * action[i])
+
+        port_vec[-1] = max(0, 1 - port_vec.sum())
+
+        return array_normalize(port_vec)
 
     def set_params(self, **kwargs):
         self.err_allowed = kwargs['err_allowed']
         self.peak_order = int(kwargs['peak_order'])
+        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -890,7 +816,9 @@ class HarmonicTrader(APrioriAgent):
             opt_params, info, _ = ot.maximize(find_hp,
                                               num_evals=nb_steps,
                                               err_allowed=[0, .1],
-                                              peak_order=[1, 20]
+                                              peak_order=[1, 20],
+                                              alpha_up=[1e-6, 1],
+                                              alpha_down=[1e-6, 1]
                                               )
 
             self.set_params(**opt_params)
@@ -919,23 +847,41 @@ class FactorTrader(APrioriAgent):
         self.std_window = std_window
         self.std_weight = 1
         self.weights = np.ones(len(self.factors))
+        self.alpha = [1., 1.]
 
     def act(self, obs):
-        action = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
+        action = np.zeros(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for weight, factor in zip(self.weights, self.factors):
             action += weight * factor.act(obs)
+        return action
+
+    def rebalance(self, obs):
+        action = self.act(obs)
+        prev_port= self.get_portfolio_vector(obs)
+        port_vec = np.zeros(prev_port.shape)
         for i, symbol in enumerate(obs.columns.levels[0]):
             if symbol is not self.fiat:
-                action[i] /= (self.std_weight * obs[symbol].close.rolling(self.std_window, min_periods=1,
-                              center=True).std().iat[-1] / obs.get_value(obs.index[-1], (symbol, 'close')) +
-                              self.epsilon)
-        return array_normalize(action)
+                if action[i] >= 0.:
+                    port_vec[i] = max(0, prev_port[i] + self.alpha[0] * action[i] / \
+                                              (self.std_weight * obs[symbol].close.rolling(self.std_window,
+                                               min_periods=1, center=True).std().iat[-1] / obs.get_value(
+                                               obs.index[-1], (symbol, 'close')) + self.epsilon))
+                else:
+                    port_vec[i] = max(0, prev_port[i] + self.alpha[1] * action[i] / \
+                                              (self.std_weight * obs[symbol].close.rolling(self.std_window,
+                                               min_periods=1, center=True).std().iat[-1] / obs.get_value(
+                                               obs.index[-1], (symbol, 'close')) + self.epsilon))
+
+        port_vec[-1] = max(0, 1 - port_vec.sum())
+
+        return array_normalize(port_vec)
 
     def set_params(self, **kwargs):
         self.std_window = int(kwargs['std_window'])
         self.std_weight = kwargs['std_weight']
         for i, factor in enumerate(self.factors):
             self.weights[i] = kwargs[str(factor) + '_weight']
+        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
 
     def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -999,6 +945,8 @@ class FactorTrader(APrioriAgent):
                                               num_evals=nb_steps,
                                               std_window=[2, env.obs_steps],
                                               std_weight=[0.0001, 3],
+                                              alpha_up=[1e-6, 1e2],
+                                              alpha_down=[1e-6, 1e2],
                                               **factor_weights
                                               )
 

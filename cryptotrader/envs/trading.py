@@ -66,6 +66,8 @@ class BacktestDataFeed(object):
 
     def download_data(self, start=None, end=None):
         # TODO WRITE TEST
+        self.ohlc_data = {}
+        self.data_length = None
         for pair in self.pairs:
             data = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                start=start, end=end
