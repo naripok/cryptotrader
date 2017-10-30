@@ -107,7 +107,7 @@ class APrioriAgent(Agent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                           ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 1,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
@@ -342,11 +342,15 @@ class DummyTrader(APrioriAgent):
         if self.random_process:
             if self.activation == 'softmax':
                 return array_softmax(self.random_process.sample())
+            elif self.activation == 'simplex':
+                return self.simplex_proj(self.random_process.sample())
             else:
                 return np.array(self.random_process.sample())
         else:
             if self.activation == 'softmax':
                 return array_softmax(np.random.random(obs.columns.levels[0].shape[0]))
+            elif self.activation == 'simplex':
+                return self.simplex_proj(np.random.random(obs.columns.levels[0].shape[0]))
             else:
                 return np.random.random(obs.columns.levels[0].shape[0])
 
@@ -391,6 +395,7 @@ class ConstantRebalanceTrader(APrioriAgent):
         n_pairs = obs.columns.levels[0].shape[0]
         action = np.ones(n_pairs)
         action[-1] = 0
+
         return array_normalize(action)
 
     def rebalance(self, obs):
@@ -404,16 +409,17 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, fiat="USDT", mean_type='kama'):
+    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
+                 fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
         super().__init__(fiat=fiat)
         self.mean_type = mean_type
-        self.ma_span = None
-        self.std_span = None
-        self.opt_params = None
-        self.alpha = [1.0, 1.0]
+        self.ma_span = ma_span
+        self.std_span = std_span
+        self.alpha = alpha
+        self.activation = activation
 
     def get_ma(self, df):
         if self.mean_type == 'exp':
@@ -440,7 +446,8 @@ class MomentumTrader(APrioriAgent):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                factor[key] = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) / \
+                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
                               (df.close.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
 
             return factor
@@ -464,7 +471,7 @@ class MomentumTrader(APrioriAgent):
 
             position[-1] = max(0., 1 - position[:-1].sum())
 
-            return array_normalize(position)
+            return self.activation(position)
 
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
@@ -476,9 +483,9 @@ class MomentumTrader(APrioriAgent):
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
         self.std_span = int(kwargs['std_span'])
 
-    def fit(self, env, nb_steps, batch_size, action_repetition=1, callbacks=None, verbose=1,
+    def fit(self, env, nb_steps, batch_size, search_space=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None, n_workers=1):
+            nb_max_episode_steps=None):
         try:
 
             if verbose:
@@ -487,7 +494,6 @@ class MomentumTrader(APrioriAgent):
             i = 0
             t0 = time()
             env.training = True
-
 
             @ot.constraints.violations_defaulted(-np.inf)
             @ot.constraints.constrained([lambda mean_type,
@@ -536,19 +542,20 @@ class MomentumTrader(APrioriAgent):
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
-            hp = {
-                'ma1': [2, env.obs_steps],
-                'ma2': [2, env.obs_steps],
-                'std_span': [2, env.obs_steps],
-                'alpha_up': [1e-6, 1e2],
-                'alpha_down': [1e-6, 1e2]
-                }
+            if not search_space:
+                hp = {
+                    'ma1': [2, env.obs_steps],
+                    'ma2': [2, env.obs_steps],
+                    'std_span': [2, env.obs_steps],
+                    'alpha_up': [1e-8, 1],
+                    'alpha_down': [1e-8, 1]
+                    }
 
-            search_space = {'mean_type':{'simple': hp,
-                                         'exp': hp,
-                                         'kama': hp
-                                         }
-                            }
+                search_space = {'mean_type':{'simple': hp,
+                                             'exp': hp,
+                                             'kama': hp
+                                             }
+                                }
 
             opt_params, info, _ = ot.maximize_structured(find_hp,
                                               num_evals=nb_steps,
@@ -639,25 +646,6 @@ class PAMRTrader(APrioriAgent):
         # project it onto simplex
         return np.append(self.simplex_proj(b), 0)
 
-    def simplex_proj(self, y):
-        """ Projection of y onto simplex. """
-        m = len(y)
-        bget = False
-
-        s = sorted(y, reverse=True)
-        tmpsum = 0.
-
-        for ii in range(m - 1):
-            tmpsum = tmpsum + s[ii]
-            tmax = (tmpsum - 1) / (ii + 1)
-            if tmax >= s[ii + 1]:
-                bget = True
-                break
-
-        if not bget:
-            tmax = (tmpsum + s[m - 1] - 1) / m
-
-        return np.maximum(y - tmax, 0.)
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
@@ -758,7 +746,7 @@ class HarmonicTrader(APrioriAgent):
     def __repr__(self):
         return "HarmonicTrader"
 
-    def __init__(self, peak_order=7, err_allowed=0.05, fiat="USDT"):
+    def __init__(self, peak_order=7, err_allowed=0.05, activation=array_normalize, fiat="USDT"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
@@ -769,6 +757,7 @@ class HarmonicTrader(APrioriAgent):
         self.err_allowed = err_allowed
         self.peak_order = peak_order
         self.alpha = [1., 1.]
+        self.activation = activation
 
     def find_extreme(self, obs):
         max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
@@ -847,7 +836,7 @@ class HarmonicTrader(APrioriAgent):
 
         port_vec[-1] = max(0, 1 - port_vec.sum())
 
-        return array_normalize(port_vec)
+        return self.activation(port_vec)
 
     def set_params(self, **kwargs):
         self.err_allowed = kwargs['err_allowed']
@@ -933,16 +922,17 @@ class FactorTrader(APrioriAgent):
     def __repr__(self):
         return "FactorTrader"
 
-    def __init__(self, factors, std_window=3, fiat="USDT"):
+    def __init__(self, factors, std_window=3, std_weight=1., alpha=[1., 1.], activation=array_normalize, fiat="USDT"):
         super().__init__(fiat)
         assert isinstance(factors, list), "factors must be a list containing factor model instances"
         for factor in factors:
             assert isinstance(factor, APrioriAgent), "Factors must be APrioriAgent instances"
         self.factors = factors
         self.std_window = std_window
-        self.std_weight = 1
+        self.std_weight = std_weight
         self.weights = np.ones(len(self.factors))
-        self.alpha = [1., 1.]
+        self.alpha = alpha
+        self.activation = activation
 
     def act(self, obs):
         action = np.zeros(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
@@ -969,7 +959,8 @@ class FactorTrader(APrioriAgent):
 
         port_vec[-1] = max(0, 1 - port_vec.sum())
 
-        return array_normalize(port_vec)
+        return self.activation(port_vec)
+
 
     def set_params(self, **kwargs):
         self.std_window = int(kwargs['std_window'])
