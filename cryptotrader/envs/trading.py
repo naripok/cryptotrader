@@ -533,14 +533,14 @@ class TradingEnvironment(Env):
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
-            obs = pd.concat(obs_list, keys=keys, axis=1).ffill()
+            obs = pd.concat(obs_list, keys=keys, axis=1)
 
             if not start and not end:
                 obs = obs.iloc[-self.obs_steps:]
 
-            return obs
+            cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
 
-
+            return obs.ffill().fillna(obs[cols_to_bfill].bfill())
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))

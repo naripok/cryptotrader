@@ -221,6 +221,101 @@ class APrioriAgent(Agent):
                                                                env.calc_total_portval()))
 
 
+class TestAgent(APrioriAgent):
+    """
+    Test agent for debugging
+    """
+    def __repr__(self):
+        return "Test"
+
+    def __init__(self, obs_shape, fiat="USDT"):
+        super().__init__(fiat)
+        self.obs_shape = obs_shape
+
+    def act(self, obs):
+        # Assert obs is valid
+        assert obs.shape == self.obs_shape, "Wrong obs shape."
+
+        for val in obs.applymap(lambda x: isinstance(x, Decimal)).all():
+            assert val, ("Non decimal value found in obs.", obs)
+
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            return self.get_portfolio_vector(obs)
+
+    def rebalance(self, obs):
+        return self.act(obs)
+
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
+             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
+        """
+        Test agent on environment
+        """
+        try:
+            # Get env params
+            self.fiat = env._fiat
+
+            # Reset observations
+            env.reset_status()
+            env.reset(reset_dfs=False)
+
+            # Get max episode length
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.data_length
+
+            #Reset counters
+            t0 = time()
+            self.step = 0
+            episode_reward = 0
+
+            while True:
+                try:
+                    action = self.rebalance(env.get_observation(True))
+                    obs, reward, _, status = env.step(action)
+                    episode_reward += np.float64(reward)
+
+                    self.step += 1
+
+                    if visualize:
+                        env.render()
+
+                    if verbose:
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
+                            self.step,
+                            nb_max_episode_steps - env.obs_steps - 1,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
+                            episode_reward,
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps- 1) - self.step), unit='s'))
+                        ), end="\r", flush=True)
+                        t0 = time()
+
+                    if status['OOD'] or self.step == nb_max_episode_steps:
+                        return episode_reward
+
+                    if status['Error']:
+                        e = status['Error']
+                        print("Env error:",
+                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        break
+
+                except Exception as e:
+                    print("Model Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    raise e
+
+        except TypeError:
+            print("\nYou must fit the model or provide indicator parameters in order to test.")
+
+        except KeyboardInterrupt:
+            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
+                                                                             nb_max_episode_steps,
+                                                                             int(100 * self.step / nb_max_episode_steps)))
+
+
 class DummyTrader(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
