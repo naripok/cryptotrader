@@ -354,26 +354,6 @@ class DummyTrader(APrioriAgent):
         return self.act(obs)
 
 
-class ConstantRebalanceTrader(APrioriAgent):
-    """
-    Equally distribute portfolio every step
-    """
-    def __repr__(self):
-        return "ContantRebalanceTrader"
-
-    def __init__(self, fiat="USDT"):
-        super().__init__(fiat)
-
-    def act(self, obs):
-        n_pairs = obs.columns.levels[0].shape[0]
-        action = np.ones(n_pairs)
-        action[-1] = 0
-        return array_normalize(action)
-
-    def rebalance(self, obs):
-        return self.act(obs)
-
-
 class Benchmark(APrioriAgent):
     """
     Equally distribute cash at the first step and hold
@@ -392,6 +372,26 @@ class Benchmark(APrioriAgent):
             return array_normalize(action)
         else:
             return self.get_portfolio_vector(obs)
+
+    def rebalance(self, obs):
+        return self.act(obs)
+
+
+class ConstantRebalanceTrader(APrioriAgent):
+    """
+    Equally distribute portfolio every step
+    """
+    def __repr__(self):
+        return "ContantRebalanceTrader"
+
+    def __init__(self, fiat="USDT"):
+        super().__init__(fiat)
+
+    def act(self, obs):
+        n_pairs = obs.columns.levels[0].shape[0]
+        action = np.ones(n_pairs)
+        action[-1] = 0
+        return array_normalize(action)
 
     def rebalance(self, obs):
         return self.act(obs)

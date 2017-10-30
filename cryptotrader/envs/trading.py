@@ -538,9 +538,12 @@ class TradingEnvironment(Env):
             if not start and not end:
                 obs = obs.iloc[-self.obs_steps:]
 
-            cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
+            if portifolio_vector:
+                cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
 
-            return obs.ffill().fillna(obs[cols_to_bfill].bfill())
+                obs = obs.ffill().fillna(obs[cols_to_bfill].bfill())
+
+            return obs
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
