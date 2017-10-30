@@ -92,6 +92,27 @@ def array_normalize(x):
     return np.float32(convert_to.decimal(out))
 
 
+def simplex_proj(y):
+    """ Projection of y onto simplex. """
+    m = len(y)
+    bget = False
+
+    s = sorted(y, reverse=True)
+    tmpsum = 0.
+
+    for ii in range(m - 1):
+        tmpsum = tmpsum + s[ii]
+        tmax = (tmpsum - 1) / (ii + 1)
+        if tmax >= s[ii + 1]:
+            bget = True
+            break
+
+    if not bget:
+        tmax = (tmpsum + s[m - 1] - 1) / m
+
+    return np.maximum(y - tmax, 0.)
+
+
 class convert_to(object):
     _quantizer = Decimal('0E-8')
     _quantize = partialmethod(Decimal.quantize, _quantizer)
