@@ -531,13 +531,13 @@ class MomentumTrader(APrioriAgent):
                         try:
                             print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
                                                                                 nb_steps,
-                                                                                sum(batch_reward),
+                                                                                sum(batch_reward) / batch_size,
                                                                                 str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                                   end="\r")
                             t0 = time()
                         except TypeError:
                             raise ot.api.fun.MaximumEvaluationsException(0)
-                    return sum(batch_reward)
+                    return sum(batch_reward) / batch_size
 
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
