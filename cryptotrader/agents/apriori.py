@@ -187,12 +187,13 @@ class APrioriAgent(Agent):
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}          ".format(
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}{5}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
                                 [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
                                 env.calc_total_portval(),
-                                env.action_df.iloc[-1].astype('f').to_dict()
+                                env.action_df.iloc[-1].astype('f').to_dict(),
+                                "                                                                                       "
                             ), end="\r", flush=True)
 
                     if status['Error']:
@@ -913,6 +914,180 @@ class HarmonicTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
+
+
+class ReversedMomentumTrader(APrioriAgent):
+    """
+    Momentum trading agent
+    """
+    def __repr__(self):
+        return "ReversedMomentumTrader"
+
+    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
+                 fiat="USDT"):
+        """
+        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
+        """
+        super().__init__(fiat=fiat)
+        self.mean_type = mean_type
+        self.ma_span = ma_span
+        self.std_span = std_span
+        self.alpha = alpha
+        self.activation = activation
+
+    def get_ma(self, df):
+        if self.mean_type == 'exp':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
+        elif self.mean_type == 'kama':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
+        elif self.mean_type == 'simple':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = df.close.rolling(window).mean()
+        else:
+            raise TypeError("Wrong mean_type param")
+        return df
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        try:
+            obs = obs.astype(np.float64)
+            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                df = obs.loc[:, symbol].copy()
+                df = self.get_ma(df)
+
+                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
+                              (df.close.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
+
+            return factor
+
+        except TypeError as e:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
+
+    def rebalance(self, obs):
+        try:
+            obs = obs.astype(np.float64).ffill()
+            prev_posit = self.get_portfolio_vector(obs)
+            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
+            factor = self.act(obs)
+            for i in range(position.shape[0] - 1):
+
+                if factor[i] >= 0.0:
+                    position[i] = max(0., prev_posit[i] - self.alpha[0] * factor[i])
+                else:
+                    position[i] = max(0., prev_posit[i] - self.alpha[1] * factor[i])
+
+            position[-1] = max(0., 1 - position[:-1].sum())
+
+            return self.activation(position)
+
+        except TypeError as e:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
+
+    def set_params(self, **kwargs):
+        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
+        self.mean_type = kwargs['mean_type']
+        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
+        self.std_span = int(kwargs['std_span'])
+
+    def fit(self, env, nb_steps, batch_size, search_space=None, action_repetition=1, callbacks=None, verbose=1,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            nb_max_episode_steps=None):
+        try:
+
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
+            i = 0
+            t0 = time()
+            env.training = True
+
+            @ot.constraints.violations_defaulted(-np.inf)
+            @ot.constraints.constrained([lambda mean_type,
+                                                ma1,
+                                                ma2,
+                                                std_span,
+                                                alpha_up,
+                                                alpha_down: ma1 < ma2])
+            def find_hp(**kwargs):
+                try:
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+
+                    self.set_params(**kwargs)
+
+                    batch_reward = []
+                    for batch in range(batch_size):
+                        # Reset env
+                        env.reset_status()
+                        env.reset(reset_dfs=True)
+                        # run test on the main process
+                        r = self.test(env,
+                                        nb_episodes=1,
+                                        action_repetition=action_repetition,
+                                        callbacks=callbacks,
+                                        visualize=visualize,
+                                        nb_max_episode_steps=nb_max_episode_steps,
+                                        nb_max_start_steps=nb_max_start_steps,
+                                        start_step_policy=start_step_policy,
+                                        verbose=False)
+
+                        batch_reward.append(r)
+
+                    i += 1
+                    if verbose:
+                        try:
+                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
+                                                                                nb_steps,
+                                                                                sum(batch_reward) / batch_size,
+                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                                  end="\r")
+                            t0 = time()
+                        except TypeError:
+                            raise ot.api.fun.MaximumEvaluationsException(0)
+                    return sum(batch_reward) / batch_size
+
+                except KeyboardInterrupt:
+                    raise ot.api.fun.MaximumEvaluationsException(0)
+
+            if not search_space:
+                hp = {
+                    'ma1': [2, env.obs_steps],
+                    'ma2': [2, env.obs_steps],
+                    'std_span': [2, env.obs_steps],
+                    'alpha_up': [1e-8, 1],
+                    'alpha_down': [1e-8, 1]
+                    }
+
+                search_space = {'mean_type':{'simple': hp,
+                                             'exp': hp,
+                                             'kama': hp
+                                             }
+                                }
+
+            opt_params, info, _ = ot.maximize_structured(find_hp,
+                                              num_evals=nb_steps,
+                                              search_space=search_space
+                                              )
+
+            self.set_params(**opt_params)
+            env.training = False
+            return opt_params, info
+
+        except KeyboardInterrupt:
+            env.training = False
+            print("\nOptimization interrupted by user.")
+            return opt_params, info
+        except KeyError:
+            env.training = False
+            print("\nOptimization interrupted by user.")
+            return None, None
 
 
 class FactorTrader(APrioriAgent):
