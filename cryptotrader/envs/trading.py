@@ -476,6 +476,8 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
 
+
+
         return ohlc_df[['open','high','low','close',
                         'volume']].reindex(index).asfreq("%dT" % self.period).ffill().apply(convert_to.decimal, raw=True)
 
@@ -827,7 +829,7 @@ class TradingEnvironment(Env):
                                              function=ec.beta_aligned,
                                              window=window)
         self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.001)
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window + 5), risk_free=0.001)
 
         return self.results
 
