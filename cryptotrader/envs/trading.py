@@ -476,8 +476,8 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
 
-        return convert_and_clean(ohlc_df[['open','high','low','close',
-                        'volume']].reindex(index).asfreq("%dT" % self.period))#.apply(convert_and_clean)
+        return ohlc_df[['open','high','low','close',
+                        'volume']].reindex(index).asfreq("%dT" % self.period).ffill().apply(convert_to.decimal, raw=True)
 
     def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
@@ -517,7 +517,6 @@ class TradingEnvironment(Env):
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
                 return obs
-
             else:
                 for symbol in self.pairs:
                     keys.append(symbol)
@@ -781,7 +780,7 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_results(self, window=13):
+    def get_results(self, window=3):
         """
         Calculate arbiter desired actions statistics
         :return:

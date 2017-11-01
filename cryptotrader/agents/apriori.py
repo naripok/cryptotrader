@@ -6,7 +6,7 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-from decimal import InvalidOperation, DivisionByZero
+from decimal import InvalidOperation, DivisionByZero, Decimal
 from datetime import timedelta
 
 from scipy.signal import argrelextrema
@@ -180,7 +180,7 @@ class APrioriAgent(Agent):
                             can_act = False
 
                     else:
-                        obs = env.get_observation(True)
+                        obs = env.get_observation(True).astype(np.float64)
 
                     if render:
                         env.render()
@@ -237,7 +237,7 @@ class TestAgent(APrioriAgent):
         # Assert obs is valid
         assert obs.shape == self.obs_shape, "Wrong obs shape."
 
-        for val in obs.applymap(lambda x: isinstance(x, Decimal)).all():
+        for val in obs.applymap(lambda x: isinstance(x, Decimal) and Decimal.is_finite(x)).all():
             assert val, ("Non decimal value found in obs.", obs)
 
         if self.step == 0:
@@ -271,13 +271,13 @@ class TestAgent(APrioriAgent):
             #Reset counters
             t0 = time()
             self.step = 0
-            episode_reward = 0
+            episode_reward = 1
 
             while True:
                 try:
                     action = self.rebalance(env.get_observation(True))
                     obs, reward, _, status = env.step(action)
-                    episode_reward += np.float64(reward)
+                    episode_reward *= np.float64(reward)
 
                     self.step += 1
 
@@ -285,7 +285,7 @@ class TestAgent(APrioriAgent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}  ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                   ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 1,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
