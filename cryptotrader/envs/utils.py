@@ -203,7 +203,7 @@ def convert_and_clean(x):
     # x = x.apply(convert_to.decimal)
     f = x.rolling(5, center=True, min_periods=1).mean()#.apply(convert_to.decimal)
     # x = x.apply(lambda x: x if x.is_finite() else np.nan)
-    return x.combine_first(f).apply(convert_to.decimal)
+    return x.combine_first(f).transform(convert_to.decimal)
 
 
 def sample_trades(df, freq):
