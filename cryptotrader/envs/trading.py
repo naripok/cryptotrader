@@ -226,14 +226,6 @@ class TradingEnvironment(Env):
         else:
             return self._symbols
 
-        # symbols = []
-        # for pair in self.pairs:
-        #     symbol = pair.split('_')
-        #     for s in symbol:
-        #         symbols.append(s)
-        #
-        # return set(symbols)
-
     @property
     def fiat(self):
         try:
@@ -463,9 +455,13 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
         if not start:
-            start = self.timestamp - timedelta(minutes=self.period * (self.obs_steps + 2))
+            start = self.timestamp - timedelta(minutes=self.period * self.obs_steps)
         if not end:
             end = self.timestamp
+
+        index = pd.date_range(start=start.astimezone(timezone.utc).astimezone(timezone.utc),
+                              end=end.astimezone(timezone.utc).astimezone(timezone.utc),
+                              freq="%dT" % self.period, utc=True, closed='right').floor("%dT" % self.period)
 
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
@@ -476,7 +472,7 @@ class TradingEnvironment(Env):
         ohlc_df.set_index('date', inplace=True)
 
         return ohlc_df[['open','high','low','close',
-                        'volume']].apply(convert_and_clean)
+                        'volume']].reindex(index).apply(convert_and_clean)
 
     def get_pair_history(self, pair, start=None, end=None):
         """
@@ -589,10 +585,11 @@ class TradingEnvironment(Env):
 
     ## Trading methods
     def get_close_price(self, symbol, timestamp=None):
-        if isinstance(timestamp, pd.Timestamp):
-            return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
-        elif isinstance(timestamp, str) and timestamp == 'last' or timestamp is None:
+        if not timestamp:
             return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat, symbol), 'close'))
+        elif isinstance(timestamp, pd.Timestamp):
+            return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
+
 
     def calc_total_portval(self, timestamp=None):
         portval = convert_to.decimal('0.0')
@@ -757,6 +754,8 @@ class TradingEnvironment(Env):
         Setup env with initial values
         :return:
         """
+        self.obs_df = pd.DataFrame()
+        self.portfolio_df = pd.DataFrame()
         self.set_observation_space()
         self.set_action_space()
         self.balance = self.init_balance = self.get_balance()
