@@ -93,13 +93,13 @@ class APrioriAgent(Agent):
             #Reset counters
             t0 = time()
             self.step = 0
-            episode_reward = 0
+            episode_reward = 1
 
             while True:
                 try:
                     action = self.rebalance(obs)
                     obs, reward, _, status = env.step(action)
-                    episode_reward += np.float64(reward)
+                    episode_reward *= np.float64(reward)
 
                     self.step += 1
 

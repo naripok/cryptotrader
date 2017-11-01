@@ -693,13 +693,13 @@ class TradingEnvironment(Env):
     def get_reward(self):
         # TODO TEST
         try:
-            return (self.portval - self.get_previous_portval()) / self.get_previous_portval()
+            return self.portval / self.get_previous_portval()
 
         except DivisionByZero:
-            return (self.portval - self.get_previous_portval()) / (self.get_previous_portval() + self.epsilon)
+            return self.portval / (self.get_previous_portval() + self.epsilon)
 
         except InvalidOperation:
-            return (self.portval - self.get_previous_portval()) / (self.get_previous_portval() + self.epsilon)
+            return self.portval / (self.get_previous_portval() + self.epsilon)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
