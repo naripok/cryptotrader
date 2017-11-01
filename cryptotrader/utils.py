@@ -120,7 +120,7 @@ class convert_to(object):
     _quantizer = Decimal('0E-8')
     _quantize = partialmethod(Decimal.quantize, _quantizer)
     _convert_array = np.vectorize(Decimal)
-    _quantize_array = np.vectorize(_quantize)
+    _quantize_array = np.vectorize(lambda x: Decimal(x).quantize(convert_to._quantizer))
 
     @staticmethod
     def decimal128(data):
@@ -139,7 +139,7 @@ class convert_to(object):
                 # for i, item in enumerate(data.flatten()):
                 #     output[i] = Decimal(np.float64(item)).quantize(convert_to._quantizer)
                 # return output.reshape(shape)
-                return convert_to._convert_array(data.astype(str))
+                return convert_to._quantize_array(data.astype(str))
             else:
                 return Decimal.from_float(np.float64(data)).quantize(convert_to._quantizer)
         except InvalidOperation:

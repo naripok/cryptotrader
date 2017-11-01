@@ -9590,13 +9590,13 @@ def test_get_history(ready_env):
     assert df.index.freqstr == '%dT' % env.period
     assert type(df.values.all()) == Decimal
 
-    for data in tapi.returnChartData()[:-env.obs_steps]:
+    for data in tapi.returnChartData()[-env.obs_steps:]:
         df = env.get_history(end=datetime.fromtimestamp(data['date']))
         assert isinstance(df, pd.DataFrame)
         assert df.shape[0] == env.obs_steps
         assert set(df.columns.levels[0]) == set(env.pairs)
         assert list(df.columns.levels[1]) == ['open', 'high', 'low', 'close', 'volume']
-        # assert df.index.freqstr == '%dT' % env.period
+        assert df.index.freqstr == '%dT' % env.period
         assert type(df.values.all()) == Decimal
 
 def test_get_balance(ready_env):
