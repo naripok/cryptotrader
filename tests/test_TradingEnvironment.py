@@ -9580,16 +9580,6 @@ def test_get_ohlc(ready_env):
             assert list(df.columns) == ['open','high','low','close','volume']
             assert df.index.freqstr == '%dT' % env.period
 
-# def test_get_symbol_history(ready_env):
-#     env = ready_env
-#     for data in tapi.returnChartData()[:-env.obs_steps]:
-#         for pair in env.pairs:
-#             df = env.get_pair_history(pair, end=datetime.fromtimestamp(data['date']))
-#             assert isinstance(df, pd.DataFrame)
-#             assert df.shape[0] == env.obs_steps
-#             assert list(df.columns) == ['open', 'high', 'low', 'close', 'volume']
-#             # assert df.index.freqstr == '%dT' % env.period
-
 def test_get_history(ready_env):
     env = ready_env
     df = env.get_history()
@@ -9600,7 +9590,7 @@ def test_get_history(ready_env):
     assert df.index.freqstr == '%dT' % env.period
     assert type(df.values.all()) == Decimal
 
-    for data in tapi.returnChartData()[:-env.obs_steps - 1]:
+    for data in tapi.returnChartData()[:-env.obs_steps]:
         df = env.get_history(end=datetime.fromtimestamp(data['date']))
         assert isinstance(df, pd.DataFrame)
         assert df.shape[0] == env.obs_steps
@@ -9749,13 +9739,15 @@ def test_get_sampled_portfolio(ready_env):
 
     assert env.get_sampled_portfolio().shape == (1, 4)
 
+
+index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):
     @classmethod
     @mock.patch.object(TradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     def setup_class(cls):
         with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+            mock_datetime.now.return_value = datetime.fromtimestamp(index).astimezone(timezone.utc)
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
@@ -9768,7 +9760,7 @@ class Test_env_reset(object):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
     @mock.patch.object(TradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     def test_reset(self):
         obs = self.env.reset()
 
@@ -9801,14 +9793,16 @@ def test_get_reward(ready_env):
     r = env.get_reward()
     assert r == Decimal('10.00000000')
 
+
+index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 @pytest.mark.incremental
 class Test_env_step(object):
     # TODO: CHECK THIS TEST
     @classmethod
-    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(index).astimezone(timezone.utc))
     def setup_class(cls):
         with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+            mock_datetime.now.return_value = datetime.fromtimestamp(index).astimezone(timezone.utc)
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
@@ -9845,7 +9839,7 @@ class Test_env_step(object):
                         self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
     @mock.patch.object(PaperTradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     @given(arrays(dtype=np.float32,
                   shape=(3,),
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))
