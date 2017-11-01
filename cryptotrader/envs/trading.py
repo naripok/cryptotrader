@@ -908,7 +908,7 @@ class TradingEnvironment(Env):
         config_fig(p_val)
 
         results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2, legend='portval')
-        results['benchmark'] = p_val.line(df.index, df.benchmark, color=palettes[-1], line_width=1.2, legend="benchmark")
+        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red', line_width=1.2, legend="benchmark")
         p_val.legend.click_policy = "hide"
 
         # Individual assets portval
