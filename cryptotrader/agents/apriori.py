@@ -93,13 +93,13 @@ class APrioriAgent(Agent):
             #Reset counters
             t0 = time()
             self.step = 0
-            episode_reward = 0
+            episode_reward = 1
 
             while True:
                 try:
                     action = self.rebalance(obs)
                     obs, reward, _, status = env.step(action)
-                    episode_reward += np.float64(reward)
+                    episode_reward *= np.float64(reward)
 
                     self.step += 1
 
@@ -531,13 +531,13 @@ class MomentumTrader(APrioriAgent):
                         try:
                             print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
                                                                                 nb_steps,
-                                                                                sum(batch_reward),
+                                                                                sum(batch_reward) / batch_size,
                                                                                 str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                                   end="\r")
                             t0 = time()
                         except TypeError:
                             raise ot.api.fun.MaximumEvaluationsException(0)
-                    return sum(batch_reward)
+                    return sum(batch_reward) / batch_size
 
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
