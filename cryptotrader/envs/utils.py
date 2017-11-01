@@ -205,7 +205,7 @@ def convert_and_clean(x):
     # x = x.apply(lambda x: x if x.is_finite() else np.nan)
     # f = running_mean()
     # return x.combine_first(f).transform(convert_to.decimal)
-    return x.apply(convert_to.decimal, raw=True).ffill()
+    return x.ffill().apply(convert_to.decimal)
 
 
 def sample_trades(df, freq):
