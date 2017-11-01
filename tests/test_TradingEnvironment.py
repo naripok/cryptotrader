@@ -9739,6 +9739,22 @@ def test_get_sampled_portfolio(ready_env):
 
     assert env.get_sampled_portfolio().shape == (1, 4)
 
+def test_get_reward(ready_env):
+    env = ready_env
+    env.reset()
+    r = env.get_reward()
+    assert isinstance(r, Decimal)
+    assert r == Decimal('0.0')
+
+    n_tests = 100
+    for i, j in zip(np.random.random(n_tests), np.random.random(n_tests)):
+        # env.reset()
+        env.fiat = Decimal(i)
+        env.portval = env.calc_total_portval()
+        env.fiat = Decimal(j)
+        r = env.get_reward()
+        assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
+
 
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):
@@ -9779,19 +9795,6 @@ class Test_env_reset(object):
         assert list(self.env.balance.keys()) == list(self.env.symbols)
         for symbol in self.env.balance:
             assert isinstance(self.env.balance[symbol], Decimal)
-
-def test_get_reward(ready_env):
-    env = ready_env
-    env.reset()
-    r = env.get_reward()
-    assert isinstance(r, Decimal)
-    assert r == Decimal('0.0')
-
-    env.fiat = Decimal('1')
-    env.portval = env.calc_total_portval()
-    env.fiat = Decimal('10')
-    r = env.get_reward()
-    assert r == Decimal('10.00000000')
 
 
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)

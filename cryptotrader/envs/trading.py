@@ -335,15 +335,21 @@ class TradingEnvironment(Env):
     @portval.setter
     def portval(self, value):
         try:
-            if isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
-                self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value)
+            # if isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
+            #     self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value)
+            #
+            # elif isinstance(value, dict):
+            #     try:
+            #         timestamp = value['timestamp']
+            #     except KeyError:
+            #         timestamp = self.timestamp
+            #     self.portfolio_df.at[timestamp, 'portval'] = convert_to.decimal(value['portval'])
 
-            elif isinstance(value, dict):
-                try:
-                    timestamp = value['timestamp']
-                except KeyError:
-                    timestamp = self.timestamp
-                self.portfolio_df.at[timestamp, 'portval'] = convert_to.decimal(value['portval'])
+            self.portfolio_df.at[value['timestamp'], 'portval'] = convert_to.decimal(value['portval'])
+        except KeyError:
+            self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value['portval'])
+        except TypeError:
+            self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.portval, self.parse_error(e))
@@ -572,15 +578,14 @@ class TradingEnvironment(Env):
     ## Trading methods
     def get_close_price(self, symbol, timestamp=None):
         if not timestamp:
-            return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat, symbol), 'close'))
-        elif isinstance(timestamp, pd.Timestamp):
-            return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
+            timestamp = self.obs_df.index[-1]
+        return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
 
     def calc_total_portval(self, timestamp=None):
-        portval = convert_to.decimal('0.0')
+        portval = convert_to.decimal('0E-8')
 
         for symbol in self._crypto:
-            portval += self.get_crypto(symbol) * self.get_close_price(symbol, timestamp)
+            portval = self.get_crypto(symbol).fma(self.get_close_price(symbol, timestamp), portval)
         portval += self.fiat
 
         return portval
