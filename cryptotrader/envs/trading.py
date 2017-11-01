@@ -841,12 +841,7 @@ class TradingEnvironment(Env):
             fig.xaxis.major_label_orientation = np.pi / 4
             fig.grid.grid_line_alpha = 0.1
             fig.grid.grid_line_dash = [6, 4]
-            if hasattr(fig, 'legend'):
-                fig.legend.text_font_style = 'bold'
-                fig.legend.text_color = 'black'
-                fig.legend.click_policy="hide"
-            # fig.hover.tooltips = [('index', '$index'),
-            #                       ("(x,y)", "($x, $y)")]
+
 
         df = self.get_results().astype(np.float64)
 
@@ -873,7 +868,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=800, plot_height=400,
+                       plot_width=800, plot_height=300,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
@@ -882,13 +877,15 @@ class TradingEnvironment(Env):
         palettes = inferno(len(self.symbols))
 
         for i, symbol in enumerate(self.symbols):
-            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i], legend=symbol)
+            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i],
+                                                    legend=symbol, line_width=1.3, muted_color=palettes[i], muted_alpha=0.2)
+            p_pos.legend.click_policy = "mute"
 
         # Portifolio and benchmark values
         val_hover = HoverTool(
             tooltips=[
                 ('date', '<span style="color: #000000;">@x{%F, %H:%M}</span>'),
-                ('close', '<span style="color: #000000;">$@y{%0.2f}</span>'),
+                ('val', '<span style="color: #000000;">$@y{%0.2f}</span>'),
                 ],
 
             formatters={
@@ -903,15 +900,32 @@ class TradingEnvironment(Env):
         p_val = figure(title="Portifolio / Benchmark Value",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
-                       y_axis_label='position',
+                       y_axis_label='value',
                        plot_width=800, plot_height=400,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
         config_fig(p_val)
 
-        results['portval'] = p_val.line(df.index, df.portval, color='green')
-        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red')
+        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2, legend='portval')
+        results['benchmark'] = p_val.line(df.index, df.benchmark, color=palettes[-1], line_width=1.2, legend="benchmark")
+        p_val.legend.click_policy = "hide"
+
+        # Individual assets portval
+        p_pval = figure(title="Pair Performance",
+                       x_axis_type="datetime",
+                       x_axis_label='timestep',
+                       y_axis_label='position',
+                       plot_width=800, plot_height=400,
+                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
+                       toolbar_location="above"
+                       )
+        config_fig(p_pval)
+
+        for i, symbol in enumerate(self.pairs):
+            results[symbol+'_benchmark'] = p_pval.line(df.index, df[symbol+'_benchmark'], color=palettes[i], line_width=1.2,
+                                                      legend=symbol)
+            p_pval.legend.click_policy = "hide"
 
         # Portifolio and benchmark returns
         p_ret = figure(title="Portifolio / Benchmark Returns",
@@ -924,8 +938,8 @@ class TradingEnvironment(Env):
                        )
         config_fig(p_ret)
 
-        results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red')
-        results['port_ret'] = p_ret.line(df.index, df.returns, color='green')
+        results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red', line_width=1.2)
+        results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2)
 
         p_hist = figure(title="Portifolio Value Pct Change Distribution",
                         x_axis_label='Pct Change',
@@ -952,7 +966,7 @@ class TradingEnvironment(Env):
                          )
         config_fig(p_alpha)
 
-        results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow')
+        results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow', line_width=1.2)
 
         # Portifolio rolling beta
         p_beta = figure(title="Portifolio rolling beta",
@@ -965,7 +979,7 @@ class TradingEnvironment(Env):
                         )
         config_fig(p_beta)
 
-        results['beta'] = p_beta.line(df.index, df.beta, color='yellow')
+        results['beta'] = p_beta.line(df.index, df.beta, color='yellow', line_width=1.2)
 
         # Rolling Drawdown
         p_dd = figure(title="Portifolio rolling drawdown",
@@ -978,7 +992,7 @@ class TradingEnvironment(Env):
                       )
         config_fig(p_dd)
 
-        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red')
+        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red', line_width=1.2)
 
         # Portifolio Sharpe ratio
         p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
@@ -991,7 +1005,7 @@ class TradingEnvironment(Env):
                           )
         config_fig(p_sharpe)
 
-        results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow')
+        results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow', line_width=1.2)
 
         print("\n################### > Portifolio Performance Analysis < ###################\n")
         print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
@@ -1002,7 +1016,7 @@ class TradingEnvironment(Env):
         print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
                                                                      ec.max_drawdown(df.benchmark_returns)))
 
-        results['handle'] = show(column(p_val, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta),
+        results['handle'] = show(column(p_val, p_pval, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta),
                                  notebook_handle=True)
 
         return results
