@@ -440,9 +440,9 @@ class TradingEnvironment(Env):
         period = "%dmin" % self.period
 
         # Sample the trades into OHLC data
-        df['rate'] = df['rate'].ffill().apply(convert_to.decimal)
-        df['amount'] = df['amount'].apply(convert_to.decimal)
-        df.index = df.date.apply(pd.to_datetime)
+        df['rate'] = df['rate'].ffill().apply(convert_to.decimal, raw=True)
+        df['amount'] = df['amount'].apply(convert_to.decimal, raw=True)
+        df.index = df.date.apply(pd.to_datetime, raw=True)
 
         # TODO REMOVE NANS
         index = df.resample(period).first().index
@@ -468,11 +468,11 @@ class TradingEnvironment(Env):
                                                                         start=datetime.timestamp(start),
                                                                         end=datetime.timestamp(end)))
         # TODO 1 FIND A BETTER WAY
-        ohlc_df['date'] = ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc))
-        ohlc_df.set_index('date', inplace=True)
+        # ohlc_df['date'] = ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc))
+        ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
 
-        return ohlc_df[['open','high','low','close',
-                        'volume']].reindex(index).apply(convert_and_clean)
+        return convert_and_clean(ohlc_df[['open','high','low','close',
+                        'volume']].reindex(index).asfreq("%dT" % self.period))#.apply(convert_and_clean)
 
     def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
@@ -777,7 +777,7 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_results(self, window=7):
+    def get_results(self, window=13):
         """
         Calculate arbiter desired actions statistics
         :return:
@@ -786,7 +786,7 @@ class TradingEnvironment(Env):
 
         obs = self.get_history(self.results.index[0], self.results.index[-1])
 
-        self.results['benchmark'] = convert_to.decimal('0E-8')
+        self.results['benchmark'] = convert_to.decimal('1E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)
@@ -796,7 +796,7 @@ class TradingEnvironment(Env):
 
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
-        init_portval = Decimal('0E-8')
+        init_portval = Decimal('1E-8')
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += convert_to.decimal(self.init_balance[symbol]) * \
@@ -817,21 +817,21 @@ class TradingEnvironment(Env):
                                               self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
                                               window=window,
-                                              risk_free=0.002
+                                              risk_free=0.001
                                               )
         self.results['beta'] = ec.utils.roll(self.results.returns,
                                              self.results.benchmark_returns,
                                              function=ec.beta_aligned,
                                              window=window)
         self.results['drawdown'] = ec.roll_max_drawdown(self.results.returns, window=int(window))
-        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.002)
+        self.results['sharpe'] = ec.roll_sharpe_ratio(self.results.returns, window=int(window), risk_free=0.001)
 
         return self.results
 
     def plot_results(self):
         def config_fig(fig):
             fig.background_fill_color = "black"
-            fig.background_fill_alpha = 0.5
+            fig.background_fill_alpha = 0.1
             fig.border_fill_color = "#232323"
             fig.outline_line_color = "#232323"
             fig.title.text_color = "whitesmoke"
@@ -841,7 +841,6 @@ class TradingEnvironment(Env):
             fig.xaxis.major_label_orientation = np.pi / 4
             fig.grid.grid_line_alpha = 0.1
             fig.grid.grid_line_dash = [6, 4]
-
 
         df = self.get_results().astype(np.float64)
 
@@ -878,8 +877,8 @@ class TradingEnvironment(Env):
 
         for i, symbol in enumerate(self.symbols):
             results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i],
-                                                    legend=symbol, line_width=1.3, muted_color=palettes[i], muted_alpha=0.2)
-            p_pos.legend.click_policy = "mute"
+                                                    legend=symbol, line_width=1.2)#, muted_color=palettes[i], muted_alpha=0.2)
+            p_pos.legend.click_policy = "hide"
 
         # Portifolio and benchmark values
         val_hover = HoverTool(
