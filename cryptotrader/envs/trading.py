@@ -468,7 +468,6 @@ class TradingEnvironment(Env):
                                                                         start=datetime.timestamp(start),
                                                                         end=datetime.timestamp(end)))
         # TODO 1 FIND A BETTER WAY
-        # ohlc_df['date'] = ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc))
         ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
 
         return convert_and_clean(ohlc_df[['open','high','low','close',
@@ -483,7 +482,7 @@ class TradingEnvironment(Env):
                 end = self.timestamp
                 is_bounded = False
             if not start:
-                start = self.timestamp - timedelta(minutes=self.period * self.obs_steps)
+                start = end - timedelta(minutes=self.period * self.obs_steps)
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
                                       freq="%dT" % self.period).floor("%dT" % self.period)[-self.obs_steps:]
