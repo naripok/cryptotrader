@@ -18,6 +18,7 @@ import empyrical as ec
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
+from bokeh.models import HoverTool
 
 from decimal import DivisionByZero, InvalidOperation
 from ..exchange_api.poloniex import PoloniexError
@@ -85,13 +86,13 @@ class BacktestDataFeed(object):
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
-            assert np.allclose(period, self.period * 60), "Invalid period"
+            # assert np.allclose(period, self.period * 60), "Invalid period"
             assert currencyPair in self.pairs, "Invalid pair"
-
-            if not start:
-                start = self.ohlc_data[currencyPair].date.index[-50]
-            if not end:
-                end = self.ohlc_data[currencyPair].date.index[-1]
+            #
+            # if not start:
+            #     start = self.ohlc_data[currencyPair].date.index[-50]
+            # if not end:
+            #     end = self.ohlc_data[currencyPair].date.index[-1]
 
             # Faster method
             # data = []
@@ -144,7 +145,11 @@ class PaperTradingDataFeed(object):
         return self.tapi.returnCurrencies()
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
-        return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+        try:
+            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+
+        except PoloniexError("Invalid json response returned"):
+            raise ValueError("Bad exchange response data.")
 
 
 class TradingEnvironment(Env):
@@ -473,14 +478,16 @@ class TradingEnvironment(Env):
         try:
             obs_list = []
             keys = []
-
+            is_bounded = True
             if not end:
                 end = self.timestamp
+                is_bounded = False
             if not start:
                 start = self.timestamp - timedelta(minutes=self.period * self.obs_steps)
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
                                       freq="%dT" % self.period).floor("%dT" % self.period)[-self.obs_steps:]
+                is_bounded = False
             else:
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
@@ -501,7 +508,8 @@ class TradingEnvironment(Env):
                 cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
                 obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
-                assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+                if not is_bounded:
+                    assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
                 return obs
 
@@ -513,10 +521,10 @@ class TradingEnvironment(Env):
 
                 obs = pd.concat(obs_list, keys=keys, axis=1)
 
-                assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+                if not is_bounded:
+                    assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
                 return obs
-
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -683,23 +691,23 @@ class TradingEnvironment(Env):
             self.log_action(timestamp, symbol, vector[i])
         self.log_action(timestamp, 'online', online)
 
-    def get_previous_portval(self):
+    def get_last_portval(self):
         try:
             return self.portfolio_df.get_value(self.portfolio_df['portval'].last_valid_index(), 'portval')
         except Exception as e:
-            self.logger.error(TradingEnvironment.get_previous_portval, self.parse_error(e))
+            self.logger.error(TradingEnvironment.get_last_portval, self.parse_error(e))
             raise e
 
     def get_reward(self):
         # TODO TEST
         try:
-            return self.portval / self.get_previous_portval()
+            return self.portval / self.get_last_portval()
 
         except DivisionByZero:
-            return self.portval / (self.get_previous_portval() + self.epsilon)
+            return self.portval / (self.get_last_portval() + self.epsilon)
 
         except InvalidOperation:
-            return self.portval / (self.get_previous_portval() + self.epsilon)
+            return self.portval / (self.get_last_portval() + self.epsilon)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
@@ -831,7 +839,14 @@ class TradingEnvironment(Env):
             fig.yaxis.axis_label_text_color = "whitesmoke"
             fig.yaxis.major_label_text_color = "whitesmoke"
             fig.xaxis.major_label_orientation = np.pi / 4
-            fig.grid.grid_line_alpha = 0.3
+            fig.grid.grid_line_alpha = 0.1
+            fig.grid.grid_line_dash = [6, 4]
+            if hasattr(fig, 'legend'):
+                fig.legend.text_font_style = 'bold'
+                fig.legend.text_color = 'black'
+                fig.legend.click_policy="hide"
+            # fig.hover.tooltips = [('index', '$index'),
+            #                       ("(x,y)", "($x, $y)")]
 
         df = self.get_results().astype(np.float64)
 
@@ -839,12 +854,27 @@ class TradingEnvironment(Env):
         results = {}
 
         # Position
+        pos_hover = HoverTool(
+            tooltips=[
+                ('date', '<span style="color: #000000;">@x{%F, %H:%M}</span>'),
+                ('position', '<span style="color: #000000;">@y{%f}</span>'),
+                ],
+
+            formatters={
+                'x': 'datetime',  # use 'datetime' formatter for 'date' field
+                'y': 'printf',  # use 'printf' formatter for 'adj close' field
+                },
+
+            # display a tooltip whenever the cursor is vertically in line with a glyph
+            mode='vline'
+            )
+
         p_pos = figure(title="Position over time",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
                        plot_width=800, plot_height=400,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
         config_fig(p_pos)
@@ -855,12 +885,27 @@ class TradingEnvironment(Env):
             results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i], legend=symbol)
 
         # Portifolio and benchmark values
+        val_hover = HoverTool(
+            tooltips=[
+                ('date', '<span style="color: #000000;">@x{%F, %H:%M}</span>'),
+                ('close', '<span style="color: #000000;">$@y{%0.2f}</span>'),
+                ],
+
+            formatters={
+                'x': 'datetime',  # use 'datetime' formatter for 'date' field
+                'y': 'printf',  # use 'printf' formatter for 'adj close' field
+                },
+
+            # display a tooltip whenever the cursor is vertically in line with a glyph
+            mode='vline'
+            )
+
         p_val = figure(title="Portifolio / Benchmark Value",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
                        plot_width=800, plot_height=400,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
         config_fig(p_val)
@@ -874,7 +919,7 @@ class TradingEnvironment(Env):
                        x_axis_label='timestep',
                        y_axis_label='Returns',
                        plot_width=800, plot_height=200,
-                       tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                       tools=['crosshair','reset','xwheel_zoom','pan,box_zoom'],
                        toolbar_location="above"
                        )
         config_fig(p_ret)
@@ -886,7 +931,7 @@ class TradingEnvironment(Env):
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
                         plot_width=800, plot_height=300,
-                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
         config_fig(p_hist)
@@ -902,7 +947,7 @@ class TradingEnvironment(Env):
                          x_axis_label='timestep',
                          y_axis_label='alpha',
                          plot_width=800, plot_height=200,
-                         tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                          toolbar_location="above"
                          )
         config_fig(p_alpha)
@@ -915,7 +960,7 @@ class TradingEnvironment(Env):
                         x_axis_label='timestep',
                         y_axis_label='beta',
                         plot_width=800, plot_height=200,
-                        tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                        tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
         config_fig(p_beta)
@@ -928,7 +973,7 @@ class TradingEnvironment(Env):
                       x_axis_label='timestep',
                       y_axis_label='drawdown',
                       plot_width=800, plot_height=200,
-                      tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                      tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                       toolbar_location="above"
                       )
         config_fig(p_dd)
@@ -941,7 +986,7 @@ class TradingEnvironment(Env):
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
                           plot_width=800, plot_height=200,
-                          tools='crosshair,hover,reset,xwheel_zoom,pan,box_zoom',
+                          tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                           toolbar_location="above"
                           )
         config_fig(p_sharpe)

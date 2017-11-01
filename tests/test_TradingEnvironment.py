@@ -9525,7 +9525,7 @@ def data_feed():
     yield df
 
 
-# Tests
+# ENVIRONMENT TESTS
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
 
@@ -9572,7 +9572,7 @@ def test_get_ohlc(ready_env):
             assert isinstance(df, pd.DataFrame)
             assert df.shape[0] == env.obs_steps
             assert list(df.columns) == ['open','high','low','close','volume']
-            # assert df.index.freqstr == '%dT' % env.period
+            assert df.index.freqstr == '%dT' % env.period
 
 def test_get_symbol_history(ready_env):
     env = ready_env
@@ -9591,7 +9591,7 @@ def test_get_history(ready_env):
     assert df.shape[0] == env.obs_steps
     assert set(df.columns.levels[0]) == set(env.pairs)
     assert list(df.columns.levels[1]) == ['open', 'high', 'low', 'close', 'volume']
-    # assert df.index.freqstr == '%dT' % env.period
+    assert df.index.freqstr == '%dT' % env.period
     assert type(df.values.all()) == Decimal
 
     for data in tapi.returnChartData()[:-env.obs_steps]:
@@ -9730,13 +9730,14 @@ def test_get_previous_portval(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
     with pytest.raises(KeyError):
-        portval = env.get_previous_portval()
+        portval = env.get_last_portval()
 
     env.portval = 10
-    portval = env.get_previous_portval()
+    portval = env.get_last_portval()
     assert portval == Decimal('10')
 
 def test_get_sampled_portfolio(ready_env):
+    # TODO: WRITE TEST
     env = ready_env
     env.reset()
 
@@ -9780,8 +9781,6 @@ class Test_env_reset(object):
         assert list(self.env.balance.keys()) == list(self.env.symbols)
         for symbol in self.env.balance:
             assert isinstance(self.env.balance[symbol], Decimal)
-        # Assert action_vetor
-        # assert self.env.action_vector == list(self.env.symbols)
 
 def test_get_reward(ready_env):
     env = ready_env
@@ -9794,10 +9793,11 @@ def test_get_reward(ready_env):
     env.portval = env.calc_total_portval()
     env.fiat = Decimal('10')
     r = env.get_reward()
-    assert r == Decimal('9.00000000')
+    assert r == Decimal('10.00000000')
 
 @pytest.mark.incremental
 class Test_env_step(object):
+    # TODO: CHECK THIS TEST
     @classmethod
     @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
     def setup_class(cls):
@@ -9849,7 +9849,6 @@ class Test_env_step(object):
         action = array_softmax(action)
         obs, reward, done, status = self.env.step(action)
 
-
         # Assert returned obs
         assert isinstance(obs, pd.DataFrame)
         assert obs.shape[0] == self.env.obs_steps
@@ -9867,6 +9866,8 @@ class Test_env_step(object):
         for key in status:
             assert status[key] == False
 
+
+# DATA FEED TESTS
 def test_returnBalances(data_feed):
     balance = data_feed.returnBalances()
     assert isinstance(balance, dict)
