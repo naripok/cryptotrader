@@ -428,7 +428,7 @@ class TradingEnvironment(Env):
             self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
             raise e
 
-    def get_ohlc_from_trades(self, pair, start=None, end=None):
+    def sample_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
         df = self.get_pair_trades(pair, start=start, end=end)
 
@@ -451,17 +451,12 @@ class TradingEnvironment(Env):
 
         return out
 
-    def get_ohlc(self, symbol, start=None, end=None):
+    def get_ohlc(self, symbol, index):
         # TODO WRITE TEST
         # TODO GET INVALID CANDLE TIMES RIGHT
-        if not start:
-            start = self.timestamp - timedelta(minutes=self.period * self.obs_steps)
-        if not end:
-            end = self.timestamp
 
-        index = pd.date_range(start=start.astimezone(timezone.utc).astimezone(timezone.utc),
-                              end=end.astimezone(timezone.utc).astimezone(timezone.utc),
-                              freq="%dT" % self.period, utc=True, closed='right').floor("%dT" % self.period)
+        start = index[0]
+        end = index[-1]
 
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
@@ -474,72 +469,54 @@ class TradingEnvironment(Env):
         return ohlc_df[['open','high','low','close',
                         'volume']].reindex(index).apply(convert_and_clean)
 
-    def get_pair_history(self, pair, start=None, end=None):
-        """
-        Pools symbol's trade data from exchange api
-        """
-        try:
-            if self.period < 5:
-                df = self.get_ohlc_from_trades(pair)
-            else:
-                df = self.get_ohlc(pair, start=start, end=end)
-
-            if not start and not end:
-                # If df is large enough, return
-                while not df.shape[0] >= self.obs_steps:
-                    sleep(int(self.period / 4))
-                    print("Insufficient data", df.shape, df.index[0], df.index[-1])
-                    if self.period < 5:
-                        df = self.get_ohlc_from_trades(pair)
-                    else:
-                        df = self.get_ohlc(pair, start=start, end=end)
-
-                assert df.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(df.shape)
-                return df.iloc[-self.obs_steps:]
-
-            else:
-                return df
-
-        except Exception as e:
-            self.logger.error(TradingEnvironment.get_pair_history, self.parse_error(e))
-            raise e
-
-    def get_history(self, start=None, end=None, portifolio_vector=False):
+    def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
             obs_list = []
             keys = []
 
-            if portifolio_vector:
-                if not start and not end:
-                    port_vec = self.get_sampled_portfolio(self.timestamp -
-                                                          timedelta(minutes=self.period * (self.obs_steps - 1)),
-                                                          self.timestamp).iloc[-self.obs_steps:]
-                else:
-                    port_vec = self.get_sampled_portfolio(start, end)
+            if not end:
+                end = self.timestamp
+            if not start:
+                start = self.timestamp - timedelta(minutes=self.period * self.obs_steps)
+                index = pd.date_range(start=start.astimezone(timezone.utc),
+                                      end=end.astimezone(timezone.utc),
+                                      freq="%dT" % self.period).floor("%dT" % self.period)[-self.obs_steps:]
+            else:
+                index = pd.date_range(start=start.astimezone(timezone.utc),
+                                      end=end.astimezone(timezone.utc),
+                                      freq="%dT" % self.period).floor("%dT" % self.period)
 
-            for symbol in self.pairs:
-                keys.append(symbol)
-                history = self.get_pair_history(symbol, start=start, end=end)
-
-                if portifolio_vector:
+            if portfolio_vector:
+                port_vec = self.get_sampled_portfolio(index)
+                for symbol in self.pairs:
+                    keys.append(symbol)
+                    history = self.get_ohlc(symbol, index)
                     history = pd.concat([history, port_vec[symbol.split('_')[1]]], axis=1)
-                obs_list.append(history)
-
-            if portifolio_vector:
+                    obs_list.append(history)
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
-            obs = pd.concat(obs_list, keys=keys, axis=1)
+                obs = pd.concat(obs_list, keys=keys, axis=1)
 
-            if not start and not end:
-                obs = obs.iloc[-self.obs_steps:]
-
-            if portifolio_vector:
                 cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
+                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
-                obs = obs.ffill().fillna(obs[cols_to_bfill].bfill())
+                assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-            return obs
+                return obs
+
+            else:
+                for symbol in self.pairs:
+                    keys.append(symbol)
+                    history = self.get_ohlc(symbol, index)
+                    obs_list.append(history)
+
+                obs = pd.concat(obs_list, keys=keys, axis=1)
+
+                assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+
+                return obs
+
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -547,12 +524,14 @@ class TradingEnvironment(Env):
 
     def get_observation(self, portfolio_vector=False):
         try:
-            self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
+            self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
+
         except PoloniexError:
-            sleep(1)
-            self.obs_df = self.get_history(portifolio_vector=portfolio_vector)
+            sleep(int(self.period * 30))
+            self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
+
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
             raise e
@@ -589,7 +568,6 @@ class TradingEnvironment(Env):
             return self.obs_df.get_value(self.obs_df.index[-1], ("%s_%s" % (self._fiat, symbol), 'close'))
         elif isinstance(timestamp, pd.Timestamp):
             return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
-
 
     def calc_total_portval(self, timestamp=None):
         portval = convert_to.decimal('0.0')
@@ -767,19 +745,27 @@ class TradingEnvironment(Env):
         return obs.astype(np.float64)
 
     ## Analytics methods
-    def get_sampled_portfolio(self, start=None, end=None):
-        if not start:
-            start = self.portfolio_df.index[-1]
-        if not end:
+    def get_sampled_portfolio(self, index=None):
+        if index is None:
             start = self.portfolio_df.index[0]
+            end = self.portfolio_df.index[-1]
+
+        else:
+            start = index[0]
+            end = index[-1]
+
         # TODO 1 FIND A BETTER WAY
         return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_sampled_actions(self, start=None, end=None):
-        if not start:
-            start = self.portfolio_df.index[-1]
-        if not end:
+    def get_sampled_actions(self, index=None):
+        if index is None:
             start = self.portfolio_df.index[0]
+            end = self.portfolio_df.index[-1]
+
+        else:
+            start = index[0]
+            end = index[-1]
+
         # TODO 1 FIND A BETTER WAY
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 

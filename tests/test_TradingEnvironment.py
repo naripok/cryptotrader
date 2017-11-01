@@ -9736,26 +9736,42 @@ def test_get_previous_portval(ready_env):
     portval = env.get_previous_portval()
     assert portval == Decimal('10')
 
+def test_get_sampled_portfolio(ready_env):
+    env = ready_env
+    env.reset()
+
+    assert env.get_sampled_portfolio().shape == (1, 4)
+
 class Test_env_reset(object):
     @classmethod
+    @mock.patch.object(TradingEnvironment, 'timestamp',
+                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
     def setup_class(cls):
-        cls.env = TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
-        cls.env.add_pairs("USDT_BTC", "USDT_ETH")
-        cls.env.fiat = "USDT"
+        with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+            mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
+            mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            cls.env = TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+            cls.env.add_pairs("USDT_BTC", "USDT_ETH")
+            cls.env.fiat = "USDT"
 
     @classmethod
     def teardown_class(cls):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
+    @mock.patch.object(TradingEnvironment, 'timestamp',
+                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
     def test_reset(self):
         obs = self.env.reset()
+
         # Assert observation
         assert isinstance(self.env.obs_df, pd.DataFrame) and self.env.obs_df.shape[0] == self.env.obs_steps
         assert isinstance(obs, pd.DataFrame) and obs.shape[0] == self.env.obs_steps
         # Assert taxes
         assert list(self.env.tax.keys()) == self.env.symbols
         # Assert portfolio log
-        assert isinstance(self.env.portfolio_df, pd.DataFrame) and self.env.portfolio_df.shape[0] == 2
+        assert isinstance(self.env.portfolio_df, pd.DataFrame) and self.env.portfolio_df.shape[0] == 1
         assert list(self.env.portfolio_df.columns) == list(self.env.symbols) + ['portval']
         # Assert action log
         assert isinstance(self.env.action_df, pd.DataFrame) and self.env.action_df.shape[0] == 1
