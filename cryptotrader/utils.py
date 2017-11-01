@@ -112,6 +112,9 @@ def simplex_proj(y):
 
     return np.maximum(y - tmax, 0.)
 
+def running_mean(x, N):
+    cumsum = np.cumsum(np.insert(x, 0, 0))
+    return (cumsum[N:] - cumsum[:-N]) / N
 
 class convert_to(object):
     _quantizer = Decimal('0E-8')

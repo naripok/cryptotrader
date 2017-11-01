@@ -16,6 +16,249 @@ from decimal import Decimal
 from poloniex import Poloniex
 from datetime import datetime, timezone
 
+chart_data = [{'close': '5722.8374746',
+  'date': 1507981800,
+  'high': 5758,
+  'low': '5721.4242596',
+  'open': '5756.00000001',
+  'quoteVolume': '38.16456236',
+  'volume': '219195.86287692',
+  'weightedAverage': '5743.43970747'},
+ {'close': 5715,
+  'date': 1507982100,
+  'high': '5728.75345933',
+  'low': '5700.10000001',
+  'open': '5723.83747461',
+  'quoteVolume': '21.43616015',
+  'volume': '122496.25349716',
+  'weightedAverage': '5714.46810622'},
+ {'close': '5717.84620499',
+  'date': 1507982400,
+  'high': '5736.99999946',
+  'low': 5715,
+  'open': '5715.39990234',
+  'quoteVolume': '15.67109131',
+  'volume': '89703.63551938',
+  'weightedAverage': '5724.14733249'},
+ {'close': '5721.00999999',
+  'date': 1507982700,
+  'high': '5721.00999999',
+  'low': 5715,
+  'open': '5721.00999969',
+  'quoteVolume': '10.19975977',
+  'volume': '58300.80546675',
+  'weightedAverage': '5715.89986248'},
+ {'close': '5705.00000001',
+  'date': 1507983000,
+  'high': '5720.99999994',
+  'low': 5705,
+  'open': '5715.20000012',
+  'quoteVolume': '17.79753329',
+  'volume': '101711.43959931',
+  'weightedAverage': '5714.91778899'},
+ {'close': '5730.99724621',
+  'date': 1507983300,
+  'high': '5730.99724621',
+  'low': '5705.00000001',
+  'open': '5705.00000001',
+  'quoteVolume': '2.83275905',
+  'volume': '16189.38325546',
+  'weightedAverage': '5715.0583476'},
+ {'close': '5720.00000003',
+  'date': 1507983600,
+  'high': '5728.97099997',
+  'low': '5720.00000003',
+  'open': 5721,
+  'quoteVolume': '3.25510203',
+  'volume': '18631.20293707',
+  'weightedAverage': '5723.69245736'},
+ {'close': '5728.52869267',
+  'date': 1507983900,
+  'high': '5730.49',
+  'low': '5720.00000006',
+  'open': '5720.00000006',
+  'quoteVolume': '6.7754652',
+  'volume': '38808.94737984',
+  'weightedAverage': '5727.86461656'},
+ {'close': '5721.00000085',
+  'date': 1507984200,
+  'high': '5732.971',
+  'low': '5721.00000047',
+  'open': '5730.49',
+  'quoteVolume': '14.13881708',
+  'volume': '81017.96465762',
+  'weightedAverage': '5730.17984455'},
+ {'close': 5690,
+  'date': 1507984500,
+  'high': '5726.85189438',
+  'low': 5690,
+  'open': '5726.85189438',
+  'quoteVolume': '21.97791221',
+  'volume': '125473.09858425',
+  'weightedAverage': '5709.05449914'},
+ {'close': '5665.99999999',
+  'date': 1507984800,
+  'high': '5699.2661659',
+  'low': 5660,
+  'open': '5699.2661659',
+  'quoteVolume': '26.7747043',
+  'volume': '152008.12385769',
+  'weightedAverage': '5677.30355317'},
+ {'close': '5685.00000016',
+  'date': 1507985100,
+  'high': '5691.76100997',
+  'low': 5670,
+  'open': '5672.99999977',
+  'quoteVolume': '10.1592388',
+  'volume': '57674.00463223',
+  'weightedAverage': '5677.00058711'},
+ {'close': '5680.98999995',
+  'date': 1507985400,
+  'high': '5691.76100991',
+  'low': '5675.00000125',
+  'open': '5685.00000022',
+  'quoteVolume': '29.57676825',
+  'volume': '168128.51167905',
+  'weightedAverage': '5684.47878611'},
+ {'close': '5679.5',
+  'date': 1507985700,
+  'high': '5691.76100991',
+  'low': '5679.5',
+  'open': '5681.98999998',
+  'quoteVolume': '10.04113599',
+  'volume': '57111.07046297',
+  'weightedAverage': '5687.71008776'},
+ {'close': 5685,
+  'date': 1507986000,
+  'high': '5685.99999969',
+  'low': '5673.97',
+  'open': 5680,
+  'quoteVolume': '2.58602749',
+  'volume': '14691.05065233',
+  'weightedAverage': '5680.93367496'},
+ {'close': '5692.80615285',
+  'date': 1507986300,
+  'high': '5703.49063242',
+  'low': '5685.99999969',
+  'open': '5685.99999969',
+  'quoteVolume': '11.75049566',
+  'volume': '66992.53230552',
+  'weightedAverage': '5701.25161048'},
+ {'close': '5687.91778984',
+  'date': 1507986600,
+  'high': '5702.99999992',
+  'low': '5681.76100991',
+  'open': '5702.99999992',
+  'quoteVolume': '9.56359039',
+  'volume': '54417.83543662',
+  'weightedAverage': '5690.1052029'},
+ {'close': '5691.99999997',
+  'date': 1507986900,
+  'high': '5691.99999997',
+  'low': '5687.9177899',
+  'open': '5687.9177899',
+  'quoteVolume': '5.13402252',
+  'volume': '29221.25205012',
+  'weightedAverage': '5691.68754836'},
+ {'close': 5690,
+  'date': 1507987200,
+  'high': '5699.99999916',
+  'low': '5680.93385299',
+  'open': 5695,
+  'quoteVolume': '7.36502012',
+  'volume': '41915.37814058',
+  'weightedAverage': '5691.14238082'},
+ {'close': 5684,
+  'date': 1507987500,
+  'high': '5690.7186021',
+  'low': 5684,
+  'open': 5690,
+  'quoteVolume': '2.86828958',
+  'volume': '16309.59279157',
+  'weightedAverage': '5686.1737062'},
+ {'close': 5700,
+  'date': 1507987800,
+  'high': 5700,
+  'low': 5678,
+  'open': 5684,
+  'quoteVolume': '4.90342935',
+  'volume': '27893.9761551',
+  'weightedAverage': '5688.66688272'},
+ {'close': '5720.20009007',
+  'date': 1507988100,
+  'high': '5725.99999999',
+  'low': 5700,
+  'open': 5700,
+  'quoteVolume': '16.23376965',
+  'volume': '92723.90055305',
+  'weightedAverage': '5711.79107207'},
+ {'close': '5720.20008978',
+  'date': 1507988400,
+  'high': '5740.08332984',
+  'low': 5712,
+  'open': '5725.99999999',
+  'quoteVolume': '12.47603452',
+  'volume': '71471.15378964',
+  'weightedAverage': '5728.67553989'},
+ {'close': '5705.00000015',
+  'date': 1507988700,
+  'high': '5720.20008958',
+  'low': '5677.0000001',
+  'open': '5720.20008958',
+  'quoteVolume': '14.35443767',
+  'volume': '81649.9256681',
+  'weightedAverage': '5688.13126262'},
+ {'close': 5710,
+  'date': 1507989000,
+  'high': '5718.12149919',
+  'low': 5705,
+  'open': '5705.0000003',
+  'quoteVolume': '18.57752375',
+  'volume': '106126.03254483',
+  'weightedAverage': '5712.60378794'},
+ {'close': '5713.99999996',
+  'date': 1507989300,
+  'high': '5716.99999988',
+  'low': '5705.00000049',
+  'open': '5716.99999988',
+  'quoteVolume': '4.04154916',
+  'volume': '23081.06263128',
+  'weightedAverage': '5710.94442193'},
+ {'close': '5705.00000003',
+  'date': 1507989600,
+  'high': '5713.99999996',
+  'low': 5705,
+  'open': '5713.99999996',
+  'quoteVolume': '6.41122876',
+  'volume': '36611.18277821',
+  'weightedAverage': '5710.47831059'},
+ {'close': 5681,
+  'date': 1507989900,
+  'high': '5706.03269143',
+  'low': 5681,
+  'open': '5705.00000006',
+  'quoteVolume': '15.7181433',
+  'volume': '89617.63445825',
+  'weightedAverage': '5701.54074484'},
+ {'close': '5689.999995',
+  'date': 1507990200,
+  'high': 5690,
+  'low': '5680.59999999',
+  'open': '5689.9999947',
+  'quoteVolume': '2.04388264',
+  'volume': '11625.81528869',
+  'weightedAverage': '5688.10315287'},
+ {'close': '5689.999995',
+  'date': 1507990500,
+  'high': '5689.99999999',
+  'low': 5686,
+  'open': '5689.999995',
+  'quoteVolume': '0.57217633',
+  'volume': '3255.63796966',
+  'weightedAverage': '5689.92074464'}]
+
+indexes = [float(item['date']) + 1e-6 for item in chart_data]
+
 # Mocks
 tapi = mock.Mock(spec=Poloniex)
 tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
@@ -8960,246 +9203,7 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
   'total': '1.61293512',
   'tradeID': 9351356,
   'type': 'buy'}],
-                       'returnChartData.return_value': [{'close': '5722.8374746',
-  'date': 1507981800,
-  'high': 5758,
-  'low': '5721.4242596',
-  'open': '5756.00000001',
-  'quoteVolume': '38.16456236',
-  'volume': '219195.86287692',
-  'weightedAverage': '5743.43970747'},
- {'close': 5715,
-  'date': 1507982100,
-  'high': '5728.75345933',
-  'low': '5700.10000001',
-  'open': '5723.83747461',
-  'quoteVolume': '21.43616015',
-  'volume': '122496.25349716',
-  'weightedAverage': '5714.46810622'},
- {'close': '5717.84620499',
-  'date': 1507982400,
-  'high': '5736.99999946',
-  'low': 5715,
-  'open': '5715.39990234',
-  'quoteVolume': '15.67109131',
-  'volume': '89703.63551938',
-  'weightedAverage': '5724.14733249'},
- {'close': '5721.00999999',
-  'date': 1507982700,
-  'high': '5721.00999999',
-  'low': 5715,
-  'open': '5721.00999969',
-  'quoteVolume': '10.19975977',
-  'volume': '58300.80546675',
-  'weightedAverage': '5715.89986248'},
- {'close': '5705.00000001',
-  'date': 1507983000,
-  'high': '5720.99999994',
-  'low': 5705,
-  'open': '5715.20000012',
-  'quoteVolume': '17.79753329',
-  'volume': '101711.43959931',
-  'weightedAverage': '5714.91778899'},
- {'close': '5730.99724621',
-  'date': 1507983300,
-  'high': '5730.99724621',
-  'low': '5705.00000001',
-  'open': '5705.00000001',
-  'quoteVolume': '2.83275905',
-  'volume': '16189.38325546',
-  'weightedAverage': '5715.0583476'},
- {'close': '5720.00000003',
-  'date': 1507983600,
-  'high': '5728.97099997',
-  'low': '5720.00000003',
-  'open': 5721,
-  'quoteVolume': '3.25510203',
-  'volume': '18631.20293707',
-  'weightedAverage': '5723.69245736'},
- {'close': '5728.52869267',
-  'date': 1507983900,
-  'high': '5730.49',
-  'low': '5720.00000006',
-  'open': '5720.00000006',
-  'quoteVolume': '6.7754652',
-  'volume': '38808.94737984',
-  'weightedAverage': '5727.86461656'},
- {'close': '5721.00000085',
-  'date': 1507984200,
-  'high': '5732.971',
-  'low': '5721.00000047',
-  'open': '5730.49',
-  'quoteVolume': '14.13881708',
-  'volume': '81017.96465762',
-  'weightedAverage': '5730.17984455'},
- {'close': 5690,
-  'date': 1507984500,
-  'high': '5726.85189438',
-  'low': 5690,
-  'open': '5726.85189438',
-  'quoteVolume': '21.97791221',
-  'volume': '125473.09858425',
-  'weightedAverage': '5709.05449914'},
- {'close': '5665.99999999',
-  'date': 1507984800,
-  'high': '5699.2661659',
-  'low': 5660,
-  'open': '5699.2661659',
-  'quoteVolume': '26.7747043',
-  'volume': '152008.12385769',
-  'weightedAverage': '5677.30355317'},
- {'close': '5685.00000016',
-  'date': 1507985100,
-  'high': '5691.76100997',
-  'low': 5670,
-  'open': '5672.99999977',
-  'quoteVolume': '10.1592388',
-  'volume': '57674.00463223',
-  'weightedAverage': '5677.00058711'},
- {'close': '5680.98999995',
-  'date': 1507985400,
-  'high': '5691.76100991',
-  'low': '5675.00000125',
-  'open': '5685.00000022',
-  'quoteVolume': '29.57676825',
-  'volume': '168128.51167905',
-  'weightedAverage': '5684.47878611'},
- {'close': '5679.5',
-  'date': 1507985700,
-  'high': '5691.76100991',
-  'low': '5679.5',
-  'open': '5681.98999998',
-  'quoteVolume': '10.04113599',
-  'volume': '57111.07046297',
-  'weightedAverage': '5687.71008776'},
- {'close': 5685,
-  'date': 1507986000,
-  'high': '5685.99999969',
-  'low': '5673.97',
-  'open': 5680,
-  'quoteVolume': '2.58602749',
-  'volume': '14691.05065233',
-  'weightedAverage': '5680.93367496'},
- {'close': '5692.80615285',
-  'date': 1507986300,
-  'high': '5703.49063242',
-  'low': '5685.99999969',
-  'open': '5685.99999969',
-  'quoteVolume': '11.75049566',
-  'volume': '66992.53230552',
-  'weightedAverage': '5701.25161048'},
- {'close': '5687.91778984',
-  'date': 1507986600,
-  'high': '5702.99999992',
-  'low': '5681.76100991',
-  'open': '5702.99999992',
-  'quoteVolume': '9.56359039',
-  'volume': '54417.83543662',
-  'weightedAverage': '5690.1052029'},
- {'close': '5691.99999997',
-  'date': 1507986900,
-  'high': '5691.99999997',
-  'low': '5687.9177899',
-  'open': '5687.9177899',
-  'quoteVolume': '5.13402252',
-  'volume': '29221.25205012',
-  'weightedAverage': '5691.68754836'},
- {'close': 5690,
-  'date': 1507987200,
-  'high': '5699.99999916',
-  'low': '5680.93385299',
-  'open': 5695,
-  'quoteVolume': '7.36502012',
-  'volume': '41915.37814058',
-  'weightedAverage': '5691.14238082'},
- {'close': 5684,
-  'date': 1507987500,
-  'high': '5690.7186021',
-  'low': 5684,
-  'open': 5690,
-  'quoteVolume': '2.86828958',
-  'volume': '16309.59279157',
-  'weightedAverage': '5686.1737062'},
- {'close': 5700,
-  'date': 1507987800,
-  'high': 5700,
-  'low': 5678,
-  'open': 5684,
-  'quoteVolume': '4.90342935',
-  'volume': '27893.9761551',
-  'weightedAverage': '5688.66688272'},
- {'close': '5720.20009007',
-  'date': 1507988100,
-  'high': '5725.99999999',
-  'low': 5700,
-  'open': 5700,
-  'quoteVolume': '16.23376965',
-  'volume': '92723.90055305',
-  'weightedAverage': '5711.79107207'},
- {'close': '5720.20008978',
-  'date': 1507988400,
-  'high': '5740.08332984',
-  'low': 5712,
-  'open': '5725.99999999',
-  'quoteVolume': '12.47603452',
-  'volume': '71471.15378964',
-  'weightedAverage': '5728.67553989'},
- {'close': '5705.00000015',
-  'date': 1507988700,
-  'high': '5720.20008958',
-  'low': '5677.0000001',
-  'open': '5720.20008958',
-  'quoteVolume': '14.35443767',
-  'volume': '81649.9256681',
-  'weightedAverage': '5688.13126262'},
- {'close': 5710,
-  'date': 1507989000,
-  'high': '5718.12149919',
-  'low': 5705,
-  'open': '5705.0000003',
-  'quoteVolume': '18.57752375',
-  'volume': '106126.03254483',
-  'weightedAverage': '5712.60378794'},
- {'close': '5713.99999996',
-  'date': 1507989300,
-  'high': '5716.99999988',
-  'low': '5705.00000049',
-  'open': '5716.99999988',
-  'quoteVolume': '4.04154916',
-  'volume': '23081.06263128',
-  'weightedAverage': '5710.94442193'},
- {'close': '5705.00000003',
-  'date': 1507989600,
-  'high': '5713.99999996',
-  'low': 5705,
-  'open': '5713.99999996',
-  'quoteVolume': '6.41122876',
-  'volume': '36611.18277821',
-  'weightedAverage': '5710.47831059'},
- {'close': 5681,
-  'date': 1507989900,
-  'high': '5706.03269143',
-  'low': 5681,
-  'open': '5705.00000006',
-  'quoteVolume': '15.7181433',
-  'volume': '89617.63445825',
-  'weightedAverage': '5701.54074484'},
- {'close': '5689.999995',
-  'date': 1507990200,
-  'high': 5690,
-  'low': '5680.59999999',
-  'open': '5689.9999947',
-  'quoteVolume': '2.04388264',
-  'volume': '11625.81528869',
-  'weightedAverage': '5688.10315287'},
- {'close': '5689.999995',
-  'date': 1507990500,
-  'high': '5689.99999999',
-  'low': 5686,
-  'open': '5689.999995',
-  'quoteVolume': '0.57217633',
-  'volume': '3255.63796966',
-  'weightedAverage': '5689.92074464'}],
+                       'returnChartData.return_value': chart_data,
                        'returnBalances.return_value': {'1CR': '0.00000000',
  'ABY': '0.00000000',
  'AC': '0.00000000',
@@ -9505,11 +9509,13 @@ def fresh_env():
 @pytest.fixture
 def ready_env():
     with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
-        mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+        # mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+        mock_datetime.now.return_value = datetime.fromtimestamp(np.choose(np.random.randint(low=10, high=len(indexes)),
+                                                                          indexes)).astimezone(timezone.utc)
         mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
         mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-        env = TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+        env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
         env.add_pairs("USDT_BTC", "USDT_ETH")
         env.fiat = "USDT"
         env.balance = env.get_balance()
@@ -9532,7 +9538,7 @@ def test_env_name(fresh_env):
 class Test_env_setup(object):
     @classmethod
     def setup_class(cls):
-        cls.env = TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+        cls.env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
 
     @classmethod
     def teardown_class(cls):
@@ -9568,21 +9574,11 @@ def test_get_ohlc(ready_env):
     env = ready_env
     for data in tapi.returnChartData()[:-env.obs_steps]:
         for pair in env.pairs:
-            df = env.get_ohlc(pair, end=datetime.fromtimestamp(data['date']))
+            df = env.get_ohlc(pair, index=pd.date_range(end=data['date'], freq="%dT" % env.period, periods=env.obs_steps))
             assert isinstance(df, pd.DataFrame)
             assert df.shape[0] == env.obs_steps
             assert list(df.columns) == ['open','high','low','close','volume']
             assert df.index.freqstr == '%dT' % env.period
-
-def test_get_symbol_history(ready_env):
-    env = ready_env
-    for data in tapi.returnChartData()[:-env.obs_steps]:
-        for pair in env.pairs:
-            df = env.get_pair_history(pair, end=datetime.fromtimestamp(data['date']))
-            assert isinstance(df, pd.DataFrame)
-            assert df.shape[0] == env.obs_steps
-            assert list(df.columns) == ['open', 'high', 'low', 'close', 'volume']
-            # assert df.index.freqstr == '%dT' % env.period
 
 def test_get_history(ready_env):
     env = ready_env
@@ -9690,10 +9686,10 @@ def test_get_close_price(ready_env):
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
 
-    for i in range(env.obs_df.shape[0]):
-        price = env.get_close_price("BTC", env.obs_df.index[i])
+    for i in env.obs_df.index:
+        price = env.get_close_price("BTC", i)
         assert isinstance(price, Decimal)
-        assert price == env.obs_df["USDT_BTC"].close.iloc[i]
+        assert price == env.obs_df["USDT_BTC"].close.loc[i]
 
 def test_get_fee(ready_env):
     env = ready_env
@@ -9743,17 +9739,35 @@ def test_get_sampled_portfolio(ready_env):
 
     assert env.get_sampled_portfolio().shape == (1, 4)
 
+def test_get_reward(ready_env):
+    env = ready_env
+    env.reset()
+    r = env.get_reward()
+    assert isinstance(r, Decimal)
+    assert r == Decimal('0.0')
+
+    n_tests = 100
+    for i, j in zip(np.random.random(n_tests), np.random.random(n_tests)):
+        # env.reset()
+        env.fiat = Decimal(i)
+        env.portval = env.calc_total_portval()
+        env.fiat = Decimal(j)
+        r = env.get_reward()
+        assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
+
+
+index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):
     @classmethod
     @mock.patch.object(TradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     def setup_class(cls):
         with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+            mock_datetime.now.return_value = datetime.fromtimestamp(index).astimezone(timezone.utc)
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-            cls.env = TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+            cls.env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
             cls.env.add_pairs("USDT_BTC", "USDT_ETH")
             cls.env.fiat = "USDT"
 
@@ -9762,7 +9776,7 @@ class Test_env_reset(object):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
     @mock.patch.object(TradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     def test_reset(self):
         obs = self.env.reset()
 
@@ -9782,31 +9796,20 @@ class Test_env_reset(object):
         for symbol in self.env.balance:
             assert isinstance(self.env.balance[symbol], Decimal)
 
-def test_get_reward(ready_env):
-    env = ready_env
-    env.reset()
-    r = env.get_reward()
-    assert isinstance(r, Decimal)
-    assert r == Decimal('0.0')
 
-    env.fiat = Decimal('1')
-    env.portval = env.calc_total_portval()
-    env.fiat = Decimal('10')
-    r = env.get_reward()
-    assert r == Decimal('10.00000000')
-
+index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 @pytest.mark.incremental
 class Test_env_step(object):
     # TODO: CHECK THIS TEST
     @classmethod
-    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+    @mock.patch.object(PaperTradingEnvironment, 'timestamp', datetime.fromtimestamp(index).astimezone(timezone.utc))
     def setup_class(cls):
         with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc)
+            mock_datetime.now.return_value = datetime.fromtimestamp(index).astimezone(timezone.utc)
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-            cls.env = PaperTradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
             cls.env.add_pairs("USDT_BTC", "USDT_ETH")
             cls.env.fiat = "USDT"
             cls.env.reset()
@@ -9839,7 +9842,7 @@ class Test_env_step(object):
                         self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
     @mock.patch.object(PaperTradingEnvironment, 'timestamp',
-                       datetime.fromtimestamp(1507990500.000000).astimezone(timezone.utc))
+                       datetime.fromtimestamp(index).astimezone(timezone.utc))
     @given(arrays(dtype=np.float32,
                   shape=(3,),
                   elements=st.floats(allow_nan=False, allow_infinity=False, max_value=1e8, min_value=0)))

@@ -5,7 +5,7 @@ import pandas as pd
 from time import time
 
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
-from ..utils import convert_to
+from ..utils import convert_to, running_mean
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
@@ -201,9 +201,11 @@ def make_dfs(process_idx, files, demo=False, freq=30):
 
 def convert_and_clean(x):
     # x = x.apply(convert_to.decimal)
-    f = x.rolling(5, center=True, min_periods=1).mean()#.apply(convert_to.decimal)
+    # f = x.rolling(5, center=True, min_periods=1).mean()#.apply(convert_to.decimal)
     # x = x.apply(lambda x: x if x.is_finite() else np.nan)
-    return x.combine_first(f).transform(convert_to.decimal)
+    # f = running_mean()
+    # return x.combine_first(f).transform(convert_to.decimal)
+    return x.apply(convert_to.decimal, raw=True).ffill()
 
 
 def sample_trades(df, freq):
