@@ -732,18 +732,18 @@ class TradingEnvironment(Env):
 
     def get_reward(self):
         # TODO TEST
-        try:
-            return self.portval / self.get_last_portval()
+        # try:
+        return self.portval / (self.get_last_portval() + self.epsilon)
 
-        except DivisionByZero:
-            return self.portval / (self.get_last_portval() + self.epsilon)
+        # except DivisionByZero:
+        #     return self.portval / (self.get_last_portval() + self.epsilon)
+        #
+        # except InvalidOperation:
+        #     return self.portval / (self.get_last_portval() + self.epsilon)
 
-        except InvalidOperation:
-            return self.portval / (self.get_last_portval() + self.epsilon)
-
-        except Exception as e:
-            self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
-            raise e
+        # except Exception as e:
+        #     self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
+        #     raise e
 
     ## Env methods
     def set_observation_space(self):
