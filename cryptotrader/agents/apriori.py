@@ -259,13 +259,16 @@ class APrioriAgent(Agent):
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
-            last_action_time = datetime.utcnow() - timedelta(minutes=env.period)
+            last_action_time = env.timestamp
+            last_action_time -= timedelta(minutes=last_action_time.minute % env.period,
+                                          seconds=last_action_time.second,
+                                          microseconds=last_action_time.microsecond)
             can_act = True
             while True:
                 try:
-                    loop_time = datetime.utcnow()
+                    loop_time = env.timestamp
                     if loop_time >= last_action_time + timedelta(minutes=env.period) and \
-                                            datetime.utcnow().minute % env.period == 0:
+                                            loop_time.minute % env.period == 0:
                         can_act = True
 
                     if can_act:
@@ -275,10 +278,10 @@ class APrioriAgent(Agent):
 
                         if done:
                             self.step += 1
-                            t = datetime.utcnow()
-                            last_action_time = t - timedelta(minutes=t.minute % env.period,
-                                                             seconds=t.second,
-                                                             microseconds=t.microsecond)
+                            last_action_time = env.timestamp
+                            last_action_time -= timedelta(minutes=last_action_time.minute % env.period,
+                                                             seconds=last_action_time.second,
+                                                             microseconds=last_action_time.microsecond)
                             can_act = False
 
                     else:
@@ -292,16 +295,16 @@ class APrioriAgent(Agent):
                             ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}{5}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
-                                [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
+                                ["%.08f" % obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
                                 env.calc_total_portval(),
                                 env.action_df.iloc[-1].astype('f').to_dict(),
                                 "                                                                                       "
                             ), end="\r", flush=True)
 
                     if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        # e = status['Error']
+                        # print("Env error:",
+                        #       type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
 
                     sleep(10)
