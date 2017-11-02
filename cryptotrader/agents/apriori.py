@@ -292,7 +292,7 @@ class APrioriAgent(Agent):
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}{5}".format(
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Last action: {4}, Portval: {3:.2f}{5}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
                                 ["%s: %.08f" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close'))) for symbol in env.pairs],
