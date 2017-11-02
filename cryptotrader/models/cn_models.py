@@ -8,6 +8,7 @@ from chainer import initializer
 from chainer.initializers import Normal
 
 from time import time
+import pandas as pd
 
 eps = 1e-8
 
@@ -185,12 +186,15 @@ def get_target(obs):
         target[0, i] = np.expand_dims(obs[j + 3] / (obs[j] + 1e-8) - 1., -1)
     return target
 
-def make_batch(env, batch_size):
+def make_train_batch(env, batch_size):
     obs_batch = []
     target_batch = []
     for i in range(batch_size):
         # Choose some random index
         env.index = np.random.randint(high=env.data_length, low=env.obs_steps)
+        # Give us some cash
+        env.portfolio_df = pd.DataFrame()
+        env.balance = env.init_balance
         # Get obs and target and append it to their batches
         obs = env.get_observation(True).astype(np.float32).values
         xp = chainer.cuda.get_array_module(obs)
@@ -218,7 +222,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             if epoch % lr_decay_period == 0:
                 optimizer.hyperparam.alpha /= 2
 
-            obs_batch, target_train = make_batch(env, batch_size)
+            obs_batch, target_train = make_train_batch(env, batch_size)
 
             prediction_train = nn(obs_batch)
 
@@ -248,7 +252,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
                 test_scores = []
                 print()
                 for j in range(test_epochs):
-                    test_batch, target_test = make_batch(test_env, batch_size)
+                    test_batch, target_test = make_train_batch(test_env, batch_size)
 
                     # Forward the test data
                     prediction_test = nn(test_batch)
