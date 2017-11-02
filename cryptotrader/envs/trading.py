@@ -479,7 +479,22 @@ class TradingEnvironment(Env):
 
 
         return ohlc_df[['open','high','low','close',
-                        'volume']].reindex(index).asfreq("%dT" % self.period).ffill().apply(convert_to.decimal, raw=True)
+                        'volume']].reindex(index).asfreq("%dT" % self.period)
+
+    def get_sampled_portfolio(self, index=None):
+        if index is None:
+            start = self.portfolio_df.index[0]
+            end = self.portfolio_df.index[-1]
+
+        else:
+            start = index[0]
+            end = index[-1]
+
+        # TODO 1 FIND A BETTER WAY
+        if start != end:
+            return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
+        else:
+            return self.portfolio_df.loc[:end].resample("%dmin" % self.period).last()
 
     def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
@@ -493,12 +508,12 @@ class TradingEnvironment(Env):
                 start = end - timedelta(minutes=self.period * self.obs_steps)
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).floor("%dT" % self.period)[-self.obs_steps:]
+                                      freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
                 is_bounded = False
             else:
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).floor("%dT" % self.period)
+                                      freq="%dT" % self.period).ceil("%dT" % self.period)
 
             if portfolio_vector:
                 port_vec = self.get_sampled_portfolio(index)
@@ -513,12 +528,12 @@ class TradingEnvironment(Env):
                 obs = pd.concat(obs_list, keys=keys, axis=1)
 
                 cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
-                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
+                obs = obs.fillna(obs[cols_to_bfill].bfill())
 
                 if not is_bounded:
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs
+                return obs.ffill().apply(convert_to.decimal, raw=True)
             else:
                 for symbol in self.pairs:
                     keys.append(symbol)
@@ -530,7 +545,7 @@ class TradingEnvironment(Env):
                 if not is_bounded:
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs
+                return obs.ffill().apply(convert_to.decimal, raw=True)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -549,6 +564,18 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
             raise e
+
+    def get_sampled_actions(self, index=None):
+        if index is None:
+            start = self.portfolio_df.index[0]
+            end = self.portfolio_df.index[-1]
+
+        else:
+            start = index[0]
+            end = index[-1]
+
+        # TODO 1 FIND A BETTER WAY
+        return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
     def get_balance(self):
         try:
@@ -758,30 +785,6 @@ class TradingEnvironment(Env):
         return obs.astype(np.float64)
 
     ## Analytics methods
-    def get_sampled_portfolio(self, index=None):
-        if index is None:
-            start = self.portfolio_df.index[0]
-            end = self.portfolio_df.index[-1]
-
-        else:
-            start = index[0]
-            end = index[-1]
-
-        # TODO 1 FIND A BETTER WAY
-        return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
-
-    def get_sampled_actions(self, index=None):
-        if index is None:
-            start = self.portfolio_df.index[0]
-            end = self.portfolio_df.index[-1]
-
-        else:
-            start = index[0]
-            end = index[-1]
-
-        # TODO 1 FIND A BETTER WAY
-        return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
-
     def get_results(self, window=3):
         """
         Calculate arbiter desired actions statistics

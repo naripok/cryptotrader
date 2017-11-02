@@ -238,7 +238,7 @@ class TestAgent(APrioriAgent):
         assert obs.shape == self.obs_shape, "Wrong obs shape."
 
         for val in obs.applymap(lambda x: isinstance(x, Decimal) and Decimal.is_finite(x)).all():
-            assert val, ("Non decimal value found in obs.", obs)
+            assert val, ("Non decimal value found in obs.", obs.applymap(lambda x: isinstance(x, Decimal) and Decimal.is_finite(x)).all())
 
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
@@ -262,7 +262,7 @@ class TestAgent(APrioriAgent):
 
             # Reset observations
             env.reset_status()
-            env.reset(reset_dfs=False)
+            env.reset(reset_dfs=True)
 
             # Get max episode length
             if nb_max_episode_steps is None:
@@ -315,6 +315,90 @@ class TestAgent(APrioriAgent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
+
+    def trade(self, env, timeout=None, verbose=False, render=False):
+        """
+        TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
+        """
+
+        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period, env.calc_total_portval()))
+
+        self.fiat = env._fiat
+
+        # Reset env and get initial env
+        env.reset_status()
+        obs = env.reset()
+
+        try:
+            t0 = time()
+            self.step = 0
+            episode_reward = 0
+            action = np.zeros(len(env.symbols))
+            status = env.status
+            last_action_time = datetime.utcnow() - timedelta(minutes=env.period)
+            can_act = True
+            while True:
+                try:
+                    loop_time = datetime.utcnow()
+                    if loop_time >= last_action_time + timedelta(minutes=env.period) and \
+                                            datetime.utcnow().minute % env.period == 0:
+                        can_act = True
+
+                    if can_act:
+                        action = self.rebalance(env.get_observation(True))
+                        obs, reward, done, status = env.step(action)
+                        episode_reward += np.float64(reward)
+
+                        if done:
+                            self.step += 1
+                            t = datetime.utcnow()
+                            last_action_time = t - timedelta(minutes=t.minute % env.period,
+                                                             seconds=t.second,
+                                                             microseconds=t.microsecond)
+                            can_act = False
+
+                    else:
+                        obs = env.get_observation(True).astype(np.float64)
+
+                    if render:
+                        env.render()
+
+                    if verbose:
+                        print(
+                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Portval: {3:.2f}, Last action: {4}{5}".format(
+                                self.step,
+                                str(pd.to_timedelta(time() - t0, unit='s')),
+                                [obs.get_value(obs.index[-1], (symbol, 'close')) for symbol in env.pairs],
+                                env.calc_total_portval(),
+                                env.action_df.iloc[-1].astype('f').to_dict(),
+                                "                                                                                       "
+                            ), end="\r", flush=True)
+
+                    if status['Error']:
+                        e = status['Error']
+                        print("Env error:",
+                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        break
+
+                    sleep(10)
+
+                except Exception as e:
+                    print("\nAgent Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    print(env.timestamp)
+                    print(obs)
+                    print(env.portfolio_df.iloc[-5:])
+                    print(env.action_df.iloc[-5:])
+                    print("Action taken:", action)
+
+                    break
+
+        except KeyboardInterrupt:
+            print("\nKeyboard Interrupt: Stoping cryptotrader" + \
+                  "\nElapsed steps: {0}\nUptime: {1}\nFinal Portval: {2}\n".format(self.step,
+                                                               str(pd.to_timedelta(time() - t0, unit='s')),
+                                                               env.calc_total_portval()))
+
 
 
 class DummyTrader(APrioriAgent):
