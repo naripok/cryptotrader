@@ -90,6 +90,10 @@ class BacktestDataFeed(object):
             #     lambda x: datetime.fromtimestamp(int(x)))
             self.ohlc_data[key].set_index('date', inplace=True, drop=False)
 
+
+        print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
+                                                                (24 * 60), self.period))
+
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
             # assert np.allclose(period, self.period * 60), "Invalid period"
