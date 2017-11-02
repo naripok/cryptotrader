@@ -70,19 +70,29 @@ class BacktestDataFeed(object):
         self.ohlc_data = {}
         self.data_length = None
         for pair in self.pairs:
-            data = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
+            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                start=start, end=end
                                                               ))
-            self.ohlc_data[pair] = data
 
-            if not self.data_length:
-                self.data_length = data.shape[0]
-            else:
-                assert data.shape[0] == self.data_length, (data.shape[0], self.data_length)
+        for key in self.ohlc_data:
+            if not self.data_length or self.ohlc_data[key].shape[0] < self.data_length:
+                self.data_length = self.ohlc_data[key].shape[0]
+
+        for key in self.ohlc_data:
+            if self.ohlc_data[key].shape[0] != self.data_length:
+                self.ohlc_data[key] = pd.DataFrame.from_records(self.tapi.returnChartData(key, period=self.period * 60,
+                                                               start=self.ohlc_data[key].date.iloc[-self.data_length],
+                                                               end=end
+                                                               ))
+
 
             # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
             #     lambda x: datetime.fromtimestamp(int(x)))
-            self.ohlc_data[pair].set_index('date', inplace=True, drop=False)
+            self.ohlc_data[key].set_index('date', inplace=True, drop=False)
+
+
+        print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
+                                                                (24 * 60), self.period))
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
