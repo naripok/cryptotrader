@@ -780,19 +780,9 @@ class TradingEnvironment(Env):
     def reset(self):
         """
         Setup env with initial values
-        :return:
+        :return: pandas DataFrame: observation
         """
-        self.obs_df = pd.DataFrame()
-        self.portfolio_df = pd.DataFrame()
-        self.set_observation_space()
-        self.set_action_space()
-        self.balance = self.init_balance = self.get_balance()
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
-        obs = self.get_observation(True)
-        self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp]))
-        self.portval = self.calc_total_portval(self.obs_df.index[-1])
-        return obs.astype(np.float64)
+        raise NotImplementedError()
 
     ## Analytics methods
     def get_results(self, window=3):
@@ -1094,6 +1084,20 @@ class PaperTradingEnvironment(TradingEnvironment):
     def __init__(self, period, obs_steps, tapi, name):
         super().__init__(period, obs_steps, tapi, name)
 
+    def reset(self):
+        self.obs_df = pd.DataFrame()
+        self.portfolio_df = pd.DataFrame()
+        self.set_observation_space()
+        self.set_action_space()
+        self.balance = self.init_balance = self.get_balance()
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+        obs = self.get_observation(True)
+        self.action_df = self.action_df.append(
+            pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp]))
+        self.portval = self.calc_total_portval(self.obs_df.index[-1])
+        return obs.astype(np.float64)
+
     def simulate_trade(self, action, timestamp):
         try:
             # Assert inputs
@@ -1191,7 +1195,8 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.simulate_trade(action, timestamp)
 
             # Calculate new portval
-            self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
+            self.portval = {'portval': self.calc_total_portval(),
+                            'timestamp': self.portfolio_df.index[-1]}
 
             done = True
 

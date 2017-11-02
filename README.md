@@ -8,16 +8,18 @@ It is under active development and is provided "AS-IS", without any warrants wha
 In order to get started, you will need python and some dependencies:
 
 ```
-Python 3.2+
-numpy
-pandas
-bokeh
-chainer
-optunity
-ta-lib
-empyrical
-jupyter
+- Python 3.6
+- numpy
+- pandas
+- bokeh
+- chainer
+- optunity
+- ta-lib
+- empyrical
+- jupyter
 ```
+
+You also will need ta-lib binaries.
 
 ### Installing
 
