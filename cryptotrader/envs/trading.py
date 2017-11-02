@@ -528,7 +528,7 @@ class TradingEnvironment(Env):
                 obs = pd.concat(obs_list, keys=keys, axis=1)
 
                 cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
-                obs = obs.fillna(obs[cols_to_bfill].bfill())
+                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
                 if not is_bounded:
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
