@@ -6,7 +6,7 @@ from ..utils import *
 import optunity as ot
 import pandas as pd
 import talib as tl
-from decimal import InvalidOperation, DivisionByZero, Decimal
+from decimal import Decimal
 from datetime import timedelta
 
 from scipy.signal import argrelextrema
@@ -58,18 +58,9 @@ class APrioriAgent(Agent):
 
         port_vec = np.zeros(obs.columns.levels[0].shape)
         for i, symbol in enumerate(coin_val):
-            try:
-                port_vec[i] = coin_val[symbol] / portval
-            except DivisionByZero:
-                port_vec[i] = coin_val[symbol] / (portval + self.epsilon)
-            except InvalidOperation:
-                port_vec[i] = coin_val[symbol] / (portval + self.epsilon)
-        try:
-            port_vec[-1] = obs[self.fiat].iloc[index].values / portval
-        except DivisionByZero:
-            port_vec[-1] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
-        except InvalidOperation:
-            port_vec[-1] = obs[self.fiat].iloc[index].values / (portval + self.epsilon)
+            port_vec[i] = safe_div(coin_val[symbol], portval)
+
+        port_vec[-1] = safe_div(obs[self.fiat].iloc[index].values, portval)
 
         return port_vec
 
@@ -263,7 +254,7 @@ class APrioriAgent(Agent):
             last_action_time -= timedelta(minutes=last_action_time.minute % env.period,
                                           seconds=last_action_time.second,
                                           microseconds=last_action_time.microsecond)
-            can_act = True
+            can_act = False
             while True:
                 try:
                     loop_time = env.timestamp

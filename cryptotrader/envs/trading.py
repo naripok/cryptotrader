@@ -5,7 +5,7 @@ author: Tau
 """
 from ..core import Env
 from ..spaces import *
-from ..utils import Logger
+from ..utils import Logger, safe_div
 from .utils import *
 
 import os
@@ -20,7 +20,6 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool
 
-from decimal import DivisionByZero, InvalidOperation
 from ..exchange_api.poloniex import PoloniexError
 import json
 
@@ -481,7 +480,7 @@ class TradingEnvironment(Env):
                                                                         start=datetime.timestamp(start),
                                                                         end=datetime.timestamp(end)))
         # TODO 1 FIND A BETTER WAY
-        ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
+        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
 
         return ohlc_df[['open','high','low','close',
                         'volume']].reindex(index).asfreq("%dT" % self.period)
@@ -625,19 +624,9 @@ class TradingEnvironment(Env):
 
     def calc_posit(self, symbol):
         if symbol not in self._fiat:
-            try:
-                return self.get_crypto(symbol) * self.get_close_price(symbol) / self.calc_total_portval()
-            except DivisionByZero:
-                return self.get_crypto(symbol) * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
-            except InvalidOperation:
-                return self.get_crypto(symbol) * self.get_close_price(symbol) / (self.calc_total_portval() + self.epsilon)
+            return safe_div(self.get_crypto(symbol) * self.get_close_price(symbol), self.calc_total_portval())
         else:
-            try:
-                return self.fiat / self.calc_total_portval()
-            except DivisionByZero:
-                return self.fiat / (self.calc_total_portval() + self.epsilon)
-            except InvalidOperation:
-                return self.fiat / (self.calc_total_portval() + self.epsilon)
+            return safe_div(self.fiat, self.calc_total_portval())
 
     def calc_portfolio_vector(self):
         portfolio = []
@@ -648,74 +637,24 @@ class TradingEnvironment(Env):
     def assert_action(self, action):
         # TODO WRITE TEST
         try:
-            for posit in action:
-                if not isinstance(posit, Decimal):
-                    if isinstance(posit, np.float32):
-                        action = convert_to.decimal(np.float64(action))
-                    else:
-                        action = convert_to.decimal(action)
+            action = convert_to.decimal(action)
+            # normalize
+            if action.sum() != convert_to.decimal('1.00000000'):
+                action = safe_div(action, action.sum())
 
-            try:
-                assert self.action_space.contains(action)
+            action[-1] += convert_to.decimal('1.00000000') - action.sum()
 
-            except AssertionError:
-                # normalize
-                if action.sum() != convert_to.decimal('1.0'):
-                    try:
-                        action /= action.sum()
-                    except DivisionByZero:
-                        action /= (action.sum() + self.epsilon)
-                    except InvalidOperation:
-                        action /= (action.sum() + self.epsilon)
+            assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
 
-                    try:
-                        assert action.sum() == convert_to.decimal('1.0')
-                    except AssertionError:
-                        action[-1] += convert_to.decimal('1.0') - action.sum()
-                        try:
-                            action /= action.sum()
-                        except DivisionByZero:
-                            action /= (action.sum() + self.epsilon)
-                        except InvalidOperation:
-                            action /= (action.sum() + self.epsilon)
-
-                        assert action.sum() == convert_to.decimal('1.0')
-
-                # if debug:
-                #     self.logger.error(Apocalipse.assert_action, "Action does not belong to action space")
-
-            assert action.sum() - convert_to.decimal('1.0') < convert_to.decimal('1e-6')
+            return action
 
         except AssertionError:
-            if debug:
-                self.status['ActionError'] += 1
-                # self.logger.error(Apocalipse.assert_action, "Action out of range")
-            try:
-                action /= action.sum()
-            except DivisionByZero:
-                action /= (action.sum() + self.epsilon)
-            except InvalidOperation:
-                action /= (action.sum() + self.epsilon)
-
-            try:
-                assert action.sum() == convert_to.decimal('1.0')
-            except AssertionError:
-                action[-1] += convert_to.decimal('1.0') - action.sum()
-                try:
-                    assert action.sum() == convert_to.decimal('1.0')
-                except AssertionError:
-                    try:
-                        action /= action.sum()
-                    except DivisionByZero:
-                        action /= (action.sum() + self.epsilon)
-                    except InvalidOperation:
-                        action /= (action.sum() + self.epsilon)
+            action[-1] += convert_to.decimal('1.00000000') - action.sum()
+            return action
 
         except Exception as e:
             self.logger.error(TradingEnvironment.assert_action, self.parse_error(e))
             raise e
-
-        return action
 
     def log_action(self, timestamp, symbol, value):
         if symbol == 'online':
@@ -737,18 +676,7 @@ class TradingEnvironment(Env):
 
     def get_reward(self):
         # TODO TEST
-        # try:
-        return self.portval / (self.get_last_portval() + self.epsilon)
-
-        # except DivisionByZero:
-        #     return self.portval / (self.get_last_portval() + self.epsilon)
-        #
-        # except InvalidOperation:
-        #     return self.portval / (self.get_last_portval() + self.epsilon)
-
-        # except Exception as e:
-        #     self.logger.error(TradingEnvironment.get_reward, self.parse_error(e))
-        #     raise e
+        return safe_div(self.portval, self.get_last_portval())
 
     ## Env methods
     def set_observation_space(self):
@@ -785,11 +713,11 @@ class TradingEnvironment(Env):
         Calculate arbiter desired actions statistics
         :return:
         """
-        self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
+        self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit')[1:].ffill()
 
         obs = self.get_history(self.results.index[0].ceil("%dT" % self.period), self.results.index[-1].ceil("%dT" % self.period))
 
-        self.results['benchmark'] = convert_to.decimal('1E-8')
+        self.results['benchmark'] = convert_to.decimal('0E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)
@@ -799,7 +727,7 @@ class TradingEnvironment(Env):
 
         ## Calculate benchmark portifolio, just equaly distribute money over all the assets
         # Calc init portval
-        init_portval = Decimal('1E-8')
+        init_portval = Decimal('0E-8')
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += convert_to.decimal(self.init_balance[symbol]) * \
@@ -1096,7 +1024,8 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         obs = self.get_observation(True)
 
-        self.portval = self.calc_total_portval(self.obs_df.index[-1])
+        self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
+                        'timestamp': self.portfolio_df.index[-1]}
 
         return obs.astype(np.float64)
 
@@ -1123,12 +1052,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
                     symbol = self.symbols[i]
 
-                    try:
-                        crypto_pool = portval * action[i] / self.get_close_price(symbol)
-                    except DivisionByZero:
-                        crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
-                    except InvalidOperation:
-                        crypto_pool = portval * action[i] / (self.get_close_price(symbol) + self.epsilon)
+                    crypto_pool = safe_div(portval * action[i], self.get_close_price(symbol))
 
                     with localcontext() as ctx:
                         ctx.rounding = ROUND_UP
@@ -1162,12 +1086,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
                         fee = self.tax[symbol] * portval * change
 
-                    try:
-                        crypto_pool = portval.fma(action[i], -fee) / self.get_close_price(symbol)
-                    except DivisionByZero:
-                        crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
-                    except InvalidOperation:
-                        crypto_pool = portval.fma(action[i], -fee) / (self.get_close_price(symbol) + self.epsilon)
+                    crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_close_price(symbol))
 
                     self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
@@ -1259,16 +1178,21 @@ class BacktestEnvironment(PaperTradingEnvironment):
             # Get fee values
             for symbol in self.symbols:
                 self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+            # Get new index
+            self.index += 1
+
             obs = self.get_observation(True)
 
             # Reset portfolio value
-            self.portval = self.calc_total_portval(self.obs_df.index[-1])
+            self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-2]),
+                            'timestamp': self.portfolio_df.index[-1]}
 
             # Return first observation
             return obs.astype(np.float64)
 
         except IndexError:
-            print("Insufficient tapi data. You must choose a bigger time span.")
+            print("Insufficient tapi data. You must choose a bigger time span or a lower period.")
             raise IndexError
 
     def step(self, action):
@@ -1291,7 +1215,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             else:
                 done = False
 
-            # Get new index
+                # Get new index
             self.index += 1
 
             # Return new observation, reward, done flag and status for debugging

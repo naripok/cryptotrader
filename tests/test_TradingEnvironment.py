@@ -9826,7 +9826,10 @@ class Test_env_step(object):
     @settings(max_examples=50)
     def test_simulate_trade(self, action):
         # Normalize action vector
-        action = array_normalize(action)
+        action = array_normalize(action, False)
+
+        assert action.sum() - Decimal('1.00000000') < Decimal('1E-8'), action.sum() - Decimal('1.00000000')
+
         # Get timestamp
         timestamp = self.env.obs_df.index[-1]
         # Call method
