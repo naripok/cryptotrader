@@ -9515,7 +9515,7 @@ def ready_env():
         mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
         mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-        env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
+        env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
         env.add_pairs("USDT_BTC", "USDT_ETH")
         env.fiat = "USDT"
         env.balance = env.get_balance()
@@ -9759,7 +9759,7 @@ def test_get_reward(ready_env):
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):
     @classmethod
-    @mock.patch.object(TradingEnvironment, 'timestamp',
+    @mock.patch.object(PaperTradingEnvironment, 'timestamp',
                        datetime.fromtimestamp(index).astimezone(timezone.utc))
     def setup_class(cls):
         with mock.patch('cryptotrader.envs.trading.datetime') as mock_datetime:
@@ -9767,7 +9767,7 @@ class Test_env_reset(object):
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-            cls.env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
+            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
             cls.env.add_pairs("USDT_BTC", "USDT_ETH")
             cls.env.fiat = "USDT"
 
@@ -9775,7 +9775,7 @@ class Test_env_reset(object):
     def teardown_class(cls):
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
-    @mock.patch.object(TradingEnvironment, 'timestamp',
+    @mock.patch.object(PaperTradingEnvironment, 'timestamp',
                        datetime.fromtimestamp(index).astimezone(timezone.utc))
     def test_reset(self):
         obs = self.env.reset()

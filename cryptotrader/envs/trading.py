@@ -787,7 +787,7 @@ class TradingEnvironment(Env):
         """
         self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit').ffill()
 
-        obs = self.get_history(self.results.index[0], self.results.index[-1])
+        obs = self.get_history(self.results.index[0].ceil("%dT" % self.period), self.results.index[-1].ceil("%dT" % self.period))
 
         self.results['benchmark'] = convert_to.decimal('1E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
