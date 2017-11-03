@@ -838,17 +838,22 @@ class HarmonicTrader(APrioriAgent):
         return action
 
     def rebalance(self, obs):
-        pairs = obs.columns.levels[0]
-        prev_port = self.get_portfolio_vector(obs)
-        action = self.act(obs)
-        port_vec = np.zeros(pairs.shape[0])
-        for i in range(pairs.shape[0] - 1):
-            if action[i] >= 0:
-                port_vec[i] = max(0., prev_port[i] + self.alpha[0] * action[i])
-            else:
-                port_vec[i] = max(0., prev_port[i] + self.alpha[1] * action[i])
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            port_vec = np.ones(n_pairs)
+            port_vec[-1] = 0
+        else:
+            pairs = obs.columns.levels[0]
+            prev_port = self.get_portfolio_vector(obs)
+            action = self.act(obs)
+            port_vec = np.zeros(pairs.shape[0])
+            for i in range(pairs.shape[0] - 1):
+                if action[i] >= 0:
+                    port_vec[i] = max(0., prev_port[i] + self.alpha[0] * action[i])
+                else:
+                    port_vec[i] = max(0., prev_port[i] + self.alpha[1] * action[i])
 
-        port_vec[-1] = max(0, 1 - port_vec.sum())
+            port_vec[-1] = max(0, 1 - port_vec.sum())
 
         return self.activation(port_vec)
 
