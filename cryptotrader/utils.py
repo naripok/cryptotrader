@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, DivisionByZero
 from functools import partialmethod
 
@@ -64,6 +64,13 @@ def safe_div(x, y, eps=Decimal('1E-8')):
         out = x / (y + eps)
 
     return out
+
+
+def floor_datetime(t, period):
+    t -= timedelta(minutes=t.minute % period,
+                      seconds=t.second,
+                      microseconds=t.microsecond)
+    return t
 
 
 def array_softmax(x, SAFETY=2.0):

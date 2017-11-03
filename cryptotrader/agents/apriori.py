@@ -202,10 +202,11 @@ class APrioriAgent(Agent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                           ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps - 1,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
+                            nb_max_episode_steps - env.obs_steps - 2,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
                             episode_reward,
-                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps- 1) - self.step), unit='s'))
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
+                                                                 - self.step), unit='s'))
                         ), end="\r", flush=True)
                         t0 = time()
 
@@ -250,10 +251,8 @@ class APrioriAgent(Agent):
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
-            last_action_time = env.timestamp
-            last_action_time -= timedelta(minutes=last_action_time.minute % env.period,
-                                          seconds=last_action_time.second,
-                                          microseconds=last_action_time.microsecond)
+            last_action_time = floor_datetime(env.timestamp, env.period)
+
             can_act = False
             while True:
                 try:
@@ -269,10 +268,7 @@ class APrioriAgent(Agent):
 
                         if done:
                             self.step += 1
-                            last_action_time = env.timestamp
-                            last_action_time -= timedelta(minutes=last_action_time.minute % env.period,
-                                                             seconds=last_action_time.second,
-                                                             microseconds=last_action_time.microsecond)
+                            last_action_time = floor_datetime(env.timestamp, env.period)
                             can_act = False
 
                     else:
@@ -283,12 +279,13 @@ class APrioriAgent(Agent):
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Crypto prices: {2}, Last action: {4}, Portval: {3:.2f}{5}".format(
+                            ">> step {0}, Uptime: {1}, Last tstamp: {5}, Crypto prices: {2}, Last action: {4}, Portval: {3:.2f}{6}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
                                 ["%s: %.08f" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close'))) for symbol in env.pairs],
                                 env.calc_total_portval(),
                                 env.action_df.iloc[-1].astype('f').to_dict(),
+                                str(obs.index[-1]),
                                 "                                                                                       "
                             ), end="\r", flush=True)
 
@@ -383,10 +380,11 @@ class TestAgent(APrioriAgent):
                     if verbose:
                         print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                   ".format(
                             self.step,
-                            nb_max_episode_steps - env.obs_steps - 1,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 1)),
+                            nb_max_episode_steps - env.obs_steps - 2,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
                             episode_reward,
-                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps- 1) - self.step), unit='s'))
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
+                                                                 - self.step), unit='s'))
                         ), end="\r", flush=True)
                         t0 = time()
 
@@ -394,18 +392,15 @@ class TestAgent(APrioriAgent):
                         return episode_reward
 
                     if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        # e = status['Error']
+                        # print("Env error:",
+                        #       type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         break
 
                 except Exception as e:
                     print("Model Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                     raise e
-
-        except TypeError:
-            print("\nYou must fit the model or provide indicator parameters in order to test.")
 
         except KeyboardInterrupt:
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,

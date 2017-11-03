@@ -5,7 +5,7 @@ author: Tau
 """
 from ..core import Env
 from ..spaces import *
-from ..utils import Logger, safe_div
+from ..utils import Logger, safe_div, floor_datetime
 from .utils import *
 
 import os
@@ -319,7 +319,7 @@ class TradingEnvironment(Env):
 
     @property
     def balance(self):
-        return self.portfolio_df.ffill().loc[self.portfolio_df.index[-1], self.symbols].to_dict()
+        return self.portfolio_df.loc[self.portfolio_df.index[-1], self.symbols].to_dict()
 
     @balance.setter
     def balance(self, values):
@@ -367,8 +367,7 @@ class TradingEnvironment(Env):
     ## Data feed methods
     @property
     def timestamp(self):
-        #TODO FIX FOR DAYLIGHT SAVING TIME
-        return datetime.now(timezone.utc)
+        return floor_datetime(datetime.now(timezone.utc) - timedelta(minutes=self.period), self.period)
 
     def add_pairs(self, *args):
 
@@ -471,20 +470,6 @@ class TradingEnvironment(Env):
 
         return out
 
-    def get_ohlc(self, symbol, index):
-        start = index[0]
-        end = index[-1]
-
-        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
-                                                                        period=self.period * 60,
-                                                                        start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)))
-        # TODO 1 FIND A BETTER WAY
-        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
-
-        return ohlc_df[['open','high','low','close',
-                        'volume']].reindex(index).asfreq("%dT" % self.period)
-
     def get_sampled_portfolio(self, index=None):
         if index is None:
             start = self.portfolio_df.index[0]
@@ -500,6 +485,20 @@ class TradingEnvironment(Env):
         else:
             return self.portfolio_df.loc[:end].resample("%dmin" % self.period).last()
 
+    def get_ohlc(self, symbol, index):
+        start = index[0]
+        end = index[-1]
+
+        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
+                                                                        period=self.period * 60,
+                                                                        start=datetime.timestamp(start),
+                                                                        end=datetime.timestamp(end)))
+        # TODO 1 FIND A BETTER WAY
+        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
+                          inplace=True)
+
+        return ohlc_df[['open','high','low','close', 'volume']].reindex(index).asfreq("%dT" % self.period)
+
     def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
             obs_list = []
@@ -512,20 +511,25 @@ class TradingEnvironment(Env):
                 start = end - timedelta(minutes=self.period * self.obs_steps)
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
+                                      freq="%dT" % self.period).floor("%dmin" % self.period)[-self.obs_steps:]
                 is_bounded = False
             else:
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).ceil("%dT" % self.period)
+                                      freq="%dT" % self.period).floor("%dmin" % self.period)
 
             if portfolio_vector:
                 port_vec = self.get_sampled_portfolio(index)
+
+                # Get pairs history
                 for symbol in self.pairs:
                     keys.append(symbol)
                     history = self.get_ohlc(symbol, index)
+
                     history = pd.concat([history, port_vec[symbol.split('_')[1]]], axis=1)
                     obs_list.append(history)
+
+                # Get fiat history
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
@@ -561,7 +565,7 @@ class TradingEnvironment(Env):
             return self.obs_df
 
         except PoloniexError:
-            sleep(int(self.period * 30))
+            sleep(int(self.period / 4))
             self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
 
@@ -623,10 +627,10 @@ class TradingEnvironment(Env):
         return portval
 
     def calc_posit(self, symbol):
-        if symbol not in self._fiat:
-            return safe_div(self.get_crypto(symbol) * self.get_close_price(symbol), self.calc_total_portval())
-        else:
+        if symbol == self._fiat:
             return safe_div(self.fiat, self.calc_total_portval())
+        else:
+            return safe_div(self.get_crypto(symbol) * self.get_close_price(symbol), self.calc_total_portval())
 
     def calc_portfolio_vector(self):
         portfolio = []
@@ -715,7 +719,7 @@ class TradingEnvironment(Env):
         """
         self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit')[1:].ffill()
 
-        obs = self.get_history(self.results.index[0].ceil("%dT" % self.period), self.results.index[-1].ceil("%dT" % self.period))
+        obs = self.get_history(self.results.index[0], self.results.index[-1])
 
         self.results['benchmark'] = convert_to.decimal('0E-8')
         self.results['returns'] = convert_to.decimal(np.nan)
@@ -1011,8 +1015,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-        self.action_df = self.action_df.append(
-            pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp]))
+        self.action_df = pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp])
 
         self.set_observation_space()
         self.set_action_space()
@@ -1185,7 +1188,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
             obs = self.get_observation(True)
 
             # Reset portfolio value
-            self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-2]),
+            self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
                             'timestamp': self.portfolio_df.index[-1]}
 
             # Return first observation
