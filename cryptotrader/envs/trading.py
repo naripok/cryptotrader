@@ -511,12 +511,12 @@ class TradingEnvironment(Env):
                 start = end - timedelta(minutes=self.period * self.obs_steps)
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).floor("%dmin" % self.period)[-self.obs_steps:]
+                                      freq="%dT" % self.period)[-self.obs_steps:]
                 is_bounded = False
             else:
                 index = pd.date_range(start=start.astimezone(timezone.utc),
                                       end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period).floor("%dmin" % self.period)
+                                      freq="%dT" % self.period)
 
             if portfolio_vector:
                 port_vec = self.get_sampled_portfolio(index)
