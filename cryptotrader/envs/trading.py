@@ -158,7 +158,7 @@ class PaperTradingDataFeed(object):
         try:
             return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
 
-        except PoloniexError("Invalid json response returned"):
+        except PoloniexError:
             raise ValueError("Bad exchange response data.")
 
 
@@ -473,9 +473,6 @@ class TradingEnvironment(Env):
         return out
 
     def get_ohlc(self, symbol, index):
-        # TODO WRITE TEST
-        # TODO GET INVALID CANDLE TIMES RIGHT
-
         start = index[0]
         end = index[-1]
 
@@ -485,8 +482,6 @@ class TradingEnvironment(Env):
                                                                         end=datetime.timestamp(end)))
         # TODO 1 FIND A BETTER WAY
         ohlc_df.set_index(ohlc_df.date.apply(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)), inplace=True)
-
-
 
         return ohlc_df[['open','high','low','close',
                         'volume']].reindex(index).asfreq("%dT" % self.period)
@@ -1085,17 +1080,24 @@ class PaperTradingEnvironment(TradingEnvironment):
         super().__init__(period, obs_steps, tapi, name)
 
     def reset(self):
+
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-        self.set_observation_space()
-        self.set_action_space()
-        self.balance = self.init_balance = self.get_balance()
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
-        obs = self.get_observation(True)
         self.action_df = self.action_df.append(
             pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp]))
+
+        self.set_observation_space()
+        self.set_action_space()
+
+        self.balance = self.init_balance = self.get_balance()
+
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        obs = self.get_observation(True)
+
         self.portval = self.calc_total_portval(self.obs_df.index[-1])
+
         return obs.astype(np.float64)
 
     def simulate_trade(self, action, timestamp):
