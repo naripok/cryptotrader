@@ -344,16 +344,6 @@ class TradingEnvironment(Env):
     @portval.setter
     def portval(self, value):
         try:
-            # if isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
-            #     self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value)
-            #
-            # elif isinstance(value, dict):
-            #     try:
-            #         timestamp = value['timestamp']
-            #     except KeyError:
-            #         timestamp = self.timestamp
-            #     self.portfolio_df.at[timestamp, 'portval'] = convert_to.decimal(value['portval'])
-
             self.portfolio_df.at[value['timestamp'], 'portval'] = convert_to.decimal(value['portval'])
         except KeyError:
             self.portfolio_df.at[self.timestamp, 'portval'] = convert_to.decimal(value['portval'])
@@ -363,11 +353,6 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.portval, self.parse_error(e))
             raise e
-
-    ## Data feed methods
-    @property
-    def timestamp(self):
-        return floor_datetime(datetime.now(timezone.utc) - timedelta(minutes=self.period), self.period)
 
     def add_pairs(self, *args):
 
@@ -391,9 +376,14 @@ class TradingEnvironment(Env):
             else:
                 self.logger.error(TradingEnvironment.add_pairs, "Symbol name must be a string")
 
-        # self.portfolio_df = self.portfolio_df.append(pd.DataFrame(columns=self.symbols, index=[self.timestamp]))
-        # self.action_df = self.action_df.append(pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp]))
+    ## Data feed methods
+    @property
+    def timestamp(self):
+        # return floor_datetime(datetime.now(timezone.utc) - timedelta(minutes=self.period), self.period)
+        # Poloniex returns utc timestamp delayed from one bar
+        return datetime.now(timezone.utc) - timedelta(minutes=self.period)
 
+    # High frequency getter
     def get_pair_trades(self, pair, start=None, end=None):
         # TODO WRITE TEST
         # TODO FINISH THIS
@@ -470,55 +460,56 @@ class TradingEnvironment(Env):
 
         return out
 
-    def get_sampled_portfolio(self, index=None):
-        if index is None:
-            start = self.portfolio_df.index[0]
-            end = self.portfolio_df.index[-1]
-
-        else:
-            start = index[0]
-            end = index[-1]
-
-        # TODO 1 FIND A BETTER WAY
-        if start != end:
-            return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
-        else:
-            return self.portfolio_df.loc[:end].resample("%dmin" % self.period).last()
-
+    # Low frequency getter
     def get_ohlc(self, symbol, index):
+        # Get range
         start = index[0]
         end = index[-1]
 
+        # Call for data
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
                                                                         end=datetime.timestamp(end)))
         # TODO 1 FIND A BETTER WAY
+        # TODO: FIX TIMESTAMP
+        # Set index
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True)
 
-        return ohlc_df[['open','high','low','close', 'volume']].reindex(index).asfreq("%dT" % self.period)
+        # Get right values to fill nans
+        fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
+        fill_dict.update({'volume': '0E-8'})
+        # Reindex with desired time range and fill nans
+        ohlc_df = ohlc_df[['open','high','low','close',
+                           'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
 
+        return ohlc_df
+
+    # Observation maker
     def get_history(self, start=None, end=None, portfolio_vector=False):
         try:
             obs_list = []
             keys = []
+
+            # Make desired index
             is_bounded = True
             if not end:
                 end = self.timestamp
                 is_bounded = False
             if not start:
                 start = end - timedelta(minutes=self.period * self.obs_steps)
-                index = pd.date_range(start=start.astimezone(timezone.utc),
-                                      end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period)[-self.obs_steps:]
+                index = pd.date_range(start=start,
+                                      end=end,
+                                      freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
                 is_bounded = False
             else:
-                index = pd.date_range(start=start.astimezone(timezone.utc),
-                                      end=end.astimezone(timezone.utc),
-                                      freq="%dT" % self.period)
+                index = pd.date_range(start=start,
+                                      end=end,
+                                      freq="%dT" % self.period).ceil("%dT" % self.period)
 
             if portfolio_vector:
+                # Get portfolio observation
                 port_vec = self.get_sampled_portfolio(index)
 
                 # Get pairs history
@@ -533,27 +524,32 @@ class TradingEnvironment(Env):
                 keys.append(self._fiat)
                 obs_list.append(port_vec[self._fiat])
 
+                # Concatenate dataframes
                 obs = pd.concat(obs_list, keys=keys, axis=1)
 
+                # Fill missing portfolio observations
                 cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
-                obs = obs.fillna(obs[cols_to_bfill].bfill())
+                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
                 if not is_bounded:
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs.ffill().apply(convert_to.decimal, raw=True)
+                return obs.apply(convert_to.decimal, raw=True)
             else:
+                # Get history
                 for symbol in self.pairs:
                     keys.append(symbol)
                     history = self.get_ohlc(symbol, index)
                     obs_list.append(history)
 
+                # Concatenate
                 obs = pd.concat(obs_list, keys=keys, axis=1)
 
+                # Check size
                 if not is_bounded:
                     assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs.ffill().apply(convert_to.decimal, raw=True)
+                return obs.apply(convert_to.decimal, raw=True)
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
@@ -572,6 +568,21 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
             raise e
+
+    def get_sampled_portfolio(self, index=None):
+        if index is None:
+            start = self.portfolio_df.index[0]
+            end = self.portfolio_df.index[-1]
+
+        else:
+            start = index[0]
+            end = index[-1]
+
+        # TODO 1 FIND A BETTER WAY
+        if start != end:
+            return self.portfolio_df.loc[start:end].resample("%dmin" % self.period).last()
+        else:
+            return self.portfolio_df.loc[:end].resample("%dmin" % self.period).last()
 
     def get_sampled_actions(self, index=None):
         if index is None:
@@ -1027,7 +1038,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         obs = self.get_observation(True)
 
-        self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
+        self.portval = {'portval': self.calc_total_portval(),
                         'timestamp': self.portfolio_df.index[-1]}
 
         return obs.astype(np.float64)
@@ -1149,6 +1160,33 @@ class BacktestEnvironment(PaperTradingEnvironment):
     @property
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
+
+    def get_ohlc(self, symbol, index):
+        # Get range
+        start = index[0]
+        end = index[-1]
+
+        # Call for data
+        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
+                                                                        period=self.period * 60,
+                                                                        start=datetime.timestamp(start),
+                                                                        end=datetime.timestamp(end)))
+        # TODO 1 FIND A BETTER WAY
+        # TODO: FIX TIMESTAMP
+        # Set index
+        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
+                          inplace=True)
+
+        ## We assume that in backtest we dont have NaN values. Fillna is disabled for speed.
+
+        # # Get right values to fill nans
+        # fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
+        # fill_dict.update({'volume': '0E-8'})
+        # Reindex with desired time range and fill nans
+        ohlc_df = ohlc_df[['open','high','low','close',
+                           'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
+
+        return ohlc_df
 
     def reset(self, reset_dfs=True):
         """
