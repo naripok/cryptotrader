@@ -35,7 +35,7 @@ from json import loads as _loads
 from hmac import new as _new
 from hashlib import sha512 as _sha512
 from time import time, sleep
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import chain as _chain
 from functools import wraps as _wraps
 import logging

@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, DivisionByZero
 from functools import partialmethod
 
 import zmq
@@ -55,6 +55,24 @@ class Logger(object):
         Logger.logger.error('[%s]\n%s\n' % (method, str))
 
 
+def safe_div(x, y, eps=Decimal('1E-8')):
+    try:
+        out = x / y
+    except DivisionByZero:
+        out = x / (y + eps)
+    except InvalidOperation:
+        out = x / (y + eps)
+
+    return out
+
+
+def floor_datetime(t, period):
+    t -= timedelta(minutes=t.minute % period,
+                      seconds=t.second,
+                      microseconds=t.microsecond)
+    return t
+
+
 def array_softmax(x, SAFETY=2.0):
     """
     Compute softmax values for each sets of scores in x.
@@ -76,20 +94,22 @@ def array_softmax(x, SAFETY=2.0):
         return b / (b.sum() + decimal_cases)
 
 
-def array_normalize(x):
+def array_normalize(x, float=True):
     out = convert_to.decimal(x)
 
-    if out.sum() == convert_to.decimal('0.0'):
-        out = out / (out.sum() + convert_to.decimal('1e-8'))
+    try:
+        out /= out.sum()
+    except DivisionByZero:
+        out /= (out.sum() + convert_to.decimal('1e-8'))
+    except InvalidOperation:
+        out /= (out.sum() + convert_to.decimal('1e-8'))
+
+    out[-1] += convert_to.decimal('1.00000000') - out.sum()
+
+    if float:
+        return np.float32(out)
     else:
-        out = out / out.sum()
-
-    if out.sum() > convert_to.decimal('1.0'):
-        out[-1] += convert_to.decimal('1.0') - out.sum()
-    if out.sum() < convert_to.decimal('1.0'):
-        out[-1] += convert_to.decimal('1.0') - out.sum()
-
-    return np.float32(convert_to.decimal(out))
+        return out
 
 
 def simplex_proj(y):
@@ -112,9 +132,11 @@ def simplex_proj(y):
 
     return np.maximum(y - tmax, 0.)
 
+
 def running_mean(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / N
+
 
 class convert_to(object):
     _quantizer = Decimal('0E-8')
@@ -149,6 +171,7 @@ class convert_to(object):
                 raise InvalidOperation("NaN encountered in convert_to.decimal")
 
 
+# ZMQ sockets helpers
 def write(_socket, msg, flags=0, block=True):
     if block:
         _socket.send(msgpack.packb(msg), flags=flags)
