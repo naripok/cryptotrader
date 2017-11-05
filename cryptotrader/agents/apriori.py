@@ -482,14 +482,16 @@ class Benchmark(APrioriAgent):
     def act(self, obs):
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
+            action = np.ones(n_pairs - 1)
             return array_normalize(action)
         else:
-            return self.get_portfolio_vector(obs)
+            return self.get_portfolio_vector(obs)[:-1]
 
     def rebalance(self, obs):
-        return self.act(obs)
+        position = self.act(obs)
+        position.resize(obs.columns.levels[0].shape[0])
+        position[-1] = self.get_portfolio_vector(obs)[-1]
+        return position
 
 
 class ConstantRebalanceTrader(APrioriAgent):
@@ -504,13 +506,12 @@ class ConstantRebalanceTrader(APrioriAgent):
 
     def act(self, obs):
         n_pairs = obs.columns.levels[0].shape[0]
-        action = np.ones(n_pairs)
-        action[-1] = 0
-
+        action = np.ones(n_pairs - 1)
         return array_normalize(action)
 
     def rebalance(self, obs):
-        return self.act(obs)
+        factor = self.act(obs)
+        return factor.resize(obs.columns.levels[0].shape[0])
 
 
 class MomentumTrader(APrioriAgent):
