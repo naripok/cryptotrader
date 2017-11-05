@@ -90,6 +90,22 @@ class BacktestDataFeed(object):
         print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
                                                                 (24 * 60), self.period))
 
+    def save_data(self, dir):
+        for item in self.ohlc_data:
+            self.ohlc_data[item].drop_index.to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
+
+    def load_data(self, dir):
+        self.ohlc_data = {}
+        self.data_length = None
+        for key in self.pairs:
+            self.ohlc_data[key] = pd.read_json(dir+'/'+str(key)+'_'+str(self.period)+'min', convert_dates=False,
+                                                orient='records', date_unit='s', keep_default_dates=False, dtype=False)
+            self.ohlc_data[key].set_index('date', inplace=True, drop=False)
+            if not self.data_length:
+                self.data_length = self.ohlc_data[key].shape[0]
+            else:
+                assert self.data_length == self.ohlc_data[key].shape[0]
+
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
             data = json.loads(self.ohlc_data[currencyPair].loc[start:end, :].to_json(orient='records'))
