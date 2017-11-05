@@ -18,7 +18,7 @@ import empyrical as ec
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
-from bokeh.models import HoverTool
+from bokeh.models import HoverTool, Legend
 
 from ..exchange_api.poloniex import PoloniexError
 import json
@@ -677,12 +677,19 @@ class TradingEnvironment(Env):
             action[-1] += convert_to.decimal('1.00000000') - action.sum()
 
             assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
-
             return action
 
         except AssertionError:
+            action = safe_div(action, action.sum())
             action[-1] += convert_to.decimal('1.00000000') - action.sum()
-            return action
+            try:
+                assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
+                return action
+            except AssertionError:
+                action = safe_div(action, action.sum())
+                action[-1] += convert_to.decimal('1.00000000') - action.sum()
+                assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
+                return action
 
         except Exception as e:
             self.logger.error(TradingEnvironment.assert_action, self.parse_error(e))
@@ -836,18 +843,20 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=800, plot_height=300,
+                       plot_width=900, plot_height=300,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
         config_fig(p_pos)
 
         palettes = inferno(len(self.symbols))
-
+        legend = []
         for i, symbol in enumerate(self.symbols):
-            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i],
-                                                    legend=symbol, line_width=1.2)#, muted_color=palettes[i], muted_alpha=0.2)
+            results[symbol + '_posit'] = p_pos.line(df.index, df[symbol + '_posit'], color=palettes[i], line_width=1.2)#, muted_color=palettes[i], muted_alpha=0.2)
             p_pos.legend.click_policy = "hide"
+            legend.append((str(symbol), [results[symbol + '_posit']]))
+
+        p_pos.add_layout(Legend(items=legend, location=(0, -31)), 'right')
 
         # Portifolio and benchmark values
         val_hover = HoverTool(
@@ -869,14 +878,17 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='value',
-                       plot_width=800, plot_height=400,
+                       plot_width=900, plot_height=400,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
         config_fig(p_val)
 
-        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2, legend='portval')
-        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red', line_width=1.2, legend="benchmark")
+        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2)
+        results['benchmark'] = p_val.line(df.index, df.benchmark, color='red', line_width=1.2)
+
+        p_val.add_layout(Legend(items=[("portval", [results['portval']]),
+                                       ("benchmark", [results['benchmark']])], location=(0, -31)), 'right')
         p_val.legend.click_policy = "hide"
 
         # Individual assets portval
@@ -884,23 +896,27 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=800, plot_height=400,
+                       plot_width=900, plot_height=400,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
         config_fig(p_pval)
 
+        legend = []
         for i, symbol in enumerate(self.pairs):
-            results[symbol+'_benchmark'] = p_pval.line(df.index, df[symbol+'_benchmark'], color=palettes[i], line_width=1.2,
-                                                      legend=symbol)
-            p_pval.legend.click_policy = "hide"
+            results[symbol+'_benchmark'] = p_pval.line(df.index, df[symbol+'_benchmark'], color=palettes[i], line_width=1.2)
+            legend.append((symbol,[results[symbol+'_benchmark']]))
+
+
+        p_pval.add_layout(Legend(items=legend, location=(0, -31)), 'right')
+        p_pval.legend.click_policy = "hide"
 
         # Portifolio and benchmark returns
         p_ret = figure(title="Portifolio / Benchmark Returns",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='Returns',
-                       plot_width=800, plot_height=200,
+                       plot_width=900, plot_height=200,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom'],
                        toolbar_location="above"
                        )
@@ -909,10 +925,14 @@ class TradingEnvironment(Env):
         results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red', line_width=1.2)
         results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2)
 
+        p_ret.add_layout(Legend(items=[("bench returns", [results['bench_ret']]),
+                                       ("port returns", [results['port_ret']])], location=(0, -31)), 'right')
+        p_ret.legend.click_policy = "hide"
+
         p_hist = figure(title="Portifolio Value Pct Change Distribution",
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
-                        plot_width=800, plot_height=300,
+                        plot_width=900, plot_height=300,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
@@ -928,7 +948,7 @@ class TradingEnvironment(Env):
                          x_axis_type="datetime",
                          x_axis_label='timestep',
                          y_axis_label='alpha',
-                         plot_width=800, plot_height=200,
+                         plot_width=900, plot_height=200,
                          tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                          toolbar_location="above"
                          )
@@ -941,7 +961,7 @@ class TradingEnvironment(Env):
                         x_axis_type="datetime",
                         x_axis_label='timestep',
                         y_axis_label='beta',
-                        plot_width=800, plot_height=200,
+                        plot_width=900, plot_height=200,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
@@ -954,7 +974,7 @@ class TradingEnvironment(Env):
                       x_axis_type="datetime",
                       x_axis_label='timestep',
                       y_axis_label='drawdown',
-                      plot_width=800, plot_height=200,
+                      plot_width=900, plot_height=200,
                       tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                       toolbar_location="above"
                       )
@@ -967,7 +987,7 @@ class TradingEnvironment(Env):
                           x_axis_type="datetime",
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
-                          plot_width=800, plot_height=200,
+                          plot_width=900, plot_height=200,
                           tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                           toolbar_location="above"
                           )
@@ -1240,7 +1260,7 @@ class BacktestEnvironment(TradingEnvironment):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
-            print(action)
+            print("step action:", action)
             raise e
 
 
