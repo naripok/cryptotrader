@@ -559,7 +559,7 @@ class MomentumTrader(APrioriAgent):
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
                                (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.open.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
+                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
 
             return factor
 
@@ -765,17 +765,19 @@ class HarmonicTrader(APrioriAgent):
     def __repr__(self):
         return "HarmonicTrader"
 
-    def __init__(self, peak_order=7, err_allowed=0.05, activation=array_normalize, fiat="USDT"):
+    def __init__(self, peak_order=7, err_allowed=0.05, decay=0.99, activation=array_normalize, fiat="USDT"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
         :param err_allowed: Pattern error margin to be accepted
+        :param decay: float: Decay rate for portfolio selection. Between 0 and 1
         :param fiat: Fiat symbol to use in trading
         """
         super().__init__(fiat)
         self.err_allowed = err_allowed
         self.peak_order = peak_order
         self.alpha = [1., 1.]
+        self.decay = decay
         self.activation = activation
 
     def find_extreme(self, obs):
@@ -854,9 +856,9 @@ class HarmonicTrader(APrioriAgent):
             port_vec = np.zeros(pairs.shape[0])
             for i in range(pairs.shape[0] - 1):
                 if action[i] >= 0:
-                    port_vec[i] = max(0., prev_port[i] + self.alpha[0] * action[i])
+                    port_vec[i] = max(0., self.decay * prev_port[i] + self.alpha[0] * action[i])
                 else:
-                    port_vec[i] = max(0., prev_port[i] + self.alpha[1] * action[i])
+                    port_vec[i] = max(0., self.decay * prev_port[i] + self.alpha[1] * action[i])
 
             port_vec[-1] = max(0, 1 - port_vec.sum())
 
@@ -865,6 +867,7 @@ class HarmonicTrader(APrioriAgent):
     def set_params(self, **kwargs):
         self.err_allowed = kwargs['err_allowed']
         self.peak_order = int(kwargs['peak_order'])
+        self.decay = kwargs['decay']
         self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
 
 
@@ -914,7 +917,7 @@ class ReversedMomentumTrader(APrioriAgent):
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
                                (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.open.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
+                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
 
             return factor
 

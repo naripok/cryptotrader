@@ -200,12 +200,12 @@ def test_get_close_price(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
 
-    price = env.get_close_price("BTC")
+    price = env.get_open_price("BTC")
     assert isinstance(price, Decimal)
     assert price == env.obs_df["USDT_BTC"].open.iloc[-1]
 
     for i in env.obs_df.index:
-        price = env.get_close_price("BTC", i)
+        price = env.get_open_price("BTC", i)
         assert isinstance(price, Decimal)
         assert price == env.obs_df["USDT_BTC"].open.loc[i]
 
@@ -357,7 +357,7 @@ class Test_env_step(object):
             if symbol not in self.env._fiat:
                 assert self.env.portfolio_df.get_value(self.env.portfolio_df[symbol].last_valid_index(), symbol) - \
                        self.env.action_df.get_value(timestamp, symbol) * self.env.calc_total_portval(timestamp) / \
-                        self.env.get_close_price(symbol, timestamp) <= convert_to.decimal('1E-4')
+                        self.env.get_open_price(symbol, timestamp) <= convert_to.decimal('1E-4')
 
     @mock.patch.object(PaperTradingEnvironment, 'timestamp',
                        floor_datetime(datetime.fromtimestamp(index).astimezone(timezone.utc), 5))
