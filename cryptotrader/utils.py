@@ -171,6 +171,7 @@ class convert_to(object):
                 raise InvalidOperation("NaN encountered in convert_to.decimal")
 
 
+# ZMQ sockets helpers
 def write(_socket, msg, flags=0, block=True):
     if block:
         _socket.send(msgpack.packb(msg), flags=flags)

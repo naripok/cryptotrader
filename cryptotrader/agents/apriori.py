@@ -49,7 +49,7 @@ class APrioriAgent(Agent):
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
                 coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[index], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[index], (symbol, 'close'))
+                                                 obs.get_value(obs.index[index], (symbol, 'open'))
 
         portval = 0
         for symbol in coin_val:
@@ -70,6 +70,23 @@ class APrioriAgent(Agent):
     def fit(self, env, nb_steps, batch_size, search_space, constrains=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None):
+        """
+        Fit the model on parameters on the environment
+        :param env: BacktestEnvironment instance
+        :param nb_steps: Number of optimization evals
+        :param batch_size: Size of the batch for each optimization pass
+        :param search_space: Parameter search space
+        :param constrains: Function returning False when constrains are violated
+        :param action_repetition:
+        :param callbacks:
+        :param verbose:
+        :param visualize:
+        :param nb_max_start_steps:
+        :param start_step_policy:
+        :param log_interval:
+        :param nb_max_episode_steps: Number of steps for one episode
+        :return: tuple: Optimal parameters, information about the optimization process
+        """
         try:
 
             if verbose:
@@ -200,13 +217,14 @@ class APrioriAgent(Agent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                           ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 2,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
                             episode_reward,
                             str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
-                                                                 - self.step), unit='s'))
+                                                                 - self.step), unit='s')),
+                            1 / (time() - t0)
                         ), end="\r", flush=True)
                         t0 = time()
 
@@ -378,13 +396,14 @@ class TestAgent(APrioriAgent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}                   ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                   ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 2,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
                             episode_reward,
                             str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
-                                                                 - self.step), unit='s'))
+                                                                 - self.step), unit='s')),
+                            1 / (time() - t0)
                         ), end="\r", flush=True)
                         t0 = time()
 
@@ -433,14 +452,14 @@ class DummyTrader(APrioriAgent):
         """
         if self.random_process:
             if self.activation == 'softmax':
-                return array_softmax(self.random_process.sample())
+                return array_normalize(self.random_process.sample())
             elif self.activation == 'simplex':
                 return self.simplex_proj(self.random_process.sample())
             else:
                 return np.array(self.random_process.sample())
         else:
             if self.activation == 'softmax':
-                return array_softmax(np.random.random(obs.columns.levels[0].shape[0]))
+                return array_normalize(np.random.random(obs.columns.levels[0].shape[0]))
             elif self.activation == 'simplex':
                 return self.simplex_proj(np.random.random(obs.columns.levels[0].shape[0]))
             else:
@@ -516,13 +535,13 @@ class MomentumTrader(APrioriAgent):
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
+                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
         elif self.mean_type == 'kama':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
+                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
         elif self.mean_type == 'simple':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = df.close.rolling(window).mean()
+                df[str(window) + '_ma'] = df.open.rolling(window).mean()
         else:
             raise TypeError("Wrong mean_type param")
         return df
@@ -540,7 +559,7 @@ class MomentumTrader(APrioriAgent):
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
                                (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.close.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
+                              (df.open.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
 
             return factor
 
@@ -614,8 +633,8 @@ class PAMRTrader(APrioriAgent):
             price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
             last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'close')) - obs.get_value(obs.index[-2],
-                                                (symbol, 'close'))) / obs.get_value(obs.index[-2], (symbol, 'close'))
+                price_relative[key] = (obs.get_value(obs.index[-1], (symbol, 'open')) - obs.get_value(obs.index[-2],
+                                                (symbol, 'open'))) / obs.get_value(obs.index[-2], (symbol, 'open'))
                 last_b[key] = np.float64(prev_posit[symbol.split("_")[1]])
         return self.update(last_b, price_relative)
 
@@ -760,11 +779,11 @@ class HarmonicTrader(APrioriAgent):
         self.activation = activation
 
     def find_extreme(self, obs):
-        max_idx = argrelextrema(obs.close.values, np.greater, order=self.peak_order)[0]
-        min_idx = argrelextrema(obs.close.values, np.less, order=self.peak_order)[0]
+        max_idx = argrelextrema(obs.open.values, np.greater, order=self.peak_order)[0]
+        min_idx = argrelextrema(obs.open.values, np.less, order=self.peak_order)[0]
         extreme_idx = np.concatenate([max_idx, min_idx, [obs.shape[0] - 1]])
         extreme_idx.sort()
-        return obs.close.iloc[extreme_idx]
+        return obs.open.iloc[extreme_idx]
 
     def calc_intervals(self, extremes):
         XA = extremes.iloc[-2] - extremes.iloc[-1]
@@ -871,13 +890,13 @@ class ReversedMomentumTrader(APrioriAgent):
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = df.close.ewm(span=window).mean()
+                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
         elif self.mean_type == 'kama':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = tl.KAMA(df.close.values, timeperiod=window)
+                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
         elif self.mean_type == 'simple':
             for window in self.ma_span:
-                df[str(window) + '_ma'] = df.close.rolling(window).mean()
+                df[str(window) + '_ma'] = df.open.rolling(window).mean()
         else:
             raise TypeError("Wrong mean_type param")
         return df
@@ -895,7 +914,7 @@ class ReversedMomentumTrader(APrioriAgent):
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
                                (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.close.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
+                              (df.open.rolling(self.std_span, min_periods=1, center=True).std().iat[-1] + self.epsilon)
 
             return factor
 
@@ -964,14 +983,14 @@ class FactorTrader(APrioriAgent):
             if symbol is not self.fiat:
                 if action[i] >= 0.:
                     port_vec[i] = max(0, prev_port[i] + self.alpha[0] * action[i] / \
-                                              (self.std_weight * obs[symbol].close.rolling(self.std_window,
+                                              (self.std_weight * obs[symbol].open.rolling(self.std_window,
                                                min_periods=1, center=True).std().iat[-1] / obs.get_value(
-                                               obs.index[-1], (symbol, 'close')) + self.epsilon))
+                                               obs.index[-1], (symbol, 'open')) + self.epsilon))
                 else:
                     port_vec[i] = max(0, prev_port[i] + self.alpha[1] * action[i] / \
-                                              (self.std_weight * obs[symbol].close.rolling(self.std_window,
+                                              (self.std_weight * obs[symbol].open.rolling(self.std_window,
                                                min_periods=1, center=True).std().iat[-1] / obs.get_value(
-                                               obs.index[-1], (symbol, 'close')) + self.epsilon))
+                                               obs.index[-1], (symbol, 'open')) + self.epsilon))
 
         port_vec[-1] = max(0, 1 - port_vec.sum())
 

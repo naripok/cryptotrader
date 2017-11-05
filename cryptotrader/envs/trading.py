@@ -84,9 +84,6 @@ class BacktestDataFeed(object):
                                                                end=end
                                                                ))
 
-
-            # self.ohlc_data[pair]['date'] = self.ohlc_data[pair]['date'].apply(
-            #     lambda x: datetime.fromtimestamp(int(x)))
             self.ohlc_data[key].set_index('date', inplace=True, drop=False)
 
 
@@ -95,22 +92,12 @@ class BacktestDataFeed(object):
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
         try:
-            # assert np.allclose(period, self.period * 60), "Invalid period"
-            assert currencyPair in self.pairs, "Invalid pair"
-            #
-            # if not start:
-            #     start = self.ohlc_data[currencyPair].date.index[-50]
-            # if not end:
-            #     end = self.ohlc_data[currencyPair].date.index[-1]
-
-            # Faster method
-            # data = []
-            # for row in self.ohlc_data[currencyPair].loc[start:end, :].iterrows():
-            #     data.append(row[1].to_dict())
-
             data = json.loads(self.ohlc_data[currencyPair].loc[start:end, :].to_json(orient='records'))
 
             return data
+
+        except json.JSONDecodeError:
+            print("Bad exchange response.")
 
         except AssertionError as e:
             if "Invalid period" == e:
@@ -230,20 +217,28 @@ class TradingEnvironment(Env):
 
     @property
     def symbols(self):
-        if not self._symbols:
+        if self._symbols:
+            return self._symbols
+        else:
             symbols = []
             for pair in self.pairs:
                 symbols.append(pair.split('_')[1])
             symbols.append(self._fiat)
             self._symbols = symbols
             return self._symbols
-        else:
-            return self._symbols
 
     @property
     def fiat(self):
         try:
-            return self.portfolio_df.get_value(self.portfolio_df[self._fiat].last_valid_index(), self._fiat)
+            i = -1
+            fiat = self.portfolio_df.get_value(self.portfolio_df.index[i], self._fiat)
+            while not convert_to.decimal(fiat.is_finite()):
+                i -= 1
+                fiat = self.portfolio_df.get_value(self.portfolio_df.index[-i], self._fiat)
+            return fiat
+        except IndexError:
+            self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
+            raise KeyError
         except KeyError as e:
             self.logger.error(TradingEnvironment.fiat, "You must specify a fiat symbol first.")
             raise e
@@ -256,12 +251,13 @@ class TradingEnvironment(Env):
         try:
             if isinstance(value, str):
                 symbols = []
-                for symbol in self.pairs:
-                    symbols += symbol.split('_')
-                symbols = set(symbols)
+                for pair in self.pairs:
+                    symbols.append(pair.split('_')[1])
+                symbols.append(self.pairs[0].split('_')[0])
                 assert value in symbols, "Fiat not in symbols."
                 self._fiat = value
-                self._crypto = symbols.difference([self._fiat])
+                symbols.remove(self._fiat)
+                self._crypto = symbols
 
             elif isinstance(value, Decimal) or isinstance(value, float) or isinstance(value, int):
                 self.portfolio_df.at[self.timestamp, self._fiat] = convert_to.decimal(value)
@@ -273,6 +269,9 @@ class TradingEnvironment(Env):
                     timestamp = self.timestamp
                 self.portfolio_df.at[timestamp, self._fiat] = convert_to.decimal(value[self._fiat])
 
+        except IndexError:
+            raise AssertionError('You must enter pairs before set fiat.')
+
         except Exception as e:
             self.logger.error(TradingEnvironment.fiat, self.parse_error(e))
             raise e
@@ -282,7 +281,7 @@ class TradingEnvironment(Env):
         try:
             crypto = {}
             for symbol in self._crypto:
-                crypto[symbol] = self.portfolio_df.get_value(self.portfolio_df[symbol].last_valid_index(), symbol)
+                crypto[symbol] = self.get_crypto(symbol)
             return crypto
         except KeyError as e:
             self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
@@ -293,7 +292,16 @@ class TradingEnvironment(Env):
 
     def get_crypto(self, symbol):
         try:
-            return self.portfolio_df.get_value(self.portfolio_df[symbol].last_valid_index(), symbol)
+            i = -1
+            value = self.portfolio_df.get_value(self.portfolio_df.index[i], symbol)
+            while not convert_to.decimal(value).is_finite():
+                i -= 1
+                value = self.portfolio_df.get_value(self.portfolio_df.index[i], symbol)
+            return value
+
+        except IndexError:
+            self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
+            raise KeyError
         except KeyError as e:
             self.logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
             raise e
@@ -304,7 +312,7 @@ class TradingEnvironment(Env):
     @crypto.setter
     def crypto(self, values):
         try:
-            assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
+            # assert isinstance(values, dict), "Crypto value must be a dictionary containing the currencies balance."
             try:
                 timestamp = values['timestamp']
             except KeyError:
@@ -313,13 +321,19 @@ class TradingEnvironment(Env):
                 if symbol not in [self._fiat, 'timestamp']:
                     self.portfolio_df.at[timestamp, symbol] = convert_to.decimal(value)
 
+        except TypeError:
+            raise AssertionError("Crypto value must be a dictionary containing the currencies balance.")
+
         except Exception as e:
             self.logger.error(TradingEnvironment.crypto, self.parse_error(e))
             raise e
 
     @property
     def balance(self):
-        return self.portfolio_df.loc[self.portfolio_df.index[-1], self.symbols].to_dict()
+        # return self.portfolio_df.ffill().loc[self.portfolio_df.index[-1], self.symbols].to_dict()
+        balance = self.crypto
+        balance.update({self._fiat: self.fiat})
+        return balance
 
     @balance.setter
     def balance(self, values):
@@ -382,6 +396,33 @@ class TradingEnvironment(Env):
         # return floor_datetime(datetime.now(timezone.utc) - timedelta(minutes=self.period), self.period)
         # Poloniex returns utc timestamp delayed from one bar
         return datetime.now(timezone.utc) - timedelta(minutes=self.period)
+
+    # Exchange data getters
+    def get_balance(self):
+        try:
+            balance = self.tapi.returnBalances()
+
+            filtered_balance = {}
+            for symbol in self.symbols:
+                filtered_balance[symbol] = balance[symbol]
+
+            return filtered_balance
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
+            raise e
+
+    def get_fee(self, symbol, fee_type='takerFee'):
+        # TODO MAKE IT UNIVERSAL
+        try:
+            fees = self.tapi.returnFeeInfo()
+
+            assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
+            return convert_to.decimal(fees[fee_type])
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
+            raise e
 
     # High frequency getter
     def get_pair_trades(self, pair, start=None, end=None):
@@ -474,11 +515,13 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
+
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True)
 
         # Get right values to fill nans
-        fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
+        # TODO: FIND A BETTER PERFORMANCE METHOD
+        fill_dict = {col: ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close') for col in ['open', 'high', 'low', 'close']}
         fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
@@ -596,37 +639,11 @@ class TradingEnvironment(Env):
         # TODO 1 FIND A BETTER WAY
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
-    def get_balance(self):
-        try:
-            balance = self.tapi.returnBalances()
-
-            filtered_balance = {}
-            for symbol in self.symbols:
-                filtered_balance[symbol] = balance[symbol]
-
-            return filtered_balance
-
-        except Exception as e:
-            self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
-            raise e
-
-    def get_fee(self, symbol, fee_type='takerFee'):
-        # TODO MAKE IT UNIVERSAL
-        try:
-            fees = self.tapi.returnFeeInfo()
-
-            assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
-            return convert_to.decimal(fees[fee_type])
-
-        except Exception as e:
-            self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
-            raise e
-
     ## Trading methods
     def get_close_price(self, symbol, timestamp=None):
         if not timestamp:
             timestamp = self.obs_df.index[-1]
-        return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'close'))
+        return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'open'))
 
     def calc_total_portval(self, timestamp=None):
         portval = convert_to.decimal('0E-8')
@@ -644,10 +661,10 @@ class TradingEnvironment(Env):
             return safe_div(self.get_crypto(symbol) * self.get_close_price(symbol), self.calc_total_portval())
 
     def calc_portfolio_vector(self):
-        portfolio = []
-        for symbol in self.symbols:
-            portfolio.append(self.calc_posit(symbol))
-        return np.array(portfolio)
+        portfolio = np.empty(len(self.symbols), dtype=Decimal)
+        for i, symbol in enumerate(self.symbols):
+            portfolio[i] = self.calc_posit(symbol)
+        return portfolio
 
     def assert_action(self, action):
         # TODO WRITE TEST
@@ -684,7 +701,13 @@ class TradingEnvironment(Env):
 
     def get_last_portval(self):
         try:
-            return self.portfolio_df.get_value(self.portfolio_df['portval'].last_valid_index(), 'portval')
+            i = -1
+            portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
+            while not convert_to.decimal(portval).is_finite():
+                i -= 1
+                portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
+
+            return portval
         except Exception as e:
             self.logger.error(TradingEnvironment.get_last_portval, self.parse_error(e))
             raise e
@@ -746,15 +769,15 @@ class TradingEnvironment(Env):
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += convert_to.decimal(self.init_balance[symbol]) * \
-                           obs.get_value(init_time, (self._fiat + '_' + symbol, 'close'))
+                           obs.get_value(init_time, (self._fiat + '_' + symbol, 'open'))
         init_portval += convert_to.decimal(self.init_balance[self._fiat])
 
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
             for symbol in self.pairs:
-                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'close'] * \
+                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
                                             init_portval / (obs.get_value(init_time,
-                                            (symbol, 'close')) * Decimal(self.action_space.low.shape[0] - 1))
+                                            (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
                 self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
@@ -1089,9 +1112,7 @@ class PaperTradingEnvironment(TradingEnvironment):
                     self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
 
                     # if fiat_pool is negative, deduce it from portval and clip
-                    try:
-                        assert self.fiat >= convert_to.decimal('0E-8')
-                    except AssertionError:
+                    if self.fiat < convert_to.decimal('0E-8'):
                         portval += self.fiat
                         self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
 
@@ -1161,6 +1182,7 @@ class BacktestEnvironment(PaperTradingEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
 
+    # Low frequency getter
     def get_ohlc(self, symbol, index):
         # Get range
         start = index[0]
@@ -1174,12 +1196,14 @@ class BacktestEnvironment(PaperTradingEnvironment):
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
+
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True)
 
-        ## We assume that in backtest we dont have NaN values. Fillna is disabled for speed.
+        # Disabled fill on backtest for performance.
+        # We assume that backtest data feed will not return nan values
 
-        # # Get right values to fill nans
+        # Get right values to fill nans
         # fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
         # fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans

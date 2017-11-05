@@ -202,12 +202,12 @@ def test_get_close_price(ready_env):
 
     price = env.get_close_price("BTC")
     assert isinstance(price, Decimal)
-    assert price == env.obs_df["USDT_BTC"].close.iloc[-1]
+    assert price == env.obs_df["USDT_BTC"].open.iloc[-1]
 
     for i in env.obs_df.index:
         price = env.get_close_price("BTC", i)
         assert isinstance(price, Decimal)
-        assert price == env.obs_df["USDT_BTC"].close.loc[i]
+        assert price == env.obs_df["USDT_BTC"].open.loc[i]
 
 def test_get_fee(ready_env):
     env = ready_env
