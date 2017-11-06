@@ -559,8 +559,7 @@ class MomentumTrader(APrioriAgent):
                 df = self.get_ma(df)
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2]))
 
             return factor
 
@@ -577,9 +576,13 @@ class MomentumTrader(APrioriAgent):
             for i in range(position.shape[0] - 1):
 
                 if factor[i] >= 0.0:
-                    position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i])
+                    position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i] / \
+                                      (obs.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                                       self.epsilon))
                 else:
-                    position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i])
+                    position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i] / \
+                                      (obs.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                                       self.epsilon))
 
             position[-1] = max(0., 1 - position[:-1].sum())
 

@@ -1129,7 +1129,7 @@ class BacktestEnvironment(TradingEnvironment):
             self.data_length = self.tapi.data_length
 
             if self.training:
-                self.index = np.random.random_integers(self.obs_steps, self.data_length - 2)
+                self.index = np.random.random_integers(self.obs_steps, self.data_length - 3)
             else:
                 self.index = self.obs_steps
 
