@@ -106,7 +106,7 @@ class BacktestDataFeed(object):
         :return:
         """
         for item in self.ohlc_data:
-            self.ohlc_data[item].drop_index.to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
+            self.ohlc_data[item].to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
 
 
     def load_data(self, dir):
