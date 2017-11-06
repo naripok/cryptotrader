@@ -337,3 +337,31 @@ class Space(object):
         """Return boolean specifying if x is a valid member of this space
         """
         raise NotImplementedError()
+
+
+class ExchangeConnection(object):
+    def __init__(self, tapi, period, pairs=[]):
+        """
+        :param tapi: exchange api instance: Exchange api instance
+        :param period: int: Data period
+        :param pairs: list: Pairs to trade
+        """
+        self.tapi = tapi
+        self.period = period
+        self.pairs = pairs
+
+    @property
+    def balance(self):
+        return NotImplementedError("This class is not intended to be used directly.")
+
+    def returnBalances(self):
+        return NotImplementedError("This class is not intended to be used directly.")
+
+    def returnFeeInfo(self):
+        return NotImplementedError("This class is not intended to be used directly.")
+
+    def returnCurrencies(self):
+        return NotImplementedError("This class is not intended to be used directly.")
+
+    def returnChartData(self, currencyPair, period, start=None, end=None):
+        return NotImplementedError("This class is not intended to be used directly.")
