@@ -34,10 +34,10 @@ class BacktestDataFeed(object):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, period, load_dir=None, pairs=[], portifolio={}):
+    def __init__(self, tapi, period, load_dir=None, pairs=[], portfolio={}):
         self.tapi = tapi
         self.ohlc_data = {}
-        self.portfolio = portifolio
+        self.portfolio = portfolio
         self.pairs = pairs
         self.period = period
         self.data_length = 0
