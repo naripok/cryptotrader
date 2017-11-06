@@ -34,13 +34,14 @@ class BacktestDataFeed(object):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, period, pairs=[], portifolio={}):
+    def __init__(self, tapi, period, load_dir=None, pairs=[], portifolio={}):
         self.tapi = tapi
         self.ohlc_data = {}
         self.portfolio = portifolio
         self.pairs = pairs
         self.period = period
         self.data_length = 0
+        self.load_dir = load_dir
 
     @property
     def balance(self):
@@ -62,7 +63,15 @@ class BacktestDataFeed(object):
                 'thirtyDayVolume': '0.00000000'}
 
     def returnCurrencies(self):
-        return self.tapi.returnCurrencies()
+        if self.load_dir:
+            try:
+                with open(self.load_dir+'/currencies.json') as file:
+                    return json.load(file)
+            except Exception as e:
+                print(str(e.__cause__) + str(e))
+                return self.tapi.returnCurrencies()
+        else:
+            return self.tapi.returnCurrencies()
 
     def download_data(self, start=None, end=None):
         # TODO WRITE TEST
@@ -90,15 +99,27 @@ class BacktestDataFeed(object):
         print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
                                                                 (24 * 60), self.period))
 
-    def save_data(self, dir):
+    def save_data(self, dir=None):
+        """
+        Save data to disk
+        :param dir: str: directory relative to ./; eg './data/train
+        :return:
+        """
         for item in self.ohlc_data:
             self.ohlc_data[item].drop_index.to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
 
+
     def load_data(self, dir):
+        """
+        Load data form disk.
+        JSON like data expected.
+        :param dir: str: directory relative to self.load_dir; eg: './self.load_dir/dir'
+        :return: None
+        """
         self.ohlc_data = {}
         self.data_length = None
         for key in self.pairs:
-            self.ohlc_data[key] = pd.read_json(dir+'/'+str(key)+'_'+str(self.period)+'min', convert_dates=False,
+            self.ohlc_data[key] = pd.read_json(self.load_dir + dir +'/'+str(key)+'_'+str(self.period)+'min', convert_dates=False,
                                                 orient='records', date_unit='s', keep_default_dates=False, dtype=False)
             self.ohlc_data[key].set_index('date', inplace=True, drop=False)
             if not self.data_length:
