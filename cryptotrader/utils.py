@@ -169,6 +169,10 @@ class convert_to(object):
                 raise InvalidOperation("Numeric overflow in convert_to.decimal")
             elif data == np.nan or math.nan:
                 raise InvalidOperation("NaN encountered in convert_to.decimal")
+        except Exception as e:
+            print(data)
+            print(e)
+            raise e
 
 
 # ZMQ sockets helpers

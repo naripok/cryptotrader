@@ -178,10 +178,10 @@ class APrioriAgent(Agent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
-        except KeyError:
-            env.training = False
-            print("\nOptimization interrupted by user.")
-            return None, None
+        # except KeyError:
+        #     env.training = False
+        #     print("\nOptimization interrupted by user.")
+        #     return None, None
 
     def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):

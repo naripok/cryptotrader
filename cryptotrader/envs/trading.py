@@ -20,7 +20,7 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import PoloniexError
+from ..exchange_api.poloniex import PoloniexError, Poloniex
 import json
 
 # Decimal precision
@@ -591,13 +591,14 @@ class TradingEnvironment(Env):
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)))
+                                                                        end=datetime.timestamp(end)),
+                                                                        nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
 
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                          inplace=True)
+                          inplace=True, drop=True)
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
@@ -607,7 +608,7 @@ class TradingEnvironment(Env):
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
 
-        return ohlc_df
+        return ohlc_df.astype(str)#.fillna('0.0')
 
     # Observation maker
     def get_history(self, start=None, end=None, portfolio_vector=False):
@@ -675,6 +676,8 @@ class TradingEnvironment(Env):
                 return obs.apply(convert_to.decimal, raw=True)
 
         except Exception as e:
+            print(obs)
+            print(obs.shape)
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             raise e
 
@@ -1242,13 +1245,14 @@ class BacktestEnvironment(TradingEnvironment):
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)))
+                                                                        end=datetime.timestamp(end)),
+                                                                        nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
 
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                          inplace=True)
+                          inplace=True, drop=True)
 
         # Disabled fill on backtest for performance.
         # We assume that backtest data feed will not return nan values
@@ -1260,7 +1264,7 @@ class BacktestEnvironment(TradingEnvironment):
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
 
-        return ohlc_df
+        return ohlc_df.astype(str)
 
     def reset(self, reset_dfs=True):
         """
@@ -1356,7 +1360,7 @@ class PaperTradingEnvironment(TradingEnvironment):
     Paper trading environment for financial strategies forward testing
     """
     def __init__(self, period, obs_steps, tapi, name):
-        assert isinstance(tapi, PaperTradingDataFeed), "Paper trade tapi must be a instance of PaperTradingDataFeed."
+        assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, Poloniex), "Paper trade tapi must be a instance of PaperTradingDataFeed."
         super().__init__(period, obs_steps, tapi, name)
 
     def reset(self):
@@ -1428,7 +1432,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             action = self.assert_action(action)
 
             # Calculate position change given last porftolio and action vector
-            posit_change = (action - self.calc_total_portval())[:-1]
+            posit_change = (action - self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
             portval = self.calc_total_portval()
