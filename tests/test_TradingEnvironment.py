@@ -43,7 +43,7 @@ def ready_env():
 
 @pytest.fixture
 def data_feed():
-    df = BacktestDataFeed(tapi, period=5, pairs=["USDT_BTC", "USDT_ETH"], portifolio={"BTC":'1.00000000',
+    df = BacktestDataFeed(tapi, period=5, pairs=["USDT_BTC", "USDT_ETH"], portfolio={"BTC":'1.00000000',
                                                                                     "ETH":'0.50000000',
                                                                                     "USDT":'100.00000000'})
     yield df

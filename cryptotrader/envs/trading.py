@@ -3,7 +3,7 @@ Trading environment class
 data: 12/10/2017
 author: Tau
 """
-from ..core import Env
+from ..core import Env, ExchangeConnection
 from ..spaces import *
 from ..utils import Logger, safe_div, floor_datetime
 from .utils import *
@@ -20,7 +20,7 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import PoloniexError
+from ..exchange_api.poloniex import PoloniexError, Poloniex
 import json
 
 # Decimal precision
@@ -183,6 +183,49 @@ class PaperTradingDataFeed(object):
 
         except PoloniexError:
             raise ValueError("Bad exchange response data.")
+
+
+class PoloniexConnection(ExchangeConnection):
+    def __init__(self, tapi, period, pairs=[]):
+        """
+        :param tapi: exchange api instance: Exchange api instance
+        :param period: int: Data period
+        :param pairs: list: Pairs to trade
+        """
+        super().__init__(tapi, period, pairs)
+
+    @property
+    def balance(self):
+        return self.tapi.returnBalances()
+
+    def returnBalances(self):
+        return self.tapi.returnBalances()
+
+    def returnFeeInfo(self):
+        return self.tapi.returnFeeInfo()
+
+    def returnCurrencies(self):
+        return self.tapi.returnCurrencies()
+
+    def returnChartData(self, currencyPair, period, start=None, end=None):
+        try:
+            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+        except PoloniexError:
+            raise ValueError("Bad exchange response data.")
+
+
+class MultiExchangeConnection(ExchangeConnection):
+    """
+    Exchanges connection helper.
+    This class communicate with all exchanges apis.
+    """
+    def __init__(self, tapis={}, period=None, pairs=[]):
+        """
+        :param tapis: dict: Dictionary containing the exchanges names and api instances
+        :param period: int: Data period
+        :param pairs: list: Pairs to trade
+        """
+        super().__init__(tapis, period, pairs)
 
 
 class TradingEnvironment(Env):
@@ -548,13 +591,14 @@ class TradingEnvironment(Env):
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)))
+                                                                        end=datetime.timestamp(end)),
+                                                                        nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
 
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                          inplace=True)
+                          inplace=True, drop=True)
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
@@ -564,7 +608,7 @@ class TradingEnvironment(Env):
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
 
-        return ohlc_df
+        return ohlc_df.astype(str)#.fillna('0.0')
 
     # Observation maker
     def get_history(self, start=None, end=None, portfolio_vector=False):
@@ -632,6 +676,8 @@ class TradingEnvironment(Env):
                 return obs.apply(convert_to.decimal, raw=True)
 
         except Exception as e:
+            print(obs)
+            print(obs.shape)
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             raise e
 
@@ -759,6 +805,86 @@ class TradingEnvironment(Env):
     def get_reward(self):
         # TODO TEST
         return safe_div(self.portval, self.get_last_portval())
+
+    def simulate_trade(self, action, timestamp):
+        """
+        Simulates trade on exchange environment
+        :param action: np.array: Desired portfolio vector
+        :param timestamp: datetime.datetime: Trade time
+        :return: None
+        """
+        # TODO: IMPLEMENT SLIPPAGE MODEL
+        try:
+            # Assert inputs
+            action = self.assert_action(action)
+            # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
+            #     self.observation_space.contains(observation[symbol])
+            # assert isinstance(timestamp, pd.Timestamp)
+
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
+
+            # Calculate position change given action
+            posit_change = (action - self.calc_portfolio_vector())[:-1]
+
+            # Get initial portval
+            portval = self.calc_total_portval()
+
+            # Sell assets first
+            for i, change in enumerate(posit_change):
+                if change < convert_to.decimal('0E-8'):
+
+                    symbol = self.symbols[i]
+
+                    crypto_pool = safe_div(portval * action[i], self.get_open_price(symbol))
+
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_UP
+
+                        fee = portval * change.copy_abs() * self.tax[symbol]
+
+                    self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
+
+                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+
+            # Uodate prev portval with deduced taxes
+            portval = self.calc_total_portval()
+
+            # Then buy some goods
+            for i, change in enumerate(posit_change):
+                if change > convert_to.decimal('0E-8'):
+
+                    symbol = self.symbols[i]
+
+                    self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
+
+                    # if fiat_pool is negative, deduce it from portval and clip
+                    if self.fiat < convert_to.decimal('0E-8'):
+                        portval += self.fiat
+                        self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
+
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_UP
+
+                        fee = self.tax[symbol] * portval * change
+
+                    crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_open_price(symbol))
+
+                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+
+            # Log executed action and final balance
+            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
+            final_balance = self.balance
+            final_balance['timestamp'] = timestamp
+            self.balance = final_balance
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.simulate_trade, self.parse_error(e))
+            if hasattr(self, 'email') and hasattr(self, 'psw'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
 
     ## Env methods
     def set_observation_space(self):
@@ -1119,13 +1245,14 @@ class BacktestEnvironment(TradingEnvironment):
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
                                                                         start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)))
+                                                                        end=datetime.timestamp(end)),
+                                                                        nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
 
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                          inplace=True)
+                          inplace=True, drop=True)
 
         # Disabled fill on backtest for performance.
         # We assume that backtest data feed will not return nan values
@@ -1137,7 +1264,7 @@ class BacktestEnvironment(TradingEnvironment):
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
 
-        return ohlc_df
+        return ohlc_df.astype(str)
 
     def reset(self, reset_dfs=True):
         """
@@ -1187,79 +1314,6 @@ class BacktestEnvironment(TradingEnvironment):
             print("Insufficient tapi data. You must choose a bigger time span or a lower period.")
             raise IndexError
 
-    def simulate_trade(self, action, timestamp):
-        try:
-            # Assert inputs
-            action = self.assert_action(action)
-            # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-            #     self.observation_space.contains(observation[symbol])
-            # assert isinstance(timestamp, pd.Timestamp)
-
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
-
-            # Calculate position change given action
-            posit_change = (action - self.calc_portfolio_vector())[:-1]
-
-            # Get initial portval
-            portval = self.calc_total_portval()
-
-            # Sell assets first
-            for i, change in enumerate(posit_change):
-                if change < convert_to.decimal('0E-8'):
-
-                    symbol = self.symbols[i]
-
-                    crypto_pool = safe_div(portval * action[i], self.get_open_price(symbol))
-
-                    with localcontext() as ctx:
-                        ctx.rounding = ROUND_UP
-
-                        fee = portval * change.copy_abs() * self.tax[symbol]
-
-                    self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
-
-                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
-
-            # Uodate prev portval with deduced taxes
-            portval = self.calc_total_portval()
-
-            # Then buy some goods
-            for i, change in enumerate(posit_change):
-                if change > convert_to.decimal('0E-8'):
-
-                    symbol = self.symbols[i]
-
-                    self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
-
-                    # if fiat_pool is negative, deduce it from portval and clip
-                    if self.fiat < convert_to.decimal('0E-8'):
-                        portval += self.fiat
-                        self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
-
-                    with localcontext() as ctx:
-                        ctx.rounding = ROUND_UP
-
-                        fee = self.tax[symbol] * portval * change
-
-                    crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_open_price(symbol))
-
-                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
-
-            # Log executed action and final balance
-            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
-            final_balance = self.balance
-            final_balance['timestamp'] = timestamp
-            self.balance = final_balance
-
-        except Exception as e:
-            self.logger.error(PaperTradingEnvironment.simulate_trade, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
-                self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
-            raise e
-
     def step(self, action):
         try:
             # Get reward for previous action
@@ -1292,7 +1346,7 @@ class BacktestEnvironment(TradingEnvironment):
             raise KeyboardInterrupt
 
         except Exception as e:
-            self.logger.error(TradingEnvironment.step, self.parse_error(e))
+            self.logger.error(BacktestEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
@@ -1306,6 +1360,7 @@ class PaperTradingEnvironment(TradingEnvironment):
     Paper trading environment for financial strategies forward testing
     """
     def __init__(self, period, obs_steps, tapi, name):
+        assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, Poloniex), "Paper trade tapi must be a instance of PaperTradingDataFeed."
         super().__init__(period, obs_steps, tapi, name)
 
     def reset(self):
@@ -1329,25 +1384,54 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         return obs.astype(np.float64)
 
-    def simulate_trade(self, action, timestamp):
-        """
-        Simulates trade on exchange environment
-        :param action: np.array: Desired portfolio vector
-        :param timestamp: datetime.datetime: Trade time
-        :return: None
-        """
-        # TODO: IMPLEMENT SLIPPAGE MODEL
+    def step(self, action):
         try:
-            # Assert inputs
+            # Get reward for previous action
+            reward = self.get_reward()
+
+            # Get step timestamp
+            timestamp = self.timestamp
+
+            # Simulate portifolio rebalance
+            self.simulate_trade(action, timestamp)
+
+            # Calculate new portval
+            self.portval = {'portval': self.calc_total_portval(),
+                            'timestamp': self.portfolio_df.index[-1]}
+
+            done = True
+
+            # Return new observation, reward, done flag and status for debugging
+            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+        except Exception as e:
+            self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
+            if hasattr(self, 'email') and hasattr(self, 'psw'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
+
+
+class LiveTradingEnvironment(TradingEnvironment):
+    """
+    Live trading environment for financial strategies execution
+    """
+    def __init__(self, period, obs_steps, tapi, name):
+        assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
+        super().__init__(period, obs_steps, tapi, name)
+
+    # Online Trading methods
+    def online_rebalance(self, action, timestamp):
+        """
+        Performs online portfolio rebalance within ExchangeConnection
+        :param action: numpy array: action vector with desired portfolio weights. Norm must be one.
+        :return: bool: True if fully executed; False otherwise.
+        """
+        try:
+            # First, assert action is valid
             action = self.assert_action(action)
-            # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-            #     self.observation_space.contains(observation[symbol])
-            # assert isinstance(timestamp, pd.Timestamp)
 
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
-
-            # Calculate position change given action
+            # Calculate position change given last porftolio and action vector
             posit_change = (action - self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
@@ -1401,13 +1485,36 @@ class PaperTradingEnvironment(TradingEnvironment):
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
+
         except Exception as e:
-            self.logger.error(PaperTradingEnvironment.simulate_trade, self.parse_error(e))
+            self.logger.error(LiveTradingEnvironment.simulate_trade, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
-                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             raise e
+
+    # Env methods
+    def reset(self):
+
+        self.obs_df = pd.DataFrame()
+        self.portfolio_df = pd.DataFrame()
+        self.action_df = pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp])
+
+        self.set_observation_space()
+        self.set_action_space()
+
+        self.balance = self.init_balance = self.get_balance()
+
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        obs = self.get_observation(True)
+
+        self.portval = {'portval': self.calc_total_portval(),
+                        'timestamp': self.portfolio_df.index[-1]}
+
+        return obs.astype(np.float64)
 
     def step(self, action):
         try:
@@ -1429,7 +1536,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
         except Exception as e:
-            self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
+            self.logger.error(LiveTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
