@@ -87,7 +87,7 @@ class DataFeed(object):
         except PoloniexError:
             raise ValueError("Bad exchange response data.")
 
-    def invert_pair(self, pair_data):
+    def pair_reciprocal(self, pair_data):
         pass
 
 

@@ -7,7 +7,7 @@ import zmq
 import msgpack
 
 import numpy as np
-from bson import Decimal128
+# from bson import Decimal128
 import math
 
 decimal_cases = 1E-8
@@ -144,11 +144,11 @@ class convert_to(object):
     _convert_array = np.vectorize(Decimal)
     _quantize_array = np.vectorize(lambda x: Decimal(x).quantize(convert_to._quantizer))
 
-    @staticmethod
-    def decimal128(data):
-        if isinstance(data, np.float32):
-            data = np.float64(data)
-        return Decimal128(convert_to._quantize(Decimal(data)))
+    # @staticmethod
+    # def decimal128(data):
+    #     if isinstance(data, np.float32):
+    #         data = np.float64(data)
+    #     return Decimal128(convert_to._quantize(Decimal(data)))
 
     @staticmethod
     def decimal(data):
