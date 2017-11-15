@@ -52,20 +52,43 @@ class DataFeed(object):
             self._balance[key] = port[key]
 
     def returnBalances(self):
+        """
+        Return balance from exchange. API KEYS NEEDED!
+        :return: list:
+        """
         return self.tapi.returnBalances()
 
     def returnFeeInfo(self):
+        """
+        Returns exchange fee informartion
+        :return:
+        """
         return self.tapi.returnFeeInfo()
 
     def returnCurrencies(self):
+        """
+        Return exchange currency pairs
+        :return: list:
+        """
         return self.tapi.returnCurrencies()
 
     def returnChartData(self, currencyPair, period, start=None, end=None):
+        """
+        Return pair OHLC data
+        :param currencyPair: str: Desired pair str
+        :param period: int: Candle period. Must be in [300, 900, 1800, 7200, 14400, 86400]
+        :param start: str: UNIX timestamp to start from
+        :param end:  str: UNIX timestamp to end returned data
+        :return: list: List containing desired asset data in "records" format
+        """
         try:
             return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
 
         except PoloniexError:
             raise ValueError("Bad exchange response data.")
+
+    def invert_pair(self, pair_data):
+        pass
 
 
 class BacktestDataFeed(DataFeed):
@@ -184,7 +207,6 @@ class PaperTradingDataFeed(DataFeed):
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
-
 
 
 class PoloniexConnection(ExchangeConnection):
@@ -1022,7 +1044,7 @@ class TradingEnvironment(Env):
             legend.append((str(symbol), [results[symbol + '_posit']]))
 
         p_pos.add_layout(Legend(items=legend, location=(0, -31)), 'right')
-
+        p_pos.legend.click_policy = "hide"
         # Portifolio and benchmark values
         val_hover = HoverTool(
             tooltips=[
