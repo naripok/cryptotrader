@@ -269,7 +269,7 @@ class APrioriAgent(Agent):
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
-            last_action_time = floor_datetime(env.timestamp, env.period)
+            last_action_time = floor_datetime(env.timestamp - timedelta(minutes=env.period), env.period)
 
             can_act = False
             while True:
