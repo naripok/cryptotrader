@@ -29,32 +29,81 @@ getcontext().prec = 24
 # Debug flag
 debug = True
 
-class BacktestDataFeed(object):
+class DataFeed(object):
     """
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, period, load_dir=None, pairs=[], portfolio={}):
+    def __init__(self, tapi, period, pairs=[], balance={}):
         self.tapi = tapi
         self.ohlc_data = {}
-        self.portfolio = portfolio
+        self._balance = balance
         self.pairs = pairs
         self.period = period
-        self.data_length = 0
-        self.load_dir = load_dir
 
     @property
     def balance(self):
-        return self.portfolio
+        return self._balance
 
     @balance.setter
     def balance(self, port):
         assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
         for key in port:
-            self.portfolio[key] = port[key]
+            self._balance[key] = port[key]
 
     def returnBalances(self):
-        return self.portfolio
+        """
+        Return balance from exchange. API KEYS NEEDED!
+        :return: list:
+        """
+        return self.tapi.returnBalances()
+
+    def returnFeeInfo(self):
+        """
+        Returns exchange fee informartion
+        :return:
+        """
+        return self.tapi.returnFeeInfo()
+
+    def returnCurrencies(self):
+        """
+        Return exchange currency pairs
+        :return: list:
+        """
+        return self.tapi.returnCurrencies()
+
+    def returnChartData(self, currencyPair, period, start=None, end=None):
+        """
+        Return pair OHLC data
+        :param currencyPair: str: Desired pair str
+        :param period: int: Candle period. Must be in [300, 900, 1800, 7200, 14400, 86400]
+        :param start: str: UNIX timestamp to start from
+        :param end:  str: UNIX timestamp to end returned data
+        :return: list: List containing desired asset data in "records" format
+        """
+        try:
+            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+
+        except PoloniexError:
+            raise ValueError("Bad exchange response data.")
+
+    def invert_pair(self, pair_data):
+        pass
+
+
+class BacktestDataFeed(DataFeed):
+    """
+    Data feeder for backtesting with TradingEnvironment.
+    """
+    # TODO WRITE TESTS
+    def __init__(self, tapi, period, pairs=[], balance={}, load_dir=None):
+        super().__init__(tapi, period, pairs, balance)
+        self.ohlc_data = {}
+        self.data_length = 0
+        self.load_dir = load_dir
+
+    def returnBalances(self):
+        return self._balance
 
     def returnFeeInfo(self):
         return {'makerFee': '0.00150000',
@@ -108,7 +157,6 @@ class BacktestDataFeed(object):
         for item in self.ohlc_data:
             self.ohlc_data[item].to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
 
-
     def load_data(self, dir):
         """
         Load data form disk.
@@ -143,46 +191,22 @@ class BacktestDataFeed(object):
                 raise PoloniexError("Invalid currency pair.")
 
 
-class PaperTradingDataFeed(object):
+class PaperTradingDataFeed(DataFeed):
     """
     Data feeder for paper trading with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    def __init__(self, tapi, period, pairs=[], portifolio={}):
-        self.tapi = tapi
-        self.portfolio = portifolio
-        self.pairs = pairs
-        self.period = period
-
-    @property
-    def balance(self):
-        return self.portfolio
-
-    @balance.setter
-    def balance(self, port):
-        assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
-        for key in port:
-            self.portfolio[key] = port[key]
+    def __init__(self, tapi, period, pairs=[], balance={}):
+        super().__init__(tapi, period, pairs, balance)
 
     def returnBalances(self):
-        return self.portfolio
+        return self._balance
 
     def returnFeeInfo(self):
-        # return self.tapi.returnFeeInfo()
         return {'makerFee': '0.00150000',
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
-
-    def returnCurrencies(self):
-        return self.tapi.returnCurrencies()
-
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        try:
-            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-
-        except PoloniexError:
-            raise ValueError("Bad exchange response data.")
 
 
 class PoloniexConnection(ExchangeConnection):
@@ -1020,7 +1044,7 @@ class TradingEnvironment(Env):
             legend.append((str(symbol), [results[symbol + '_posit']]))
 
         p_pos.add_layout(Legend(items=legend, location=(0, -31)), 'right')
-
+        p_pos.legend.click_policy = "hide"
         # Portifolio and benchmark values
         val_hover = HoverTool(
             tooltips=[

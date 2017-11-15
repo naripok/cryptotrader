@@ -271,7 +271,7 @@ class APrioriAgent(Agent):
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
 
-            can_act = False
+            can_act = True
             while True:
                 try:
                     loop_time = env.timestamp
@@ -297,14 +297,14 @@ class APrioriAgent(Agent):
 
                     if verbose:
                         print(
-                            ">> step {0}, Uptime: {1}, Last tstamp: {5}, Crypto prices: {2}, Last action: {4}, Portval: {3:.2f}{6}".format(
+                            ">> step {0}, Uptime: {1}, Last tstamp: {4}, Crypto prices: {2}, Last action: {3}, Portfolio: {6}{5}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
                                 ["%s: %.08f" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close'))) for symbol in env.pairs],
-                                env.calc_total_portval(),
-                                env.action_df.iloc[-1].astype('f').to_dict(),
+                                env.action_df.iloc[-1].astype(str).to_dict(),
                                 str(obs.index[-1]),
-                                "                                                                                       "
+                                "                                                                                       ",
+                                env.portfolio_df.iloc[-1].astype(str).to_dict()
                             ), end="\r", flush=True)
 
                     if status['Error']:
@@ -607,7 +607,6 @@ class PAMRTrader(APrioriAgent):
         Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
-
     def __repr__(self):
         return "PAMRTrader"
 
@@ -777,9 +776,9 @@ class HarmonicTrader(APrioriAgent):
             port_vec = np.zeros(pairs.shape[0])
             for i in range(pairs.shape[0] - 1):
                 if action[i] >= 0:
-                    port_vec[i] = max(0., self.decay * prev_port[i] + self.alpha[0] * action[i])
+                    port_vec[i] = max(0., (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[0] * action[i])
                 else:
-                    port_vec[i] = max(0., self.decay * prev_port[i] + self.alpha[1] * action[i])
+                    port_vec[i] = max(0., (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[1] * action[i])
 
             port_vec[-1] = max(0, 1 - port_vec.sum())
 
