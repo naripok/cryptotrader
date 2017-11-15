@@ -271,7 +271,7 @@ class APrioriAgent(Agent):
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
 
-            can_act = True
+            can_act = False
             while True:
                 try:
                     loop_time = env.timestamp
