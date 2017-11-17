@@ -265,13 +265,13 @@ class APrioriAgent(Agent):
 
         try:
             t0 = time()
-            self.step = 0
+            self.step = 1
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
 
-            can_act = False
+            can_act = True # TODO: FALSE HERE
             while True:
                 try:
                     loop_time = env.timestamp
@@ -569,21 +569,27 @@ class MomentumTrader(APrioriAgent):
 
     def rebalance(self, obs):
         try:
-            obs = obs.astype(np.float64).ffill()
-            prev_posit = self.get_portfolio_vector(obs)
-            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
-            factor = self.act(obs)
-            for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                if factor[i] >= 0.0:
-                    position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i] / \
-                                      (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                                       self.epsilon))
-                else:
-                    position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i] / \
-                                      (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                                       self.epsilon))
+            if self.step == 0:
+                n_pairs = obs.columns.levels[0].shape[0]
+                action = np.ones(n_pairs)
+                action[-1] = 0
+                return array_normalize(action)
+            else:
+                obs = obs.astype(np.float64).ffill()
+                prev_posit = self.get_portfolio_vector(obs)
+                position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
+                factor = self.act(obs)
+                for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                    if factor[i] >= 0.0:
+                        position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i] / \
+                                          (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                                           self.epsilon))
+                    else:
+                        position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i] / \
+                                          (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                                           self.epsilon))
 
-            position[-1] = max(0., 1 - position[:-1].sum())
+                position[-1] = max(0., 1 - position[:-1].sum())
 
             return self.activation(position)
 
@@ -626,18 +632,18 @@ class PAMRTrader(APrioriAgent):
         """
         Performs a single step on the environment
         """
-        if self.step == 0:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-2)
-            price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
-                last_b[key] = np.float64(prev_posit[key])
+        # if self.step == 0:
+        #     n_pairs = obs.columns.levels[0].shape[0]
+        #     action = np.ones(n_pairs)
+        #     action[-1] = 0
+        #     return array_normalize(action)
+        # else:
+        prev_posit = self.get_portfolio_vector(obs, index=-1)
+        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
+            last_b[key] = np.float64(prev_posit[key])
         return self.update(last_b, price_relative)
 
     def rebalance(self, obs):
