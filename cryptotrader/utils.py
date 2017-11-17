@@ -2,7 +2,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, DivisionByZero
 from functools import partialmethod
-
 import zmq
 import msgpack
 
@@ -48,11 +47,21 @@ class Logger(object):
     @staticmethod
     def error(method, str):
         """
-        Write info log
+        Write error log
         :param method: Method name
         :param str: Log message
         """
         Logger.logger.error('[%s]\n%s\n' % (method, str))
+
+    @staticmethod
+    def debug(method, str):
+        """
+        Write debug log
+        :param method: Method name
+        :param str: Log message
+        """
+        Logger.logger.debug('[%s]\n%s\n' % (method, str))
+
 
 
 def safe_div(x, y, eps=Decimal('1E-8')):

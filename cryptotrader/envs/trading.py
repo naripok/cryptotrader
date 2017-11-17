@@ -20,8 +20,10 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import PoloniexError, Poloniex
+from ..exchange_api.poloniex import PoloniexError, Poloniex, RetryException
 import json
+from functools import wraps as _wraps
+from itertools import chain as _chain
 
 # Decimal precision
 getcontext().prec = 24
@@ -34,6 +36,34 @@ class DataFeed(object):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
+    retryDelays = [2 ** i for i in range(14)]
+    logger = Logger("DataFeed")
+
+    def unexpected_rep_retry(func):
+        """ Unexected response decorator """
+        @_wraps(func)
+        def retrying(*args, **kwargs):
+            problems = []
+            for delay in _chain(DataFeed.retryDelays, [None]):
+                try:
+                    # attempt call
+                    return func(*args, **kwargs)
+
+                # we need to try again
+                except PoloniexError as problem:
+                    problems.append(problem)
+                    if delay is None:
+                        DataFeed.logger.debug(DataFeed, problems)
+                        raise RetryException(
+                            'retryDelays exhausted ' + str(problem))
+                    else:
+                        # log exception and wait
+                        DataFeed.logger.debug(DataFeed, problem)
+                        DataFeed.logger.info(DataFeed, "-- delaying for %ds" % delay)
+                        sleep(delay)
+
+        return retrying
+
     def __init__(self, tapi, period, pairs=[], balance={}):
         self.tapi = tapi
         self.ohlc_data = {}
@@ -51,6 +81,7 @@ class DataFeed(object):
         for key in port:
             self._balance[key] = port[key]
 
+    @unexpected_rep_retry
     def returnBalances(self):
         """
         Return balance from exchange. API KEYS NEEDED!
@@ -58,6 +89,7 @@ class DataFeed(object):
         """
         return self.tapi.returnBalances()
 
+    @unexpected_rep_retry
     def returnFeeInfo(self):
         """
         Returns exchange fee informartion
@@ -65,6 +97,7 @@ class DataFeed(object):
         """
         return self.tapi.returnFeeInfo()
 
+    @unexpected_rep_retry
     def returnCurrencies(self):
         """
         Return exchange currency pairs
@@ -72,6 +105,7 @@ class DataFeed(object):
         """
         return self.tapi.returnCurrencies()
 
+    @unexpected_rep_retry
     def returnChartData(self, currencyPair, period, start=None, end=None):
         """
         Return pair OHLC data
@@ -81,11 +115,7 @@ class DataFeed(object):
         :param end:  str: UNIX timestamp to end returned data
         :return: list: List containing desired asset data in "records" format
         """
-        try:
-            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-
-        except PoloniexError:
-            raise ValueError("Bad exchange response data.")
+        return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
 
     def pair_reciprocal(self, pair_data):
         pass
@@ -703,8 +733,6 @@ class TradingEnvironment(Env):
                 return obs.apply(convert_to.decimal, raw=True)
 
         except Exception as e:
-            print(obs)
-            print(obs.shape)
             self.logger.error(TradingEnvironment.get_history, self.parse_error(e))
             raise e
 

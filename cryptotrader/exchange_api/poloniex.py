@@ -253,7 +253,7 @@ class Poloniex(object):
                              parse_float=self.jsonNums,
                              parse_int=self.jsonNums)
         except:
-            self.logger.error(data)
+            # self.logger.error(data)
             raise PoloniexError('Invalid json response returned')
 
         # check if poloniex returned an error
