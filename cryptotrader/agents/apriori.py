@@ -250,7 +250,7 @@ class APrioriAgent(Agent):
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
-    def trade(self, env, timeout=None, verbose=False, render=False):
+    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
@@ -265,7 +265,7 @@ class APrioriAgent(Agent):
 
         try:
             t0 = time()
-            self.step = 1
+            self.step = start_step
             episode_reward = 0
             action = np.zeros(len(env.symbols))
             status = env.status
