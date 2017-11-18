@@ -183,7 +183,7 @@ class APrioriAgent(Agent):
         #     print("\nOptimization interrupted by user.")
         #     return None, None
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False, start_step=0,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
         """
         Test agent on environment
@@ -202,7 +202,7 @@ class APrioriAgent(Agent):
 
             #Reset counters
             t0 = time()
-            self.step = 0
+            self.step = start_step
             episode_reward = 1
 
             while True:
@@ -834,7 +834,7 @@ class PAMRTrader(APrioriAgent):
 
     def act(self, obs):
         """
-        Performs a single step on the environment
+        Performs prediction given environment observation
         """
         price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
@@ -842,6 +842,11 @@ class PAMRTrader(APrioriAgent):
         return price_relative
 
     def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
@@ -855,7 +860,9 @@ class PAMRTrader(APrioriAgent):
     def update(self, b, x):
         """
         Update portfolio weights to satisfy constraint b * x <= eps
-        and minimize distance to previous portifolio.
+        and minimize distance to previous portfolio.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
         """
         x_mean = np.mean(x)
         if np.dot(b, x) >= 1:
@@ -903,8 +910,7 @@ class OLMARTrader(APrioriAgent):
     def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT"):
         """
         :param window: integer: Lookback window size.
-        :param eps: float: Threshold value for updating portifolio.
-
+        :param eps: float: Threshold value for updating portfolio.
         """
         super().__init__(fiat=fiat)
         self.window = window
@@ -913,14 +919,21 @@ class OLMARTrader(APrioriAgent):
 
     def act(self, obs):
         """
-        Performs a single step on the environment
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
         """
         price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
+                                            (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         return price_predict
 
     def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
@@ -932,8 +945,12 @@ class OLMARTrader(APrioriAgent):
             return self.update(prev_posit[:-1], price_predict)
 
     def update(self, b, x):
-        """ Update portfolio weights to satisfy constraint b * x >= eps
-        and minimize distance to previous weights. """
+        """
+        Update portfolio weights to satisfy constraint b * x >= eps
+        and minimize distance to previous weights.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
+        """
         x_mean = np.mean(x)
         if np.dot(b, x) >= 1:
             lam = max(0., (np.dot(b, x) - 1 - self.eps) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
@@ -947,7 +964,7 @@ class OLMARTrader(APrioriAgent):
         b = b + self.smooth* lam * (x - x_mean)
 
         # project it onto simplex
-        return np.append(simplex_proj(b),0)
+        return np.append(simplex_proj(b), 0)
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
@@ -958,37 +975,42 @@ class OLMARTrader(APrioriAgent):
 # Portfolio optimization
 class TCOTrader(APrioriAgent):
     """
-        Transaction cost optimization for online portfolio selection
+    Transaction cost optimization for online portfolio selection
 
-        Reference:
-            B. Li and J. Wang
-            http://ink.library.smu.edu.sg/cgi/viewcontent.cgi?article=4761&context=sis_research
-        """
-
+    Reference:
+        B. Li and J. Wang
+        http://ink.library.smu.edu.sg/cgi/viewcontent.cgi?article=4761&context=sis_research
+    """
     def __repr__(self):
         return "TCOTrader"
 
-    def __init__(self, window=5, toff=0.1, smooth=2, fiat="USDT"):
+    def __init__(self, toff=0.1, smooth=2, predictor=None, fiat="USDT"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portifolio.
-
         """
         super().__init__(fiat=fiat)
         self.toff = toff
         self.smooth = smooth
-        self.window = window
+        self.predictor = predictor
 
     def act(self, obs):
         """
-        Performs a single step on the environment
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
         """
-        price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-        return price_predict
+        # price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        # for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+        #     # price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
+        #     #                                 (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        return self.predictor(obs)
 
     def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
@@ -1000,8 +1022,12 @@ class TCOTrader(APrioriAgent):
             self.update(prev_posit[:-1], price_prediction)
 
     def update(self, b, x):
-        """ Update portfolio weights to satisfy constraint b * x >= eps
-        and minimize distance to previous weights. """
+        """
+        Update portfolio weights to satisfy constraint b * x >= eps
+        and minimize distance to previous weights.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
+        """
         vt = x / np.dot(b, x)
         vt_mean = np.mean(vt)
 
@@ -1013,7 +1039,6 @@ class TCOTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
-        self.window = int(kwargs['window'])
         self.smooth = kwargs['smooth']
 
 
