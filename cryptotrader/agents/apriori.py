@@ -333,6 +333,7 @@ class APrioriAgent(Agent):
                                                                env.calc_total_portval()))
 
 
+# Test and benchmark
 class TestAgent(APrioriAgent):
     """
     Test agent for debugging
@@ -514,6 +515,7 @@ class ConstantRebalanceTrader(APrioriAgent):
         return factor.resize(obs.columns.levels[0].shape[0])
 
 
+# Momentum
 class MomentumTrader(APrioriAgent):
     """
     Momentum trading agent
@@ -604,90 +606,94 @@ class MomentumTrader(APrioriAgent):
         self.std_span = int(kwargs['std_span'])
 
 
-class PAMRTrader(APrioriAgent):
+class ReversedMomentumTrader(APrioriAgent):
     """
-    Passive aggressive mean reversion strategy for portfolio selection.
-
-    Reference:
-        B. Li, P. Zhao, S. C.H. Hoi, and V. Gopalkrishnan.
-        Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
-        https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
+    Momentum trading agent
     """
     def __repr__(self):
-        return "PAMRTrader"
+        return "ReversedMomentumTrader"
 
-    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT"):
+    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
+                 fiat="USDT"):
         """
-        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
-        :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
-        :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
-        :
+        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
         super().__init__(fiat=fiat)
-        self.sensitivity = sensitivity
-        self.C = C
-        self.variant = variant
+        self.mean_type = mean_type
+        self.ma_span = ma_span
+        self.std_span = std_span
+        self.alpha = alpha
+        self.activation = activation
+
+    def get_ma(self, df):
+        if self.mean_type == 'exp':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
+        elif self.mean_type == 'kama':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
+        elif self.mean_type == 'simple':
+            for window in self.ma_span:
+                df[str(window) + '_ma'] = df.open.rolling(window).mean()
+        else:
+            raise TypeError("Wrong mean_type param")
+        return df
 
     def act(self, obs):
         """
         Performs a single step on the environment
         """
-        # if self.step == 0:
-        #     n_pairs = obs.columns.levels[0].shape[0]
-        #     action = np.ones(n_pairs)
-        #     action[-1] = 0
-        #     return array_normalize(action)
-        # else:
-        prev_posit = self.get_portfolio_vector(obs, index=-1)
-        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-        last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
-            last_b[key] = np.float64(prev_posit[key])
-        return self.update(last_b, price_relative)
+        try:
+            obs = obs.astype(np.float64)
+            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
+            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                df = obs.loc[:, symbol].copy()
+                df = self.get_ma(df)
+
+                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
+                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
+
+            return factor
+
+        except TypeError as e:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
 
     def rebalance(self, obs):
-        return self.act(obs)
+        try:
+            obs = obs.astype(np.float64).ffill()
+            prev_posit = self.get_portfolio_vector(obs)
+            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
+            factor = self.act(obs)
+            for i in range(position.shape[0] - 1):
 
-    def update(self, b, x):
-        """
-        Update portfolio weights to satisfy constraint b * x <= eps
-        and minimize distance to previous portifolio.
-        """
-        x_mean = np.mean(x)
-        if np.dot(b, x) >= 1:
-            le = max(0., np.dot(b, x) - (1 + self.sensitivity))
-        else:
-            le = max(0, (1 - self.sensitivity) - np.dot(b, x))
+                if factor[i] >= 0.0:
+                    position[i] = max(0., prev_posit[i] - self.alpha[0] * factor[i])
+                else:
+                    position[i] = max(0., prev_posit[i] - self.alpha[1] * factor[i])
 
+            position[-1] = max(0., 1 - position[:-1].sum())
 
-        if self.variant == 'PAMR':
-            lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
-        elif self.variant == 'PAMR1':
-            lam = min(self.C, le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
-        elif self.variant == 'PAMR2':
-            lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C + self.epsilon)
+            return self.activation(position)
 
-        # limit lambda to avoid numerical problems
-        lam = min(100000, lam)
-
-        # update portfolio
-        b = b + lam * (x - x_mean)
-
-        # project it onto simplex
-        return np.append(simplex_proj(b), 0)
+        except TypeError as e:
+            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
+            raise e
 
     def set_params(self, **kwargs):
-        self.sensitivity = kwargs['sensitivity']
-        if 'C' in kwargs:
-            self.C = kwargs['C']
-        self.variant = kwargs['variant']
+        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
+        self.mean_type = kwargs['mean_type']
+        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
+        self.std_span = int(kwargs['std_span'])
 
 
+# Pattern trading
 class HarmonicTrader(APrioriAgent):
     """
     Fibonacci harmonic pattern trader
     """
+
     def __repr__(self):
         return "HarmonicTrader"
 
@@ -782,9 +788,13 @@ class HarmonicTrader(APrioriAgent):
             port_vec = np.zeros(pairs.shape[0])
             for i in range(pairs.shape[0] - 1):
                 if action[i] >= 0:
-                    port_vec[i] = max(0., (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[0] * action[i])
+                    port_vec[i] = max(0.,
+                                      (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[0] * action[
+                                          i])
                 else:
-                    port_vec[i] = max(0., (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[1] * action[i])
+                    port_vec[i] = max(0.,
+                                      (self.decay * prev_port[i] + (1 - self.decay)) + self.alpha[1] * action[
+                                          i])
 
             port_vec[-1] = max(0, 1 - port_vec.sum())
 
@@ -797,86 +807,214 @@ class HarmonicTrader(APrioriAgent):
         self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
 
 
-class ReversedMomentumTrader(APrioriAgent):
+# Mean reversion
+class PAMRTrader(APrioriAgent):
     """
-    Momentum trading agent
+    Passive aggressive mean reversion strategy for portfolio selection.
+
+    Reference:
+        B. Li, P. Zhao, S. C.H. Hoi, and V. Gopalkrishnan.
+        Pamr: Passive aggressive mean reversion strategy for portfolio selection, 2012.
+        https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
     def __repr__(self):
-        return "ReversedMomentumTrader"
+        return "PAMRTrader"
 
-    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
-                 fiat="USDT"):
+    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT"):
         """
-        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
+        :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
+        :
         """
         super().__init__(fiat=fiat)
-        self.mean_type = mean_type
-        self.ma_span = ma_span
-        self.std_span = std_span
-        self.alpha = alpha
-        self.activation = activation
-
-    def get_ma(self, df):
-        if self.mean_type == 'exp':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
-        elif self.mean_type == 'kama':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
-        elif self.mean_type == 'simple':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.rolling(window).mean()
-        else:
-            raise TypeError("Wrong mean_type param")
-        return df
+        self.sensitivity = sensitivity
+        self.C = C
+        self.variant = variant
 
     def act(self, obs):
         """
         Performs a single step on the environment
         """
-        try:
-            obs = obs.astype(np.float64)
-            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                df = obs.loc[:, symbol].copy()
-                df = self.get_ma(df)
-
-                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
-
-            return factor
-
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
+        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
+        return price_relative
 
     def rebalance(self, obs):
-        try:
-            obs = obs.astype(np.float64).ffill()
-            prev_posit = self.get_portfolio_vector(obs)
-            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
-            factor = self.act(obs)
-            for i in range(position.shape[0] - 1):
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_relative = self.act(obs)
+            return self.update(prev_posit[:-1], price_relative)
 
-                if factor[i] >= 0.0:
-                    position[i] = max(0., prev_posit[i] - self.alpha[0] * factor[i])
-                else:
-                    position[i] = max(0., prev_posit[i] - self.alpha[1] * factor[i])
+    def update(self, b, x):
+        """
+        Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portifolio.
+        """
+        x_mean = np.mean(x)
+        if np.dot(b, x) >= 1:
+            le = max(0., np.dot(b, x) - (1 + self.sensitivity))
+        else:
+            le = max(0, (1 - self.sensitivity) - np.dot(b, x))
 
-            position[-1] = max(0., 1 - position[:-1].sum())
 
-            return self.activation(position)
+        if self.variant == 'PAMR':
+            lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
+        elif self.variant == 'PAMR1':
+            lam = min(self.C, le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+        elif self.variant == 'PAMR2':
+            lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C + self.epsilon)
 
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
+        # limit lambda to avoid numerical problems
+        lam = min(100000, lam)
+
+        # update portfolio
+        b = b + lam * (x - x_mean)
+
+        # project it onto simplex
+        return np.append(simplex_proj(b), 0)
 
     def set_params(self, **kwargs):
-        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
-        self.mean_type = kwargs['mean_type']
-        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
-        self.std_span = int(kwargs['std_span'])
+        self.sensitivity = kwargs['sensitivity']
+        if 'C' in kwargs:
+            self.C = kwargs['C']
+        self.variant = kwargs['variant']
+
+
+class OLMARTrader(APrioriAgent):
+    """
+        On-Line Portfolio Selection with Moving Average Reversio
+
+        Reference:
+            B. Li and S. C. H. Hoi.
+            On-line portfolio selection with moving average reversion, 2012.
+            http://icml.cc/2012/papers/168.pdf
+        """
+
+    def __repr__(self):
+        return "OLMARTrader"
+
+    def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT"):
+        """
+        :param window: integer: Lookback window size.
+        :param eps: float: Threshold value for updating portifolio.
+
+        """
+        super().__init__(fiat=fiat)
+        self.window = window
+        self.eps = eps
+        self.smooth =  smooth
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        return price_predict
+
+    def rebalance(self, obs):
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=-2)
+            price_predict = self.act(obs)
+            return self.update(prev_posit[:-1], price_predict)
+
+    def update(self, b, x):
+        """ Update portfolio weights to satisfy constraint b * x >= eps
+        and minimize distance to previous weights. """
+        x_mean = np.mean(x)
+        if np.dot(b, x) >= 1:
+            lam = max(0., (np.dot(b, x) - 1 - self.eps) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+        else:
+            lam = max(0, (1 - self.eps - np.dot(b, x)) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+
+        # limit lambda to avoid numerical problems
+        lam = min(100000, lam)
+
+        # update portfolio
+        b = b + self.smooth* lam * (x - x_mean)
+
+        # project it onto simplex
+        return np.append(simplex_proj(b),0)
+
+    def set_params(self, **kwargs):
+        self.eps = kwargs['eps']
+        self.window = int(kwargs['window'])
+        self.smooth = kwargs['smooth']
+
+
+# Portfolio optimization
+class TCOTrader(APrioriAgent):
+    """
+        Transaction cost optimization for online portfolio selection
+
+        Reference:
+            B. Li and J. Wang
+            http://ink.library.smu.edu.sg/cgi/viewcontent.cgi?article=4761&context=sis_research
+        """
+
+    def __repr__(self):
+        return "TCOTrader"
+
+    def __init__(self, window=5, toff=0.1, smooth=2, fiat="USDT"):
+        """
+        :param window: integer: Lookback window size.
+        :param eps: float: Threshold value for updating portifolio.
+
+        """
+        super().__init__(fiat=fiat)
+        self.toff = toff
+        self.smooth = smooth
+        self.window = window
+
+    def act(self, obs):
+        """
+        Performs a single step on the environment
+        """
+        price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        return price_predict
+
+    def rebalance(self, obs):
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_prediction = self.act(obs)
+            self.update(prev_posit[:-1], price_prediction)
+
+    def update(self, b, x):
+        """ Update portfolio weights to satisfy constraint b * x >= eps
+        and minimize distance to previous weights. """
+        vt = x / np.dot(b, x)
+        vt_mean = np.mean(vt)
+
+        # update portfolio
+        b = b + np.sign(vt - vt_mean) * np.clip(self.smooth * abs(vt - vt_mean) - self.toff, 0, np.inf)
+
+        # project it onto simplex
+        return np.append(simplex_proj(b), 0)
+
+    def set_params(self, **kwargs):
+        self.toff = kwargs['toff']
+        self.window = int(kwargs['window'])
+        self.smooth = kwargs['smooth']
 
 
 class FactorTrader(APrioriAgent):
@@ -1004,138 +1142,4 @@ class FactorTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
-
-
-class OLMARTrader(APrioriAgent):
-    """
-        On-Line Portfolio Selection with Moving Average Reversio
-
-        Reference:
-            B. Li and S. C. H. Hoi.
-            On-line portfolio selection with moving average reversion, 2012.
-            http://icml.cc/2012/papers/168.pdf
-        """
-
-    def __repr__(self):
-        return "OLMARTrader"
-
-    def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT"):
-        """
-        :param window: integer: Lookback window size.
-        :param eps: float: Threshold value for updating portifolio.
-
-        """
-        super().__init__(fiat=fiat)
-        self.window = window
-        self.eps = eps
-        self.smooth =  smooth
-
-    def act(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        if self.step == 0:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-2)
-            price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-                last_b[key] = np.float64(prev_posit[key])
-        return self.update(last_b, price_predict)
-
-    def rebalance(self, obs):
-        return self.act(obs)
-
-    def update(self, b, x):
-        """ Update portfolio weights to satisfy constraint b * x >= eps
-        and minimize distance to previous weights. """
-        x_mean = np.mean(x)
-        if np.dot(b, x) >= 1:
-            lam = max(0., (np.dot(b, x) - 1 - self.eps) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
-        else:
-            lam = max(0, (1 - self.eps - np.dot(b, x)) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
-
-        # limit lambda to avoid numerical problems
-        lam = min(100000, lam)
-
-
-        # update portfolio
-        b = b + self.smooth* lam * (x - x_mean)
-
-        # project it onto simplex
-
-        return np.append(simplex_proj(b),0)
-
-    def set_params(self, **kwargs):
-        self.eps = kwargs['eps']
-        self.window = int(kwargs['window'])
-        self.smooth = kwargs['smooth']
-
-
-class TCOTrader(APrioriAgent):
-    """
-        Transaction cost optimization for online portfolio selection
-
-        Reference:
-            B. Li and J. Wang
-            http://ink.library.smu.edu.sg/cgi/viewcontent.cgi?article=4761&context=sis_research
-        """
-
-    def __repr__(self):
-        return "TCOTrader"
-
-    def __init__(self, window=5, toff=0.1, smooth=2, fiat="USDT"):
-        """
-        :param window: integer: Lookback window size.
-        :param eps: float: Threshold value for updating portifolio.
-
-        """
-        super().__init__(fiat=fiat)
-        self.toff = toff
-        self.smooth = smooth
-        self.window = window
-
-    def act(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        if self.step == 0:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-1)
-            price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            last_b = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() / (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-                last_b[key] = np.float64(prev_posit[key])
-        return self.update(last_b, price_predict)
-
-    def rebalance(self, obs):
-        return self.act(obs)
-
-    def update(self, b, x):
-        """ Update portfolio weights to satisfy constraint b * x >= eps
-        and minimize distance to previous weights. """
-        vt = x / np.dot(b, x)
-        vt_mean = np.mean(vt)
-
-        # update portfolio
-        b = b + np.sign(vt - vt_mean) * np.clip(self.smooth * abs(vt - vt_mean) - self.toff, 0, np.inf)
-
-        # project it onto simplex
-        return np.append(simplex_proj(b),0)
-
-    def set_params(self, **kwargs):
-        self.toff = kwargs['toff']
-        self.window = int(kwargs['window'])
-        self.smooth = kwargs['smooth']
-
 
