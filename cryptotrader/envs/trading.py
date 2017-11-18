@@ -690,8 +690,8 @@ class TradingEnvironment(Env):
                 # Get portfolio observation
                 port_vec = self.get_sampled_portfolio(index)
                 if port_vec.shape[0] == 0:
-                    port_vec = self.get_sampled_portfolio()
-                    port_vec.index[-1] = [index[0]]
+                    port_vec = self.get_sampled_portfolio().iloc[-1:]
+                    port_vec.index = [index[0]]
 
                 # Get pairs history
                 for symbol in self.pairs:
