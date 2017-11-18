@@ -117,8 +117,12 @@ class DataFeed(object):
         """
         return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
 
-    def pair_reciprocal(self, pair_data):
-        pass
+    def pair_reciprocal(self, df):
+        df[['open', 'high', 'low', 'close']] = df.apply(
+            {col: lambda x: str((Decimal('1') / convert_to.decimal(x)).quantize(Decimal('0E-8')))
+             for col in ['open', 'low', 'high', 'close']}, raw=True).rename(columns={'low': 'high', 'high': 'low'}
+            )
+        return df
 
 
 class BacktestDataFeed(DataFeed):
