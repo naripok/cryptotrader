@@ -984,14 +984,13 @@ class TCOTrader(APrioriAgent):
     def __repr__(self):
         return "TCOTrader"
 
-    def __init__(self, toff=0.1, smooth=2, predictor=None, fiat="USDT"):
+    def __init__(self, toff=0.1, predictor=None, fiat="USDT"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
         """
         super().__init__(fiat=fiat)
         self.toff = toff
-        self.smooth = smooth
         self.predictor = predictor
 
     def act(self, obs):
@@ -1031,14 +1030,13 @@ class TCOTrader(APrioriAgent):
         vt = x / (np.dot(b, x) + self.epsilon)
         vt_mean = np.mean(vt)
         # update portfolio
-        b = b + np.sign(vt - vt_mean) * np.clip(self.smooth * abs(vt - vt_mean) - self.toff, 0, np.inf)
+        b = b + np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0, np.inf)
 
         # project it onto simplex
         return np.append(simplex_proj(b), [0])
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
-        self.smooth = kwargs['smooth']
 
 
 class FactorTrader(APrioriAgent):
