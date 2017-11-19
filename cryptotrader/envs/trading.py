@@ -120,9 +120,10 @@ class DataFeed(object):
     def pair_reciprocal(self, df):
         df[['open', 'high', 'low', 'close']] = df.apply(
             {col: lambda x: str((Decimal('1') / convert_to.decimal(x)).quantize(Decimal('0E-8')))
-             for col in ['open', 'low', 'high', 'close']}, raw=True).rename(columns={'low': 'high', 'high': 'low'}
+             for col in ['open', 'low', 'high', 'close']}, raw=True).rename(columns={'low': 'high',
+                                                                                     'high': 'low'}
             )
-        return df
+        return df.rename(columns={'quoteVolume': 'volume','volume': 'quoteVolume'})
 
 
 class BacktestDataFeed(DataFeed):
@@ -161,9 +162,21 @@ class BacktestDataFeed(DataFeed):
         self.ohlc_data = {}
         self.data_length = None
         for pair in self.pairs:
-            self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
-                                                               start=start, end=end
-                                                              ))
+            try:
+                self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
+                                                                   start=start, end=end
+                                                                  ))
+            except PoloniexError:
+                try:
+                    symbols = pair.split('_')
+                    self.ohlc_data[pair] = self.pair_reciprocal(pd.DataFrame.from_records(
+                        self.tapi.returnChartData(symbols[1] + '_' + symbols[0], period=self.period * 60,
+                                                   start=start, end=end
+                                                  )))
+                except PoloniexError as e:
+                    raise e
+
+
 
         for key in self.ohlc_data:
             if not self.data_length or self.ohlc_data[key].shape[0] < self.data_length:

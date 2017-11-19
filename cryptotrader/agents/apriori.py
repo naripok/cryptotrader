@@ -885,7 +885,7 @@ class PAMRTrader(APrioriAgent):
         b = b + lam * (x - x_mean)
 
         # project it onto simplex
-        return np.append(simplex_proj(b), 0)
+        return np.append(simplex_proj(b), [0])
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
@@ -961,10 +961,10 @@ class OLMARTrader(APrioriAgent):
         lam = min(100000, lam)
 
         # update portfolio
-        b = b + self.smooth* lam * (x - x_mean)
+        b = b + self.smooth * lam * (x - x_mean)
 
         # project it onto simplex
-        return np.append(simplex_proj(b), 0)
+        return np.append(simplex_proj(b), [0])
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
@@ -984,14 +984,13 @@ class TCOTrader(APrioriAgent):
     def __repr__(self):
         return "TCOTrader"
 
-    def __init__(self, toff=0.1, smooth=2, predictor=None, fiat="USDT"):
+    def __init__(self, toff=0.1, predictor=None, fiat="USDT"):
         """
         :param window: integer: Lookback window size.
-        :param eps: float: Threshold value for updating portifolio.
+        :param eps: float: Threshold value for updating portfolio.
         """
         super().__init__(fiat=fiat)
         self.toff = toff
-        self.smooth = smooth
         self.predictor = predictor
 
     def act(self, obs):
@@ -1001,8 +1000,8 @@ class TCOTrader(APrioriAgent):
         """
         # price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         # for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-        #     # price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
-        #     #                                 (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
+        #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         return self.predictor(obs)
 
     def rebalance(self, obs):
@@ -1019,7 +1018,7 @@ class TCOTrader(APrioriAgent):
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_prediction = self.act(obs)
-            self.update(prev_posit[:-1], price_prediction)
+            return self.update(prev_posit[:-1], price_prediction)
 
     def update(self, b, x):
         """
@@ -1028,18 +1027,16 @@ class TCOTrader(APrioriAgent):
         :param b: numpy array: Last portfolio vector
         :param x: numpy array: Price movement prediction
         """
-        vt = x / np.dot(b, x)
+        vt = x / (np.dot(b, x) + self.epsilon)
         vt_mean = np.mean(vt)
-
         # update portfolio
-        b = b + np.sign(vt - vt_mean) * np.clip(self.smooth * abs(vt - vt_mean) - self.toff, 0, np.inf)
+        b = b + np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0, np.inf)
 
         # project it onto simplex
-        return np.append(simplex_proj(b), 0)
+        return np.append(simplex_proj(b), [0])
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
-        self.smooth = kwargs['smooth']
 
 
 class FactorTrader(APrioriAgent):
