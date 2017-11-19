@@ -3,7 +3,7 @@ Trading environment class
 data: 12/10/2017
 author: Tau
 """
-from ..core import Env, ExchangeConnection
+from ..core import Env, ExchangeConnection, DataFeed
 from ..spaces import *
 from ..utils import Logger, safe_div, floor_datetime
 from .utils import *
@@ -22,120 +22,13 @@ from bokeh.models import HoverTool, Legend
 
 from ..exchange_api.poloniex import PoloniexError, Poloniex, RetryException
 import json
-from functools import wraps as _wraps
-from itertools import chain as _chain
+
 
 # Decimal precision
 getcontext().prec = 24
 
 # Debug flag
 debug = True
-
-class DataFeed(object):
-    """
-    Data feeder for backtesting with TradingEnvironment.
-    """
-    # TODO WRITE TESTS
-    retryDelays = [2 ** i for i in range(14)]
-    logger = Logger("DataFeed")
-
-    def unexpected_rep_retry(func):
-        """ Unexected response decorator """
-        @_wraps(func)
-        def retrying(*args, **kwargs):
-            problems = []
-            for delay in _chain(DataFeed.retryDelays, [None]):
-                try:
-                    # attempt call
-                    return func(*args, **kwargs)
-
-                # we need to try again
-                except PoloniexError as problem:
-                    problems.append(problem)
-                    if delay is None:
-                        DataFeed.logger.debug(DataFeed, problems)
-                        raise RetryException(
-                            'retryDelays exhausted ' + str(problem))
-                    else:
-                        # log exception and wait
-                        DataFeed.logger.debug(DataFeed, problem)
-                        DataFeed.logger.info(DataFeed, "-- delaying for %ds" % delay)
-                        sleep(delay)
-
-        return retrying
-
-    def __init__(self, tapi, period, pairs=[], balance={}):
-        self.tapi = tapi
-        self.ohlc_data = {}
-        self._balance = balance
-        self.pairs = pairs
-        self.period = period
-
-    @property
-    def balance(self):
-        return self._balance
-
-    @balance.setter
-    def balance(self, port):
-        assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
-        for key in port:
-            self._balance[key] = port[key]
-
-    @unexpected_rep_retry
-    def returnBalances(self):
-        """
-        Return balance from exchange. API KEYS NEEDED!
-        :return: list:
-        """
-        return self.tapi.returnBalances()
-
-    @unexpected_rep_retry
-    def returnFeeInfo(self):
-        """
-        Returns exchange fee informartion
-        :return:
-        """
-        return self.tapi.returnFeeInfo()
-
-    @unexpected_rep_retry
-    def returnCurrencies(self):
-        """
-        Return exchange currency pairs
-        :return: list:
-        """
-        return self.tapi.returnCurrencies()
-
-    @unexpected_rep_retry
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        """
-        Return pair OHLC data
-        :param currencyPair: str: Desired pair str
-        :param period: int: Candle period. Must be in [300, 900, 1800, 7200, 14400, 86400]
-        :param start: str: UNIX timestamp to start from
-        :param end:  str: UNIX timestamp to end returned data
-        :return: list: List containing desired asset data in "records" format
-        """
-        try:
-            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-        except PoloniexError:
-            try:
-                symbols = currencyPair.split('_')
-                pair = symbols[1] + '_' + symbols[0]
-                return json.loads(self.pair_reciprocal(pd.DataFrame.from_records(self.tapi.returnChartData(pair, period,
-                                                                                          start=start, end=end
-                                                                                            ))).to_json(orient='records'))
-            except Exception as e:
-                raise e
-
-
-    def pair_reciprocal(self, df):
-        df[['open', 'high', 'low', 'close']] = df.apply(
-            {col: lambda x: str((Decimal('1') / convert_to.decimal(x)).quantize(Decimal('0E-8')))
-             for col in ['open', 'low', 'high', 'close']}, raw=True).rename(columns={'low': 'high',
-                                                                                     'high': 'low'}
-            )
-        return df.rename(columns={'quoteVolume': 'volume','volume': 'quoteVolume'})
-
 
 class BacktestDataFeed(DataFeed):
     """
@@ -267,7 +160,7 @@ class PaperTradingDataFeed(DataFeed):
                 'thirtyDayVolume': '0.00000000'}
 
 
-class PoloniexConnection(ExchangeConnection):
+class PoloniexConnection(DataFeed):
     def __init__(self, tapi, period, pairs=[]):
         """
         :param tapi: exchange api instance: Exchange api instance
@@ -296,7 +189,7 @@ class PoloniexConnection(ExchangeConnection):
             raise ValueError("Bad exchange response data.")
 
 
-class MultiExchangeConnection(ExchangeConnection):
+class MultiExchangeConnection(DataFeed):
     """
     Exchanges connection helper.
     This class communicate with all exchanges apis.
