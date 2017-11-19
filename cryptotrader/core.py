@@ -6,6 +6,7 @@ from itertools import chain as _chain
 import json
 from .utils import Logger, convert_to
 from decimal import Decimal
+import pandas as pd
 
 class Agent(object):
     """Abstract base class for all implemented agents.
