@@ -115,7 +115,18 @@ class DataFeed(object):
         :param end:  str: UNIX timestamp to end returned data
         :return: list: List containing desired asset data in "records" format
         """
-        return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+        try:
+            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
+        except PoloniexError:
+            try:
+                symbols = currencyPair.split('_')
+                pair = symbols[1] + '_' + symbols[0]
+                return json.loads(self.pair_reciprocal(pd.DataFrame.from_records(self.tapi.returnChartData(pair, period,
+                                                                                          start=start, end=end
+                                                                                            ))).to_json(orient='records'))
+            except Exception as e:
+                raise e
+
 
     def pair_reciprocal(self, df):
         df[['open', 'high', 'low', 'close']] = df.apply(

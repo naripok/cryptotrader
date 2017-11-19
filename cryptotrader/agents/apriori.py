@@ -549,7 +549,7 @@ class MomentumTrader(APrioriAgent):
             raise TypeError("Wrong mean_type param")
         return df
 
-    def act(self, obs):
+    def act (self, obs):
         """
         Performs a single step on the environment
         """
@@ -561,7 +561,8 @@ class MomentumTrader(APrioriAgent):
                 df = self.get_ma(df)
 
                 factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2]))
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
+                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])
 
             return factor
 
