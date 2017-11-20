@@ -90,27 +90,13 @@ Thumbs.db
 .ipynb_checkpoints
 .idea/
 .ipynb_checkpoints/
-/historical_data/*
-build/
 cryptotrader.egg-info/
 cryptotrader/__pycache__/
 cryptotrader/agents/__pycache__/
 cryptotrader/envs/__pycache__/
 dist/
-historical_data/
-notebooks/logs
 .cache/
-/notebooks/online_trading_env_nb.ipynb
 
-/notebooks/datafeed_nb.ipynb
-/notebooks/pytrends.ipynb
-/notebooks/backtest_nb.ipynb
-/notebooks/mesa_dev.ipynb
-/notebooks/momentum_dev.ipynb
-/notebooks/driver_debug_nb.ipynb
+/dev_notebooks/*
 
-/notebooks/cn_models_dev_nb.ipynb
-/notebooks/apriori_agents_dev.ipynb
-
-/cryptotrader/envs/driver.py
-/tests/test_TrainingEnvironment.py
+/notebooks/.ipynb_checkpoints/
