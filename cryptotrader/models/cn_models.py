@@ -176,17 +176,26 @@ class EIIE(chainer.Chain):
         # h = self.cashbias(h)
         return h
 
+    def predict(self, obs):
+        obs = batch_states([obs[:-1].values], chainer.cuda.get_array_module(obs), phi)
+        return self.__call__(obs).data.ravel() + 1
+
 
 # Train functions
-def get_target(obs):
+def get_target(obs, target_type):
     n_cols = int(obs.shape[-1])
     n_pairs = int((n_cols - 1) / 6)
     target = np.zeros((1, n_pairs))
     for i, j in enumerate([i for i in range(n_cols - 1) if i % 6 == 0]):
         target[0, i] = np.expand_dims(obs[j + 3] / (obs[j] + 1e-8) - 1., -1)
-    return target
+    if target_type == 'regression' or 'regressor':
+        return target
+    elif target_type == 'classifier' or 'classification':
+        return np.sign(target)
+    else:
+        raise TypeError("Bad target_type params.")
 
-def make_train_batch(env, batch_size):
+def make_train_batch(env, batch_size, target_type):
     obs_batch = []
     target_batch = []
     for i in range(batch_size):
@@ -199,7 +208,7 @@ def make_train_batch(env, batch_size):
         obs = env.get_observation(True).astype(np.float32).values
         xp = chainer.cuda.get_array_module(obs)
         obs_batch.append(obs[:-1])
-        target_batch.append(get_target(obs[-1]))
+        target_batch.append(get_target(obs[-1], target_type))
 
     obs_batch = batch_states(obs_batch, xp, phi)
     target_batch = np.swapaxes(batch_states(target_batch, xp, phi), 3, 2)
@@ -207,7 +216,8 @@ def make_train_batch(env, batch_size):
     return obs_batch, target_batch
 
 
-def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_epochs, test_interval, test_epochs, save_dir, name):
+def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_epochs,
+             test_interval, test_epochs, target_type, save_dir, name):
     ## Training loop
     t0 = 1e-8
     best_score = -np.inf
@@ -222,7 +232,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             if epoch % lr_decay_period == 0:
                 optimizer.hyperparam.alpha /= 2
 
-            obs_batch, target_train = make_train_batch(env, batch_size)
+            obs_batch, target_train = make_train_batch(env, batch_size, target_type)
 
             prediction_train = nn(obs_batch)
 
@@ -252,7 +262,7 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
                 test_scores = []
                 print()
                 for j in range(test_epochs):
-                    test_batch, target_test = make_train_batch(test_env, batch_size)
+                    test_batch, target_test = make_train_batch(test_env, batch_size, target_type)
 
                     # Forward the test data
                     prediction_test = nn(test_batch)

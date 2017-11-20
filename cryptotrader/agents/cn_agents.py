@@ -27,9 +27,26 @@ def phi(obs):
     """
     Feature extraction function
     """
+    obs = obs.values
     xp = chainer.cuda.get_array_module(obs)
     obs = xp.expand_dims(obs,0)
     return obs.astype(np.float32)
+
+
+def batch_states(states, xp, phi):
+    """The default method for making batch of observations.
+
+    Args:
+        states (list): list of observations from an environment.
+        xp (module): numpy or cupy
+        phi (callable): Feature extractor applied to observations
+
+    Return:
+        the object which will be given as input to the model.
+    """
+
+    states = [phi(s) for s in states]
+    return xp.asarray(states)
 
 
 class Buffer():
@@ -84,8 +101,8 @@ class PrintProgress(object):
     """
     def __init__(self, t0):
         self.t0 = t0
-        self.rewards = Buffer(2000)
-        self.grads = Buffer(2000)
+        # self.rewards = Buffer(200)
+        self.grads = Buffer(200)
 
     def __call__(self, env, agent, step):
         """Call the hook.
@@ -97,13 +114,13 @@ class PrintProgress(object):
 
         agent_id = agent.process_idx
         stats = agent.get_statistics()
-        self.rewards.append(env.last_reward)
+        # self.rewards.append(env.last_reward)
         self.grads.append(np.sum([np.sum(np.square(param.grad)) for param in agent.optimizer.target.params()]))
 
-        print("Agent: %d, t: %d, Avg r: %f, Avg val: %f, Avg H: %f, Lr: %.02E, g norm: %f, Avg g norm: %f, Beta: %.02E Sample/s: %.0f   " %\
+        print("Agent: %d, t: %d, Avg val: %f, Avg H: %f, Lr: %.02E, g norm: %f, Avg g norm: %f, Beta: %.02E Sample/s: %.0f   " %\
                       (agent_id,
                        step,
-                       self.rewards.data.mean(),
+                       # self.rewards.data.mean(),
                        stats[0][1],
                        stats[1][1],
                        agent.optimizer.lr,
@@ -114,50 +131,92 @@ class PrintProgress(object):
                        end='\r', flush=True)
 
 
+# class ProcessObs(chainer.Link):
+#     """
+#     Observations preprocessing / feature extraction layer
+#     """
+#     def __init__(self, input_shape):
+#         super().__init__()
+#         self.n_cols = int(input_shape[-1])
+#         self.n_pairs = int((self.n_cols - 1) / 6)
+#         self.out_channels = 3
+#
+#         with self.init_scope():
+#             self.bn = L.BatchNormalization(self.out_channels)
+#
+#     def __call__(self, x):
+#         xp = chainer.cuda.get_array_module(x)
+#         obs = []
+#
+#         indexes = [i for i in range(self.n_cols - 1) if i % 6 == 0]
+#         for j in range(self.n_pairs):
+#             i = indexes[j]
+#             pair = []
+#             pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + 1e-8) - 1., -2))
+#             pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + 1e-8) - 1., -2))
+#             pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + 1e-8) - 1., -2))
+#             obs.append(xp.concatenate(pair, axis=1))
+#
+#         # shape[batch_size, features, n_pairs, timesteps]
+#         return self.bn(xp.concatenate(obs, axis=-2))
+
+
 class ProcessObs(chainer.Link):
     """
     Observations preprocessing / feature extraction layer
     """
-    def __init__(self, input_shape):
+    def __init__(self):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
-        self.out_channels = 3
-
-        with self.init_scope():
-            self.bn = L.BatchNormalization(self.out_channels)
+        # with self.init_scope():
+        #     self.bn = L.BatchNormalization(self.out_channels)
 
     def __call__(self, x):
         xp = chainer.cuda.get_array_module(x)
         obs = []
 
-        indexes = [i for i in range(self.n_cols - 1) if i % 6 == 0]
-        for j in range(self.n_pairs):
-            i = indexes[j]
+        for i in [i for i in range(int(x.shape[-1]) - 1) if i % 6 == 0]:
             pair = []
-            pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + 1e-8) - 1., -2))
-            pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + 1e-8) - 1., -2))
-            pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + 1e-8) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + eps) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + eps) - 1., -2))
+            pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + eps) - 1., -2))
             obs.append(xp.concatenate(pair, axis=1))
 
         # shape[batch_size, features, n_pairs, timesteps]
-        return self.bn(xp.concatenate(obs, axis=-2))
+        # return self.bn(xp.concatenate(obs, axis=-2))
+        return xp.concatenate(obs, axis=-2)
 
 
-class PortifolioVector(chainer.Link):
-    def __init__(self, input_shape):
+# class PortifolioVector(chainer.Link):
+#     def __init__(self, input_shape):
+#         super().__init__()
+#         self.n_cols = int(input_shape[-1])
+#         self.n_pairs = int((self.n_cols - 1) / 6)
+#
+#     def __call__(self, x):
+#         xp = chainer.cuda.get_array_module(x)
+#         out = []
+#         for i in [i - 1 for i in range(1, self.n_cols) if (i % 6) == 0]:
+#             out.append(xp.expand_dims(x[:,:,-1, i], -1))
+# #         out.append(x[:,-1])
+#
+#         return chainer.Variable(xp.reshape(xp.concatenate(out, axis=-1), [-1,1,self.n_pairs,1]))
+
+
+class PortfolioVector(chainer.Link):
+    def __init__(self):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
 
     def __call__(self, x):
-        xp = chainer.cuda.get_array_module(x)
-        out = []
-        for i in [i - 1 for i in range(1, self.n_cols) if (i % 6) == 0]:
-            out.append(xp.expand_dims(x[:,:,-1, i], -1))
-#         out.append(x[:,-1])
+        n_cols = int(x.shape[-1])
+        n_pairs = int((n_cols - 1) / 6)
 
-        return chainer.Variable(xp.reshape(xp.concatenate(out, axis=-1), [-1,1,self.n_pairs,1]))
+        xp = chainer.cuda.get_array_module(x)
+        cv = np.zeros((1, n_pairs), dtype='f')
+        for i, j in enumerate([i - 1 for i in range(1, n_cols) if (i % 6) == 0]):
+            cv[0, i] = xp.expand_dims(x[:,:,-1, j] * x[:,:,-1, j - 2], -1)
+
+        return chainer.Variable(xp.reshape(xp.concatenate(cv / (cv.sum() + x[:,:,-1, n_cols - 1]), axis=-1),
+                                           [-1,1,n_pairs,1]))
 
 
 class CashBias(chainer.Link):
@@ -194,16 +253,15 @@ class VisionModel(chainer.Chain):
     """
     Write me
     """
-    def __init__(self, input_shape, vn_number, pn_number):
+    def __init__(self, timesteps, vn_number, pn_number):
         super().__init__()
-        timesteps, in_channels = input_shape
         with self.init_scope():
-            self.obs = ProcessObs((timesteps,in_channels))
+            self.obs = ProcessObs()
             self.filt1 = ConvBlock(3, vn_number, (1, 3), (0, 1))
             self.filt2 = ConvBlock(3, vn_number, (1, 5), (0, 2))
             self.filt3 = ConvBlock(3, vn_number, (1, 7), (0, 3))
             self.filt4 = ConvBlock(3, vn_number, (1, 9), (0, 4))
-            self.filt_out = ConvBlock(vn_number * 4, pn_number, (1, timesteps), (0, 0))
+            self.filt_out = ConvBlock(vn_number * 4, pn_number, (1, timesteps + 1), (0, 0))
 
     def __call__(self, x):
         h = self.obs(x)
@@ -215,14 +273,11 @@ class EIIE(chainer.Chain):
     """
     Write me
     """
-    def __init__(self, input_shape, vn_number, pn_number):
+    def __init__(self, timesteps, vn_number, pn_number):
         super().__init__()
-        self.n_cols = int(input_shape[-1])
-        self.n_pairs = int((self.n_cols - 1) / 6)
-
         with self.init_scope():
-            self.vision = VisionModel(input_shape, vn_number, pn_number)
-            self.portvec = PortifolioVector(input_shape)
+            self.vision = VisionModel(timesteps, vn_number, pn_number)
+            self.portvec = PortfolioVector()
             self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
             self.cashbias = CashBias()
 
@@ -329,10 +384,10 @@ class A3CEIIE(chainer.Chain, a3c.A3CModel):
     """
     Write me
     """
-    def __init__(self, input_shape, action_size, vn_number, pn_number):
+    def __init__(self, timesteps, action_size, vn_number, pn_number):
         super().__init__()
         with self.init_scope():
-            self.shared = EIIE(input_shape, vn_number, pn_number)
+            self.shared = EIIE(timesteps, vn_number, pn_number)
             self.pi = SoftmaxGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.pi = LinearGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.v_1 = L.Linear(pn_number * action_size, pn_number * action_size, initialW=LeCunNormal(), nobias=False)
