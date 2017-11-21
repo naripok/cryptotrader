@@ -117,16 +117,16 @@ class PrintProgress(object):
         # self.rewards.append(env.last_reward)
         self.grads.append(np.sum([np.sum(np.square(param.grad)) for param in agent.optimizer.target.params()]))
 
-        print("Agent: %d, t: %d, Avg val: %f, Avg H: %f, Lr: %.02E, g norm: %f, Avg g norm: %f, Beta: %.02E Sample/s: %.0f   " %\
+        print("Agent: %d, t: %d, Avg val: %f, Avg H: %f, Lr: %.02E, Beta: %.02E, g norm: %f, Avg g norm: %f Sample/s: %.0f   " %\
                       (agent_id,
                        step,
                        # self.rewards.data.mean(),
                        stats[0][1],
                        stats[1][1],
                        agent.optimizer.lr,
+                       agent.beta,
                        self.grads.get_last(),
                        self.grads.data.mean(),
-                       agent.beta,
                        int(step) / int(timedelta(seconds=time() - self.t0 + 1).total_seconds())),
                        end='\r', flush=True)
 

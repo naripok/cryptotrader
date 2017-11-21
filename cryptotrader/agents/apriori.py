@@ -250,7 +250,7 @@ class APrioriAgent(Agent):
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
-    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False):
+    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
@@ -295,25 +295,30 @@ class APrioriAgent(Agent):
                     if render:
                         env.render()
 
-                    if verbose:
-                        print(
-                            ">> step {0}, Uptime: {1}, Last tstamp: {4}, Crypto prices: {2}, Last action: {3}, Portfolio: {6}{5}".format(
+                    if verbose or email:
+                        msg = ">> step {0}, Uptime: {1}, Last tstamp: {2}, Crypto prices: {3}, Last action: {4}, Portfolio: {5}{6}".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
+                                str(obs.index[-1]),
                                 ["%s: %.08f" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close'))) for symbol in env.pairs],
                                 env.action_df.iloc[-1].astype(str).to_dict(),
-                                str(obs.index[-1]),
-                                "                                                                                       ",
-                                env.portfolio_df.iloc[-1].astype(str).to_dict()
-                            ), end="\r", flush=True)
+                                env.portfolio_df.iloc[-1].astype(str).to_dict(),
+                                "                                                                                       ")
+                        if verbose:
+                            print(msg, end="\r", flush=True)
+                        if email:
+                            env.send_email("Trading report", msg)
 
                     if status['Error']:
-                        # e = status['Error']
-                        # print("Env error:",
-                        #       type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        e = status['Error']
+                        if verbose:
+                            print("Env error:",
+                                  type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        if email:
+                            env.send_email("Trading error", env.parse_error(e))
                         break
 
-                    sleep(10)
+                    sleep(env.period * 60)
 
                 except Exception as e:
                     print("\nAgent Error:",
@@ -323,7 +328,6 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
-
                     break
 
         except KeyboardInterrupt:

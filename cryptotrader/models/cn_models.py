@@ -174,7 +174,7 @@ class EIIE(chainer.Chain):
         # h = F.concat([h, self.portvec(x)], axis=1)
         h = self.conv(h)
         # h = self.cashbias(h)
-        return h
+        return F.tanh(h)
 
     def predict(self, obs):
         obs = batch_states([obs[:-1].values], chainer.cuda.get_array_module(obs), phi)
