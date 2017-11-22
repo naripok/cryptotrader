@@ -217,10 +217,16 @@ def make_train_batch(env, batch_size, target_type):
 
 
 def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_epochs,
-             test_interval, test_epochs, target_type, save_dir, name):
+             test_interval, test_epochs, target_type, save_dir, name, prev_score=None):
     ## Training loop
     t0 = 1e-8
-    best_score = -np.inf
+
+    if prev_score:
+        assert isinstance(prev_score, float) or isinstance(prev_score, int), 'prev_score must be int or float.'
+        best_score = prev_score
+    else:
+        best_score = -np.inf
+
     train_r2_log = []
     train_loss_log = []
     test_r2_log = []
@@ -286,7 +292,8 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
                 if np.mean(test_scores) > best_score:
                     best_score = np.mean(test_scores)
                     print("\nNew best score:", best_score, end='\r')
-                    chainer.serializers.save_npz(save_dir + name + '.npz', nn, compression=True)
+                    chainer.serializers.save_npz(save_dir + name + '>' + str(float(best_score)) +
+                                                 '.npz', nn, compression=True)
 
                 print('\nval loss: {:.08f}, val r2 score: {:.08f}'.format(
                     np.mean(test_losses), np.mean(test_scores)))

@@ -986,7 +986,7 @@ class OLMARTrader(APrioriAgent):
         """
         price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
+            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window - 1:-1].mean() /
                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         return price_predict
 
