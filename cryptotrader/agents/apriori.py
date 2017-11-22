@@ -21,11 +21,13 @@ class APrioriAgent(Agent):
     model: a instance of a sklearn/keras like model, with train and test methods
     """
 
-    def __init__(self, fiat):
+    def __init__(self, fiat, name=""):
         super().__init__()
         self.epsilon = 1e-8
         self.fiat = fiat
         self.step = 0
+        self.name = name
+        self.log = {}
 
     def act(self, obs):
         """
@@ -250,7 +252,7 @@ class APrioriAgent(Agent):
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
-    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False):
+    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
@@ -272,6 +274,7 @@ class APrioriAgent(Agent):
             last_action_time = floor_datetime(env.timestamp, env.period)
 
             can_act = True # TODO: FALSE HERE
+            may_report = False
             while True:
                 try:
                     loop_time = env.timestamp
@@ -288,6 +291,7 @@ class APrioriAgent(Agent):
                             self.step += 1
                             last_action_time = floor_datetime(env.timestamp, env.period)
                             can_act = False
+                            may_report = True
 
                     else:
                         obs = env.get_observation(True).astype(np.float64)
@@ -295,25 +299,47 @@ class APrioriAgent(Agent):
                     if render:
                         env.render()
 
-                    if verbose:
-                        print(
-                            ">> step {0}, Uptime: {1}, Last tstamp: {4}, Crypto prices: {2}, Last action: {3}, Portfolio: {6}{5}".format(
+                    if verbose or email:
+                        msg = "\n>> step {0},\nUptime: {1},\nLast tstamp: {2},\n".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
-                                ["%s: %.08f" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close'))) for symbol in env.pairs],
-                                env.action_df.iloc[-1].astype(str).to_dict(),
                                 str(obs.index[-1]),
-                                "                                                                                       ",
-                                env.portfolio_df.iloc[-1].astype(str).to_dict()
-                            ), end="\r", flush=True)
+                                )
+
+                        for key in self.log:
+                            msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
+
+                        msg += "\nCrypto prices:\n"
+                        for symbol in env.pairs:
+                            msg += "%s: %.08f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
+
+                        msg += "\nLast action:\n"
+                        la = env.action_df.iloc[-1].astype(str).to_dict()
+                        for symbol in la:
+                            msg += str(symbol) + ": " + la[symbol] + '\n'
+
+                        msg += "\nPortfolio:\n"
+                        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
+                        for symbol in port:
+                            msg += str(symbol) + ": " + port[symbol] + '\n'
+
+                        if verbose:
+                            print(msg, end="\r", flush=True)
+
+                        if email and may_report:
+                            env.send_email("Trading report " + self.name, msg)
+                            may_report = False
 
                     if status['Error']:
-                        # e = status['Error']
-                        # print("Env error:",
-                        #       type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        e = status['Error']
+                        if verbose:
+                            print("Env error:",
+                                  type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        if email:
+                            env.send_email("Trading error: %s" % env.name, env.parse_error(e))
                         break
 
-                    sleep(10)
+                    sleep((env.period * 60 + 1) / 8)
 
                 except Exception as e:
                     print("\nAgent Error:",
@@ -323,7 +349,6 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
-
                     break
 
         except KeyboardInterrupt:
@@ -821,15 +846,16 @@ class PAMRTrader(APrioriAgent):
     def __repr__(self):
         return "PAMRTrader"
 
-    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT"):
+    def __init__(self, sensitivity=0.03, alpha=4, C=2444, variant="PAMR1", fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
         :param variant: str: The variant of the proposed algorithm. It can be PAMR, PAMR1, PAMR2.
         :
         """
-        super().__init__(fiat=fiat)
+        super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
+        self.alpha = alpha
         self.C = C
         self.variant = variant
 
@@ -837,9 +863,15 @@ class PAMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
+        self.log['price_change'] = {}
+
         price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
+
+            # Log values
+            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (1 / price_relative[key])})
+
         return price_relative
 
     def rebalance(self, obs):
@@ -865,12 +897,25 @@ class PAMRTrader(APrioriAgent):
         :param b: numpy array: Last portfolio vector
         :param x: numpy array: Price movement prediction
         """
-        x_mean = np.mean(x)
-        if np.dot(b, x) >= 1:
-            le = max(0., np.dot(b, x) - (1 + self.sensitivity))
-        else:
-            le = max(0, (1 - self.sensitivity) - np.dot(b, x))
+        # x_mean = np.mean(x)
+        # if np.dot(b, x) >= 1:
+        #     le = max(0., np.dot(b, x) - (1 + self.sensitivity))
+        # else:
+        #     le = max(0, (1 - self.sensitivity) - np.dot(b, x))
 
+        x_mean = np.mean(x)
+        portvar = np.dot(b, x)
+
+        if portvar > 1 + self.sensitivity:
+            le = portvar - (1 + self.sensitivity)
+        elif portvar < 1 - self.sensitivity:
+            le = (1 - self.sensitivity) - portvar
+        else:
+            max_posit = np.argmax(abs(x - 1))
+            if x[max_posit] >= 1:
+                le = max(0., (x[max_posit] - (1 + self.sensitivity * self.alpha)))
+            else:
+                le = max(0., (1- self.sensitivity * self.alpha) - x[max_posit])
 
         if self.variant == 'PAMR':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
@@ -885,6 +930,10 @@ class PAMRTrader(APrioriAgent):
         # update portfolio
         b = b + lam * (x - x_mean)
 
+        # Log values
+        self.log['mean_change'] = 1 / x_mean
+        self.log['total_portfolio_change'] = 1 / portvar
+
         # project it onto simplex
         return np.append(simplex_proj(b), [0])
 
@@ -893,6 +942,7 @@ class PAMRTrader(APrioriAgent):
         if 'C' in kwargs:
             self.C = kwargs['C']
         self.variant = kwargs['variant']
+        self.alpha = kwargs['alpha']
 
 
 class OLMARTrader(APrioriAgent):
