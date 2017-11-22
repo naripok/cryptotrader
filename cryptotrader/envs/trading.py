@@ -570,14 +570,15 @@ class TradingEnvironment(Env):
                                                                         nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
-        # Set index
 
+        # Set index
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True, drop=True)
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
-        fill_dict = {col: ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close') for col in ['open', 'high', 'low', 'close']}
+        last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+        fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
         fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
@@ -1379,6 +1380,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
         except Exception as e:
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
