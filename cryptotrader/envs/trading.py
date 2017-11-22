@@ -5,14 +5,14 @@ author: Tau
 """
 from ..core import Env, ExchangeConnection, DataFeed
 from ..spaces import *
-from ..utils import Logger, safe_div
+from ..utils import Logger, safe_div, floor_datetime
 from .utils import *
 
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
 from decimal import getcontext, localcontext, ROUND_UP, Decimal
-from time import sleep
+from time import sleep, time
 import pandas as pd
 import empyrical as ec
 from bokeh.layouts import column
@@ -20,7 +20,7 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import PoloniexError, Poloniex
+from ..exchange_api.poloniex import PoloniexError, Poloniex, RetryException
 import json
 
 
