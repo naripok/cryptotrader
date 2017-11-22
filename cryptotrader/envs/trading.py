@@ -1154,7 +1154,7 @@ class TradingEnvironment(Env):
             e.__traceback__.tb_lineno) + ': ' + str(e)
         return error_msg
 
-    def set_email(self, email, psw):
+    def set_email(self, email):
         """
         Set Gmail address and password for log keeping
         :param email: str: Gmail address
@@ -1162,34 +1162,34 @@ class TradingEnvironment(Env):
         :return:
         """
         try:
-            assert isinstance(email, str) and isinstance(psw, str)
+            assert isinstance(email, dict)
             self.email = email
-            self.psw = psw
-            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (self.email))
+            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (str([addr for addr in email])))
         except Exception as e:
             self.logger.error(TradingEnvironment.set_email, self.parse_error(e))
 
     def send_email(self, subject, body):
         try:
-            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
+            assert isinstance(self.email, dict) and \
                    isinstance(subject, str) and isinstance(body, str)
-            gmail_user = self.email
-            gmail_pwd = self.psw
-            FROM = self.email
-            TO = self.email if type(self.email) is list else [self.email]
-            SUBJECT = subject
-            TEXT = body
+            for key in self.email:
+                gmail_user = key
+                gmail_pwd = self.email[key]
+                FROM = key
+                TO = key if type(key) is list else [key]
+                SUBJECT = subject
+                TEXT = body
 
-            # Prepare actual message
-            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+                # Prepare actual message
+                message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                        """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
 
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.ehlo()
-            server.starttls()
-            server.login(gmail_user, gmail_pwd)
-            server.sendmail(FROM, TO, message)
-            server.close()
+                server = smtplib.SMTP("smtp.gmail.com", 587)
+                server.ehlo()
+                server.starttls()
+                server.login(gmail_user, gmail_pwd)
+                server.sendmail(FROM, TO, message)
+                server.close()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
