@@ -97,6 +97,17 @@ cryptotrader/envs/__pycache__/
 dist/
 .cache/
 
-/dev_notebooks/*
+/dev/*
 
 /notebooks/.ipynb_checkpoints/
+/dev/
+/dev/eiie_rl_nb.ipynb
+/dev/online_rebalance_nb.ipynb
+/dev/logs/
+/dev/.ipynb_checkpoints/
+/dev/data/
+/dev/eiie_rl_train.py
+/dev/save/
+/dev/eiie_tco_nb.ipynb
+/dev/paper_trading_remote.py
+/dev/eiie_tco_train.py

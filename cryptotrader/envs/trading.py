@@ -570,14 +570,15 @@ class TradingEnvironment(Env):
                                                                         nrows=index.shape[0])
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
-        # Set index
 
+        # Set index
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True, drop=True)
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
-        fill_dict = {col: ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close') for col in ['open', 'high', 'low', 'close']}
+        last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+        fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
         fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
@@ -1154,7 +1155,7 @@ class TradingEnvironment(Env):
             e.__traceback__.tb_lineno) + ': ' + str(e)
         return error_msg
 
-    def set_email(self, email, psw):
+    def set_email(self, email):
         """
         Set Gmail address and password for log keeping
         :param email: str: Gmail address
@@ -1162,34 +1163,34 @@ class TradingEnvironment(Env):
         :return:
         """
         try:
-            assert isinstance(email, str) and isinstance(psw, str)
+            assert isinstance(email, dict)
             self.email = email
-            self.psw = psw
-            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (self.email))
+            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (str([addr for addr in email])))
         except Exception as e:
             self.logger.error(TradingEnvironment.set_email, self.parse_error(e))
 
     def send_email(self, subject, body):
         try:
-            assert isinstance(self.email, str) and isinstance(self.psw, str) and \
+            assert isinstance(self.email, dict) and \
                    isinstance(subject, str) and isinstance(body, str)
-            gmail_user = self.email
-            gmail_pwd = self.psw
-            FROM = self.email
-            TO = self.email if type(self.email) is list else [self.email]
-            SUBJECT = subject
-            TEXT = body
+            for key in self.email:
+                gmail_user = key
+                gmail_pwd = self.email[key]
+                FROM = key
+                TO = key if type(key) is list else [key]
+                SUBJECT = subject
+                TEXT = body
 
-            # Prepare actual message
-            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+                # Prepare actual message
+                message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                        """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
 
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.ehlo()
-            server.starttls()
-            server.login(gmail_user, gmail_pwd)
-            server.sendmail(FROM, TO, message)
-            server.close()
+                server = smtplib.SMTP("smtp.gmail.com", 587)
+                server.ehlo()
+                server.starttls()
+                server.login(gmail_user, gmail_pwd)
+                server.sendmail(FROM, TO, message)
+                server.close()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
@@ -1379,6 +1380,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
         except Exception as e:
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):

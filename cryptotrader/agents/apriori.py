@@ -29,7 +29,7 @@ class APrioriAgent(Agent):
         self.name = name
         self.log = {}
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Select action on actual observation
         :param obs:
@@ -257,7 +257,8 @@ class APrioriAgent(Agent):
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
 
-        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period, env.calc_total_portval()))
+        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period,
+                                                                                            env.calc_total_portval()))
 
         self.fiat = env._fiat
 
@@ -272,18 +273,17 @@ class APrioriAgent(Agent):
             action = np.zeros(len(env.symbols))
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
-
             can_act = True # TODO: FALSE HERE
             may_report = False
+
             while True:
                 try:
                     loop_time = env.timestamp
-                    if loop_time >= last_action_time + timedelta(minutes=env.period) and \
-                                            loop_time.minute % env.period == 0:
+                    if loop_time >= last_action_time + timedelta(minutes=env.period):
                         can_act = True
 
                     if can_act:
-                        action = self.rebalance(obs)
+                        action = self.rebalance(env.get_observation(True).astype(np.float64))
                         obs, reward, done, status = env.step(action)
                         episode_reward += np.float64(reward)
 
@@ -299,15 +299,22 @@ class APrioriAgent(Agent):
                     if render:
                         env.render()
 
+                    # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0},\nUptime: {1},\nLast tstamp: {2},\n".format(
+                        msg = "\n>> step {0},\nUptime: {1}\nLast tstamp: {2}\nAction time: {3}\n".format(
                                 self.step,
                                 str(pd.to_timedelta(time() - t0, unit='s')),
                                 str(obs.index[-1]),
+                                loop_time
                                 )
 
                         for key in self.log:
-                            msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
+                            if isinstance(self.log[key], dict):
+                                msg += '\n' + str(key) + '\n'
+                                for subkey in self.log[key]:
+                                    msg += str(subkey) + ": " + str(self.log[key][subkey]) + '\n'
+                            else:
+                                msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
 
                         msg += "\nCrypto prices:\n"
                         for symbol in env.pairs:
@@ -349,6 +356,10 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
+
+                    if email:
+                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+
                     break
 
         except KeyboardInterrupt:
@@ -370,7 +381,7 @@ class TestAgent(APrioriAgent):
         super().__init__(fiat)
         self.obs_shape = obs_shape
 
-    def act(self, obs):
+    def predict(self, obs):
         # Assert obs is valid
         assert obs.shape == self.obs_shape, "Wrong obs shape."
 
@@ -386,7 +397,7 @@ class TestAgent(APrioriAgent):
             return self.get_portfolio_vector(obs)
 
     def rebalance(self, obs):
-        return self.act(obs.apply(convert_to.decimal, raw=True))
+        return self.predict(obs.apply(convert_to.decimal, raw=True))
 
     def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
@@ -472,7 +483,7 @@ class DummyTrader(APrioriAgent):
         self.random_process = random_process
         self.activation = activation
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Performs a single step on the environment
         """
@@ -492,7 +503,7 @@ class DummyTrader(APrioriAgent):
                 return np.random.random(obs.columns.levels[0].shape[0])
 
     def rebalance(self, obs):
-        return self.act(obs)
+        return self.predict(obs)
 
 
 class Benchmark(APrioriAgent):
@@ -505,7 +516,7 @@ class Benchmark(APrioriAgent):
     def __init__(self, fiat="USDT"):
         super().__init__(fiat)
 
-    def act(self, obs):
+    def predict(self, obs):
         if self.step == 0:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs - 1)
@@ -514,7 +525,7 @@ class Benchmark(APrioriAgent):
             return self.get_portfolio_vector(obs)[:-1]
 
     def rebalance(self, obs):
-        position = self.act(obs)
+        position = self.predict(obs)
         position.resize(obs.columns.levels[0].shape[0])
         position[-1] = self.get_portfolio_vector(obs)[-1]
         return position
@@ -530,13 +541,13 @@ class ConstantRebalanceTrader(APrioriAgent):
     def __init__(self, fiat="USDT"):
         super().__init__(fiat)
 
-    def act(self, obs):
+    def predict(self, obs):
         n_pairs = obs.columns.levels[0].shape[0]
         action = np.ones(n_pairs - 1)
         return array_normalize(action)
 
     def rebalance(self, obs):
-        factor = self.act(obs)
+        factor = self.predict(obs)
         return factor.resize(obs.columns.levels[0].shape[0])
 
 
@@ -574,7 +585,7 @@ class MomentumTrader(APrioriAgent):
             raise TypeError("Wrong mean_type param")
         return df
 
-    def act (self, obs):
+    def predict (self, obs):
         """
         Performs a single step on the environment
         """
@@ -606,7 +617,7 @@ class MomentumTrader(APrioriAgent):
                 obs = obs.astype(np.float64).ffill()
                 prev_posit = self.get_portfolio_vector(obs)
                 position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
-                factor = self.act(obs)
+                factor = self.predict(obs)
                 for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                     if factor[i] >= 0.0:
                         position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i] / \
@@ -665,7 +676,7 @@ class ReversedMomentumTrader(APrioriAgent):
             raise TypeError("Wrong mean_type param")
         return df
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Performs a single step on the environment
         """
@@ -691,7 +702,7 @@ class ReversedMomentumTrader(APrioriAgent):
             obs = obs.astype(np.float64).ffill()
             prev_posit = self.get_portfolio_vector(obs)
             position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
-            factor = self.act(obs)
+            factor = self.predict(obs)
             for i in range(position.shape[0] - 1):
 
                 if factor[i] >= 0.0:
@@ -788,7 +799,7 @@ class HarmonicTrader(APrioriAgent):
     def is_crab(self, obs):
         return self.find_pattern(obs, c1=(0.382, 0.618), c2=(0.382, 0.886), c3=(2.24, 3.618))
 
-    def act(self, obs):
+    def predict(self, obs):
         pairs = obs.columns.levels[0]
         action = np.zeros(pairs.shape[0] - 1)
         for i, pair in enumerate(pairs):
@@ -810,7 +821,7 @@ class HarmonicTrader(APrioriAgent):
         else:
             pairs = obs.columns.levels[0]
             prev_port = self.get_portfolio_vector(obs)
-            action = self.act(obs)
+            action = self.predict(obs)
             port_vec = np.zeros(pairs.shape[0])
             for i in range(pairs.shape[0] - 1):
                 if action[i] >= 0:
@@ -859,7 +870,7 @@ class PAMRTrader(APrioriAgent):
         self.C = C
         self.variant = variant
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Performs prediction given environment observation
         """
@@ -887,7 +898,7 @@ class PAMRTrader(APrioriAgent):
             return array_normalize(action)
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
-            price_relative = self.act(obs)
+            price_relative = self.predict(obs)
             return self.update(prev_posit[:-1], price_relative)
 
     def update(self, b, x):
@@ -958,17 +969,17 @@ class OLMARTrader(APrioriAgent):
     def __repr__(self):
         return "OLMARTrader"
 
-    def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT"):
+    def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT", name=""):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
         """
-        super().__init__(fiat=fiat)
+        super().__init__(fiat=fiat, name=name)
         self.window = window
         self.eps = eps
-        self.smooth =  smooth
+        self.smooth = smooth
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
@@ -992,7 +1003,7 @@ class OLMARTrader(APrioriAgent):
             return array_normalize(action)
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-2)
-            price_predict = self.act(obs)
+            price_predict = self.predict(obs)
             return self.update(prev_posit[:-1], price_predict)
 
     def update(self, b, x):
@@ -1035,16 +1046,16 @@ class TCOTrader(APrioriAgent):
     def __repr__(self):
         return "TCOTrader"
 
-    def __init__(self, toff=0.1, predictor=None, fiat="USDT"):
+    def __init__(self, toff=0.1, predictor=None, fiat="USDT", name=""):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
         """
-        super().__init__(fiat=fiat)
+        super().__init__(fiat=fiat, name=name)
         self.toff = toff
         self.predictor = predictor
 
-    def act(self, obs):
+    def predict(self, obs):
         """
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
@@ -1068,7 +1079,7 @@ class TCOTrader(APrioriAgent):
             return array_normalize(action)
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
-            price_prediction = self.act(obs)
+            price_prediction = self.predict(obs)
             return self.update(prev_posit[:-1], price_prediction)
 
     def update(self, b, x):
@@ -1109,14 +1120,14 @@ class FactorTrader(APrioriAgent):
         self.alpha = alpha
         self.activation = activation
 
-    def act(self, obs):
+    def predict(self, obs):
         action = np.zeros(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for weight, factor in zip(self.weights, self.factors):
-            action += weight * factor.act(obs)
+            action += weight * factor.predict(obs)
         return action
 
     def rebalance(self, obs):
-        action = self.act(obs)
+        action = self.predict(obs)
         prev_port= self.get_portfolio_vector(obs)
         port_vec = np.zeros(prev_port.shape)
         for i, symbol in enumerate(obs.columns.levels[0]):
