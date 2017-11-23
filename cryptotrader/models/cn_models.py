@@ -255,11 +255,12 @@ def train_nn(nn, env, test_env, optimizer, batch_size, lr_decay_period, train_ep
             train_r2_log.append(train_r2.data)
 
             t0 += time() - t1
-            print("Training epoch %d/%d, loss: %.08f, r2: %f, samples/sec: %f                                          "
+            print("Training epoch %d/%d, loss: %.08f, r2: %f, mean r2: %f, samples/sec: %f                                          "
                                                                                 % (epoch + 1,
                                                                                   train_epochs,
                                                                                   loss.data,
                                                                                   train_r2.data,
+                                                                                  float(np.mean(train_r2_log[-100:])),
                                                                                   (epoch + 1) * batch_size / t0),
                   end='\r')
 
