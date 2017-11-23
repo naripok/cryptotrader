@@ -301,12 +301,13 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0},\nUptime: {1}\nLast tstamp: {2}\nAction time: {3}\n".format(
-                                self.step,
-                                str(pd.to_timedelta(time() - t0, unit='s')),
-                                str(obs.index[-1]),
-                                loop_time
-                                )
+                        msg = "\n>> step {0}\ntstamp: {1}\nPortval: {2}\nAction time: {3}\nUptime: {4}\n".format(
+                            self.step,
+                            str(obs.index[-1]),
+                            env.calc_total_portval(),
+                            loop_time,
+                            str(pd.to_timedelta(time() - t0, unit='s'))
+                        )
 
                         for key in self.log:
                             if isinstance(self.log[key], dict):
