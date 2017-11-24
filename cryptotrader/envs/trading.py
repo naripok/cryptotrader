@@ -169,9 +169,13 @@ class PoloniexConnection(DataFeed):
         """
         super().__init__(tapi, period, pairs)
 
+    # Data feed methods
     @property
     def balance(self):
         return self.tapi.returnBalances()
+
+    def returnTicker(self):
+        return self.tapi.returnTicker()
 
     def returnBalances(self):
         return self.tapi.returnBalances()
@@ -187,6 +191,13 @@ class PoloniexConnection(DataFeed):
             return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
         except PoloniexError:
             raise ValueError("Bad exchange response data.")
+
+    # Trade execution methods
+    def sell(self, currencyPair, rate, amount, orderType=False):
+        return self.tapi.sell(currencyPair, rate, amount, orderType=orderType)
+
+    def buy(self, currencyPair, rate, amount, orderType=False):
+        return self.tapi.buy(currencyPair, rate, amount, orderType=orderType)
 
 
 class MultiExchangeConnection(DataFeed):
@@ -230,7 +241,11 @@ class TradingEnvironment(Env):
         self.action_df = pd.DataFrame()
 
         # Logging and debugging
-        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+        self.status = {'OOD': False,
+                       'Error': False,
+                       'ValueError': False,
+                       'ActionError': False,
+                       'NotEnoughFiat': False}
 
         if not os.path.exists('./logs'):
             os.makedirs('./logs')
@@ -616,11 +631,11 @@ class TradingEnvironment(Env):
                     port_vec.index = [index[0]]
 
                 # Get pairs history
-                for symbol in self.pairs:
-                    keys.append(symbol)
-                    history = self.get_ohlc(symbol, index)
+                for pair in self.pairs:
+                    keys.append(pair)
+                    history = self.get_ohlc(pair, index)
 
-                    history = pd.concat([history, port_vec[symbol.split('_')[1]]], axis=1)
+                    history = pd.concat([history, port_vec[pair.split('_')[1]]], axis=1)
                     obs_list.append(history)
 
                 # Get fiat history
@@ -640,9 +655,9 @@ class TradingEnvironment(Env):
                 return obs.apply(convert_to.decimal, raw=True)
             else:
                 # Get history
-                for symbol in self.pairs:
-                    keys.append(symbol)
-                    history = self.get_ohlc(symbol, index)
+                for pair in self.pairs:
+                    keys.append(pair)
+                    history = self.get_ohlc(pair, index)
                     obs_list.append(history)
 
                 # Concatenate
@@ -663,10 +678,10 @@ class TradingEnvironment(Env):
             self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
 
-        except PoloniexError:
-            sleep(int(self.period / 4))
-            self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
-            return self.obs_df
+        # except PoloniexError:
+        #     sleep(1)
+        #     self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
+        #     return self.obs_df
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_observation, self.parse_error(e))
@@ -714,16 +729,23 @@ class TradingEnvironment(Env):
 
         return portval
 
-    def calc_posit(self, symbol):
+    def calc_posit(self, symbol, portval):
+        """
+        Calculate current position vector
+        :param symbol: str: Symbol name
+        :param portval: Decimal: Portfolio value
+        :return:
+        """
         if symbol == self._fiat:
-            return safe_div(self.fiat, self.calc_total_portval())
+            return safe_div(self.fiat, portval)
         else:
-            return safe_div(self.get_crypto(symbol) * self.get_open_price(symbol), self.calc_total_portval())
+            return safe_div(self.get_crypto(symbol) * self.get_open_price(symbol), portval)
 
     def calc_portfolio_vector(self):
         portfolio = np.empty(len(self.symbols), dtype=Decimal)
+        portval = self.calc_total_portval()
         for i, symbol in enumerate(self.symbols):
-            portfolio[i] = self.calc_posit(symbol)
+            portfolio[i] = self.calc_posit(symbol, portval)
         return portfolio
 
     def assert_action(self, action):
@@ -851,13 +873,15 @@ class TradingEnvironment(Env):
 
             # Log executed action and final balance
             self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
+
+            # Update portfolio_df
             final_balance = self.balance
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
         except Exception as e:
             self.logger.error(TradingEnvironment.simulate_trade, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
+            if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
@@ -1398,6 +1422,181 @@ class LiveTradingEnvironment(TradingEnvironment):
         assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
         super().__init__(period, obs_steps, tapi, name)
 
+    # Data feed methods
+    def get_balance(self):
+        """
+        Get last balance from exchange
+        :return: dict: Dict containing Decimal values for portfolio allocation
+        """
+        try:
+            balance = self.tapi.returnBalances()
+
+            filtered_balance = {}
+            for symbol in self.symbols:
+                filtered_balance[symbol] = convert_to.decimal(balance[symbol])
+
+            return filtered_balance
+
+        except Exception as e:
+            self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
+            raise e
+
+    def calc_total_portval(self, timestamp=None):
+        """
+        Calculate total portfolio value given last pair prices
+        :param timestamp: For compatibility only
+        :return: Decimal: Total portfolio value in fiat units
+        """
+        portval = convert_to.decimal('0E-8')
+        balance = self.get_balance()
+        ticker = self.tapi.returnTicker()
+        for pair in self.pairs:
+            portval = balance[pair.split('_')[1]].fma(convert_to.decimal(ticker[pair]['last']),
+                                                      portval)
+        portval += balance[self._fiat]
+
+        return convert_to.decimal(portval)
+
+    def calc_portfolio_vector(self):
+        portfolio = np.empty(len(self.symbols), dtype=Decimal)
+        portval = self.calc_total_portval()
+        ticker = self.tapi.returnTicker()
+        balance = self.get_balance()
+        for i, pair in enumerate(self.pairs):
+            portfolio[i] = safe_div(balance[pair.split('_')[1]] *
+                                    convert_to.decimal(ticker[pair]['last']),  portval)
+
+        portfolio[-1] = safe_div(balance[self._fiat], portval)
+
+        return convert_to.decimal(portfolio)
+
+    def get_balance_array(self):
+        """
+        Return ordered balance array
+        :return: numpy ndarray:
+        """
+        balance_array = np.empty(len(self.symbols), dtype=Decimal)
+        balance = self.get_balance()
+        for i, symbol in enumerate(self.symbols):
+            balance_array[i] = balance[symbol]
+        return balance_array
+
+    def get_desired_balance_array(self, action):
+        """
+        Return asset amounts given action array
+        :param action: numpy ndarray: action array with norm summing one
+        :return: numpy ndarray: asset amount array given action
+        """
+        desired_balance = np.empty(len(self.symbols), dtype=Decimal)
+        portval = fiat = self.calc_total_portval()
+        ticker = self.tapi.returnTicker()
+        for i, pair in enumerate(self.pairs):
+            desired_balance[i] = safe_div(portval * action[i],
+                                          convert_to.decimal(ticker[pair]['last']))
+            fiat -= portval * action[i]
+        desired_balance[-1] = convert_to.decimal(fiat)
+
+        return desired_balance
+
+    def immediate_sell(self, symbol, amount):
+        try:
+            pair = self._fiat + '_' + symbol
+            amount = str(amount)
+
+            while True:
+                try:
+                    price = self.tapi.returnTicker()[pair]['highestBid']
+
+                    self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                      "Selling %s %s at %s" % (pair, amount, price))
+
+                    response = self.tapi.sell(pair, price, amount, orderType="immediateOrCancel")
+
+                    if 'amountUnfilled' in response:
+                        self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                          "Response: %s" % str(response))
+
+                        if response['amountUnfilled'] == '0.00000000':
+                            return True
+                        else:
+                            amount = response['amountUnfilled']
+
+                except PoloniexError as error:
+                    self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                      self.parse_error(error))
+
+                    if 'Total must be at least 0.0001.' == error.__str__():
+                        return True
+
+                    elif 'Not enough %s.' % symbol == error.__str__():
+                        amount = self.get_balance()[symbol]
+
+                    else:
+                        raise error
+
+        except Exception as e:
+            self.logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
+            if hasattr(self, 'email'):
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                                                                            datetime.strftime(self.timestamp,
+                                                                                              "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
+
+    def immediate_buy(self, symbol, amount):
+        try:
+            pair = self._fiat + '_' + symbol
+            amount = str(amount)
+
+            while True:
+                try:
+                    price = self.tapi.returnTicker()[pair]['lowestAsk']
+
+                    self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                      "Buying %s %s at %s" % (pair, amount, price))
+
+                    response = self.tapi.buy(pair, price, amount, orderType="immediateOrCancel")
+
+                    if 'amountUnfilled' in response:
+                        self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                          "Response: %s" % str(response))
+
+                        if response['amountUnfilled'] == '0.00000000':
+                            return True
+                        else:
+                            amount = response['amountUnfilled']
+
+                except PoloniexError as error:
+                    self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                      self.parse_error(error))
+
+                    if 'Total must be at least 0.0001.' == error.__str__():
+                        return True
+
+                    elif 'Not enough %s.' % self._fiat == error.__str__():
+                        if not self.status['NotEnoughFiat']:
+                            self.status['NotEnoughFiat'] = True
+
+                            price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
+                            fiat_units = self.get_balance()[self._fiat]
+
+                            amount = str(safe_div(fiat_units, price))
+
+                        else:
+                            raise error
+
+                    else:
+                        raise error
+
+        except Exception as e:
+            self.logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(e))
+            if hasattr(self, 'email'):
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                                                                            datetime.strftime(self.timestamp,
+                                                                                              "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
+
     # Online Trading methods
     def online_rebalance(self, action, timestamp):
         """
@@ -1406,67 +1605,41 @@ class LiveTradingEnvironment(TradingEnvironment):
         :return: bool: True if fully executed; False otherwise.
         """
         try:
+            self.status['NotEnoughFiat'] = False
             # First, assert action is valid
             action = self.assert_action(action)
 
-            # Calculate position change given last porftolio and action vector
-            posit_change = (action - self.calc_portfolio_vector())[:-1]
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
 
-            # Get initial portval
-            portval = self.calc_total_portval()
+            # Calculate position change given last porftolio and action vector
+            balance_change = (self.get_desired_balance_array(action) - self.get_balance_array())[:-1]
 
             # Sell assets first
-            for i, change in enumerate(posit_change):
-                if change < convert_to.decimal('0E-8'):
-
+            for i, change in enumerate(balance_change):
+                if change < 0:
                     symbol = self.symbols[i]
+                    self.immediate_sell(symbol, abs(change))
 
-                    crypto_pool = safe_div(portval * action[i], self.get_open_price(symbol))
-
-                    with localcontext() as ctx:
-                        ctx.rounding = ROUND_UP
-
-                        fee = portval * change.copy_abs() * self.tax[symbol]
-
-                    self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
-
-                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
-
-            # Uodate prev portval with deduced taxes
-            portval = self.calc_total_portval()
-
-            # Then buy some goods
-            for i, change in enumerate(posit_change):
-                if change > convert_to.decimal('0E-8'):
-
+            # Then, buy what you want
+            for i, change in enumerate(balance_change):
+                if change > 0:
                     symbol = self.symbols[i]
-
-                    self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
-
-                    # if fiat_pool is negative, deduce it from portval and clip
-                    if self.fiat < convert_to.decimal('0E-8'):
-                        portval += self.fiat
-                        self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
-
-                    with localcontext() as ctx:
-                        ctx.rounding = ROUND_UP
-
-                        fee = self.tax[symbol] * portval * change
-
-                    crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_open_price(symbol))
-
-                    self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
+                    self.immediate_buy(symbol, abs(change))
 
             # Log executed action and final balance
             self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
-            final_balance = self.balance
+
+            # Update portfolio_df
+            final_balance = self.get_balance()
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
+            return True
 
         except Exception as e:
-            self.logger.error(LiveTradingEnvironment.simulate_trade, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
+            self.logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))
+            if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
@@ -1474,7 +1647,6 @@ class LiveTradingEnvironment(TradingEnvironment):
 
     # Env methods
     def reset(self):
-
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
         self.action_df = pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp])
@@ -1503,16 +1675,15 @@ class LiveTradingEnvironment(TradingEnvironment):
             timestamp = self.timestamp
 
             # Simulate portifolio rebalance
-            self.simulate_trade(action, timestamp)
+            done = self.online_rebalance(action, timestamp)
 
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(),
                             'timestamp': self.portfolio_df.index[-1]}
 
-            done = True
-
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):

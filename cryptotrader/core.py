@@ -7,6 +7,7 @@ import json
 from .utils import Logger, convert_to
 from decimal import Decimal
 import pandas as pd
+from time import sleep
 
 class Agent(object):
     """Abstract base class for all implemented agents.

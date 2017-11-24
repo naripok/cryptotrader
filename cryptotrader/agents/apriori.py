@@ -301,12 +301,13 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0},\nUptime: {1}\nLast tstamp: {2}\nAction time: {3}\n".format(
-                                self.step,
-                                str(pd.to_timedelta(time() - t0, unit='s')),
-                                str(obs.index[-1]),
-                                loop_time
-                                )
+                        msg = "\n>> step {0}\ntstamp: {1}\nPortval: {2}\nAction time: {3}\nUptime: {4}\n".format(
+                            self.step,
+                            str(obs.index[-1]),
+                            env.calc_total_portval(),
+                            loop_time,
+                            str(pd.to_timedelta(time() - t0, unit='s'))
+                        )
 
                         for key in self.log:
                             if isinstance(self.log[key], dict):
@@ -986,7 +987,7 @@ class OLMARTrader(APrioriAgent):
         """
         price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
+            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window - 1:-1].mean() /
                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         return price_predict
 

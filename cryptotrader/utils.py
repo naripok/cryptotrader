@@ -21,6 +21,7 @@ class Logger(object):
         Initialise the logger
         """
         Logger.logger = logging.getLogger(name)
+        Logger.logger.setLevel(logging.DEBUG)
         Logger.logger.setLevel(logging.ERROR)
         Logger.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s \n%(message)s\n')
