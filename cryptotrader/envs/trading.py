@@ -241,7 +241,11 @@ class TradingEnvironment(Env):
         self.action_df = pd.DataFrame()
 
         # Logging and debugging
-        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+        self.status = {'OOD': False,
+                       'Error': False,
+                       'ValueError': False,
+                       'ActionError': False,
+                       'NotEnoughFiat': False}
 
         if not os.path.exists('./logs'):
             os.makedirs('./logs')
@@ -1524,8 +1528,68 @@ class LiveTradingEnvironment(TradingEnvironment):
                     if 'Total must be at least 0.0001.' == error.__str__():
                         return True
 
+                    elif 'Not enough %s.' % symbol == error.__str__():
+                        amount = self.get_balance()[symbol]
+
+                    else:
+                        raise error
+
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
+            if hasattr(self, 'email'):
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                                                                            datetime.strftime(self.timestamp,
+                                                                                              "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
+
+    def immediate_buy(self, symbol, amount):
+        try:
+            pair = self._fiat + '_' + symbol
+            amount = str(amount)
+
+            while True:
+                try:
+                    price = self.tapi.returnTicker()[pair]['lowestAsk']
+
+                    self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                      "Buying %s %s at %s" % (pair, amount, price))
+
+                    response = self.tapi.buy(pair, price, amount, orderType="immediateOrCancel")
+
+                    if 'amountUnfilled' in response:
+                        self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                          "Response: %s" % str(response))
+
+                        if response['amountUnfilled'] == '0.00000000':
+                            return True
+                        else:
+                            amount = response['amountUnfilled']
+
+                except PoloniexError as error:
+                    self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                                      self.parse_error(error))
+
+                    if 'Total must be at least 0.0001.' == error.__str__():
+                        return True
+
+                    elif 'Not enough %s.' % self._fiat == error.__str__():
+                        if not self.status['NotEnoughFiat']:
+                            self.status['NotEnoughFiat'] = True
+
+                            price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
+                            fiat_units = self.get_balance()[self._fiat]
+
+                            amount = str(safe_div(fiat_units, price))
+
+                        else:
+                            raise error
+
+                    else:
+                        raise error
+
+        except Exception as e:
+            self.logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(e))
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                                                             datetime.strftime(self.timestamp,
@@ -1541,7 +1605,7 @@ class LiveTradingEnvironment(TradingEnvironment):
         :return: bool: True if fully executed; False otherwise.
         """
         try:
-            done = False
+            self.status['NotEnoughFiat'] = False
             # First, assert action is valid
             action = self.assert_action(action)
 
@@ -1571,7 +1635,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
-            return done
+            return True
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))
@@ -1619,6 +1683,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email') and hasattr(self, 'psw'):
