@@ -169,6 +169,7 @@ class PoloniexConnection(DataFeed):
         """
         super().__init__(tapi, period, pairs)
 
+    # Data feed methods
     @property
     def balance(self):
         return self.tapi.returnBalances()
@@ -190,6 +191,13 @@ class PoloniexConnection(DataFeed):
             return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
         except PoloniexError:
             raise ValueError("Bad exchange response data.")
+
+    # Trade execution methods
+    def sell(self, currencyPair, rate, amount, orderType=False):
+        return self.tapi.sell(currencyPair, rate, amount, orderType=orderType)
+
+    def buy(self, currencyPair, rate, amount, orderType=False):
+        return self.tapi.buy(currencyPair, rate, amount, orderType=orderType)
 
 
 class MultiExchangeConnection(DataFeed):
@@ -1410,6 +1418,7 @@ class LiveTradingEnvironment(TradingEnvironment):
         assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
         super().__init__(period, obs_steps, tapi, name)
 
+    # Data feed methods
     def get_balance(self):
         """
         Get last balance from exchange
@@ -1485,6 +1494,45 @@ class LiveTradingEnvironment(TradingEnvironment):
 
         return desired_balance
 
+    def immediate_sell(self, symbol, amount):
+        try:
+            pair = self._fiat + '_' + symbol
+            amount = str(amount)
+
+            while True:
+                try:
+                    price = self.tapi.returnTicker()[pair]['highestBid']
+
+                    self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                      "Selling %s %s at %s" % (pair, amount, price))
+
+                    response = self.tapi.sell(pair, price, amount, orderType="immediateOrCancel")
+
+                    if 'amountUnfilled' in response:
+                        self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                          "Response: %s" % str(response))
+
+                        if response['amountUnfilled'] == '0.00000000':
+                            return True
+                        else:
+                            amount = response['amountUnfilled']
+
+                except PoloniexError as error:
+                    self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                                      self.parse_error(error))
+
+                    if 'Total must be at least 0.0001.' == error.__str__():
+                        return True
+
+        except Exception as e:
+            self.logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
+            if hasattr(self, 'email'):
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                                                                            datetime.strftime(self.timestamp,
+                                                                                              "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
+
     # Online Trading methods
     def online_rebalance(self, action, timestamp):
         """
@@ -1501,13 +1549,13 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.log_action_vector(timestamp, action, False)
 
             # Calculate position change given last porftolio and action vector
-            balance_change = self.get_desired_balance_array(action) - self.get_balance_array()
+            balance_change = (self.get_desired_balance_array(action) - self.get_balance_array())[:-1]
 
             # Sell assets first
             for i, change in enumerate(balance_change):
-               if change < 0:
-                   symbol = self.symbols[i]
-                   self.immediate_sell(symbol, abs(change))
+                if change < 0:
+                    symbol = self.symbols[i]
+                    self.immediate_sell(symbol, abs(change))
 
             # Then, buy what you want
             for i, change in enumerate(balance_change):
