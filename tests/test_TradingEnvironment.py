@@ -48,8 +48,23 @@ def data_feed():
                                                                                     "USDT":'100.00000000'})
     yield df
 
+# DATA FEED TESTS
+def test_returnBalances(data_feed):
+    balance = data_feed.returnBalances()
+    assert isinstance(balance, dict)
+    data_feed.balance = {"BTC": '10.00000000'}
+    balance = data_feed.returnBalances()
+    assert isinstance(balance, dict)
+    assert balance["BTC"] == '10.00000000'
+    with pytest.raises(AssertionError):
+        data_feed.balance = 10
 
-# ENVIRONMENT TESTS
+def test_returnFeeInfo(data_feed):
+    fee = data_feed.returnFeeInfo()
+    assert isinstance(fee, dict)
+    assert fee['makerFee'] == '0.00150000'
+
+# BACKTEST AND PAPERTRAING ENVIRONMENT TESTS
 def test_env_name(fresh_env):
     assert fresh_env.name == 'env_test'
 
@@ -233,8 +248,9 @@ def test_calc_posit(ready_env):
     env = ready_env
     env.obs_df = env.get_history()
     total_posit = Decimal('0E-8')
+    portval = env.calc_total_portval()
     for symbol in env.symbols:
-        posit = env.calc_posit(symbol)
+        posit = env.calc_posit(symbol, portval)
         assert isinstance(posit, Decimal)
         assert Decimal('0.00000000') <= posit <= Decimal('1.00000000')
         total_posit += posit
@@ -272,7 +288,6 @@ def test_get_reward(ready_env):
         env.fiat = Decimal(j)
         r = env.get_reward()
         assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
-
 
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):
@@ -312,8 +327,6 @@ class Test_env_reset(object):
         for symbol in self.env.balance:
             assert isinstance(self.env.balance[symbol], Decimal)
 
-
-index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 @pytest.mark.incremental
 class Test_env_step(object):
     # TODO: CHECK THIS TEST
@@ -387,22 +400,7 @@ class Test_env_step(object):
         for key in status:
             assert status[key] == False
 
-
-# DATA FEED TESTS
-def test_returnBalances(data_feed):
-    balance = data_feed.returnBalances()
-    assert isinstance(balance, dict)
-    data_feed.balance = {"BTC": '10.00000000'}
-    balance = data_feed.returnBalances()
-    assert isinstance(balance, dict)
-    assert balance["BTC"] == '10.00000000'
-    with pytest.raises(AssertionError):
-        data_feed.balance = 10
-
-def test_returnFeeInfo(data_feed):
-    fee = data_feed.returnFeeInfo()
-    assert isinstance(fee, dict)
-    assert fee['makerFee'] == '0.00150000'
+# LIVETRADING ENVIRONMENT TESTS
 
 
 if __name__ == '__main__':
