@@ -600,7 +600,8 @@ class MomentumTrader(APrioriAgent):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                p = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
+                p = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1] /\
+                              obs.get_value(obs.index[-1], (symbol, 'open'))
 
                 d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
 
@@ -1072,7 +1073,7 @@ class TCOTrader(APrioriAgent):
         # for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-        return self.predictor(obs)
+        return self.predictor.predict(obs)
 
     def rebalance(self, obs):
         """
@@ -1107,6 +1108,7 @@ class TCOTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
+        self.predictor.set_params(**kwargs)
 
 
 class FactorTrader(APrioriAgent):

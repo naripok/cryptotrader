@@ -219,7 +219,7 @@ class TradingEnvironment(Env):
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, period, obs_steps, tapi, name="TradingEnvironment"):
+    def __init__(self, period, obs_steps, tapi, fiat="USDT", name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -263,6 +263,9 @@ class TradingEnvironment(Env):
         self.observation_space = None
         self.init_balance = None
         self._symbols = []
+
+        self.add_pairs(self.tapi.pairs)
+        self.fiat = fiat
 
     ## Env properties
     @property
@@ -1261,10 +1264,10 @@ class BacktestEnvironment(TradingEnvironment):
     """
     Backtest environment for financial strategies history testing
     """
-    def __init__(self, period, obs_steps, tapi, name):
+    def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
         self.index = obs_steps
-        super().__init__(period, obs_steps, tapi, name)
+        super().__init__(period, obs_steps, tapi, fiat, name)
         self.data_length = None
         self.training = False
 
@@ -1399,9 +1402,9 @@ class PaperTradingEnvironment(TradingEnvironment):
     """
     Paper trading environment for financial strategies forward testing
     """
-    def __init__(self, period, obs_steps, tapi, name):
+    def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, Poloniex), "Paper trade tapi must be a instance of PaperTradingDataFeed."
-        super().__init__(period, obs_steps, tapi, name)
+        super().__init__(period, obs_steps, tapi, fiat, name)
 
     def reset(self):
 
@@ -1456,9 +1459,9 @@ class LiveTradingEnvironment(TradingEnvironment):
     """
     Live trading environment for financial strategies execution
     """
-    def __init__(self, period, obs_steps, tapi, name):
+    def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
-        super().__init__(period, obs_steps, tapi, name)
+        super().__init__(period, obs_steps, tapi, fiat, name)
 
     # Data feed methods
     def get_balance(self):
