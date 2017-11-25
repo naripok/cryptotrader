@@ -819,7 +819,7 @@ class TradingEnvironment(Env):
 
         # Regret Calculation
         price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].astype('f').values
-        price_change = np.append(price[-1] / (price[-2] + 1e-16), [1.0])
+        price_change = np.append(price[-1] / (price[-2] + 1e-8), [1.0])
         constrained_price_change = price_change / price_change.max()
 
         port_log_return = np.log(np.dot(self.action_df.iloc[-1].astype('f').values[:-1], constrained_price_change))

@@ -600,7 +600,7 @@ class MomentumTrader(APrioriAgent):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                p = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1] /\
+                p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) /\
                               obs.get_value(obs.index[-1], (symbol, 'open'))
 
                 d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
