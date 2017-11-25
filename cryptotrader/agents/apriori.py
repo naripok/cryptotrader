@@ -563,7 +563,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1., 1.], mean_type='kama', activation=simplex_proj,
+    def __init__(self, ma_span=[2, 3], std_span=3, alpha=[1.,1., 1.], mean_type='kama', activation=simplex_proj,
                  fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -595,21 +595,23 @@ class MomentumTrader(APrioriAgent):
         """
         try:
             obs = obs.astype(np.float64)
-            factor = np.ones(obs.columns.levels[0].shape[0], dtype=np.float32)
+            factor = np.ones(obs.columns.levels[0].shape[0], dtype=np.float64)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
                 p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) /\
-                    (obs.get_value(obs.index[-1], (symbol, 'open')) +self.epsilon)
+                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
 
-                d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
+                d = (df['%d_ma' % self.ma_span[0]].iloc[-4:] - df['%d_ma' % self.ma_span[1]].iloc[-4:]).diff()
 
                 d2 = d.diff()
 
-                factor[key] = (self.alpha[0] * p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1])
+                factor[key] = (self.alpha[0] * p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1]) /\
+                              (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                               self.epsilon)
 
-            return factor
+            return array_normalize(factor) + 1
 
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
@@ -625,15 +627,16 @@ class MomentumTrader(APrioriAgent):
                 return array_normalize(action)
             else:
                 prev_posit = self.get_portfolio_vector(obs)
-                position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
+                # position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
                 factor = self.predict(obs)
-                for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                    position[i] = max(0., prev_posit[i] + factor[i] /\
-                                      (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                                       self.epsilon))
+                # for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+                #     position[i] = max(0., prev_posit[i] + factor[i] /\
+                #                       (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                #                        self.epsilon))
 
+                position = prev_posit * factor
 
-                position[-1] = max(0., 1 - position[:-1].sum())
+                # position[-1] = max(0., 1 - position[:-1].sum())
 
             return self.activation(position)
 

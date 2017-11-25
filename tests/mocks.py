@@ -9485,3 +9485,4 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
                                                      'takerFee': '0.00250000',
                                                      'thirtyDayVolume': '0.00000000'}
                        })
+tapi.pairs = ["USDT_BTC", "USDT_ETH"]

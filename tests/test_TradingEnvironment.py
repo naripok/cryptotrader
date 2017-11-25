@@ -21,7 +21,7 @@ from .mocks import *
 # Fixtures
 @pytest.fixture
 def fresh_env():
-    yield TradingEnvironment(period=5, obs_steps=30, tapi=tapi, name='env_test')
+    yield TradingEnvironment(period=5, obs_steps=30, tapi=tapi, fiat="USDT", name='env_test')
     shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
 @pytest.fixture
@@ -33,9 +33,9 @@ def ready_env():
         mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
         mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-        env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
-        env.add_pairs("USDT_BTC", "USDT_ETH")
-        env.fiat = "USDT"
+        env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, fiat="USDT", name='env_test')
+        # env.add_pairs("USDT_BTC", "USDT_ETH")
+        # env.fiat = "USDT"
         env.balance = env.get_balance()
         env.crypto = {"BTC": Decimal('1.00000000'), 'ETH': Decimal('0.50000000')}
         yield env
@@ -71,7 +71,7 @@ def test_env_name(fresh_env):
 class Test_env_setup(object):
     @classmethod
     def setup_class(cls):
-        cls.env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
+        cls.env = TradingEnvironment(period=5, obs_steps=10, tapi=tapi, fiat="USDT", name='env_test')
 
     @classmethod
     def teardown_class(cls):
@@ -79,7 +79,7 @@ class Test_env_setup(object):
 
     def test_reset_status(self):
         self.env.reset_status()
-        assert self.env.status == {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+        assert self.env.status == {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False, "NotEnoughFiat": False}
 
     def test_add_pairs(self):
         self.env.add_pairs("USDT_BTC")
@@ -149,15 +149,15 @@ def test_get_balance(ready_env):
 def test_fiat(fresh_env):
     env = fresh_env
 
-    with pytest.raises(AssertionError):
-        env.fiat = "USDT"
+    # with pytest.raises(AssertionError):
+    #     env.fiat = "USDT"
 
-    env.add_pairs("USDT_BTC")
+    # env.add_pairs("USDT_BTC")
     env.fiat = "USDT"
     # assert env.fiat == Decimal('0.00000000')
 
-    with pytest.raises(KeyError):
-        env.fiat
+    # with pytest.raises(KeyError):
+    #     env.fiat
 
     env.fiat = 0
     assert env.fiat == Decimal('0.00000000')
@@ -298,9 +298,9 @@ class Test_env_reset(object):
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
-            cls.env.add_pairs("USDT_BTC", "USDT_ETH")
-            cls.env.fiat = "USDT"
+            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, fiat="USDT", name='env_test')
+            # cls.env.add_pairs("USDT_BTC", "USDT_ETH")
+            # cls.env.fiat = "USDT"
 
     @classmethod
     def teardown_class(cls):
@@ -337,9 +337,9 @@ class Test_env_step(object):
             mock_datetime.fromtimestamp = lambda *args, **kw: datetime.fromtimestamp(*args, **kw)
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
-            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, name='env_test')
-            cls.env.add_pairs("USDT_BTC", "USDT_ETH")
-            cls.env.fiat = "USDT"
+            cls.env = PaperTradingEnvironment(period=5, obs_steps=10, tapi=tapi, fiat="USDT", name='env_test')
+            # cls.env.add_pairs("USDT_BTC", "USDT_ETH")
+            # cls.env.fiat = "USDT"
             cls.env.reset()
             cls.env.fiat = 100
             cls.env.reset_status()
