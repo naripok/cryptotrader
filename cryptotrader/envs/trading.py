@@ -802,8 +802,34 @@ class TradingEnvironment(Env):
             raise e
 
     def get_reward(self):
+        """
+        Regret loss function
+
+        Reference:
+            A.Agarwal, E.Hazan, S.Kale, R.E.Schapire.
+            Algorithms for Portfolio Management based on the Newton Method, 2006.
+            http://machinelearning.wustl.edu/mlpapers/paper_files/icml2006_AgarwalHKS06.pdf
+
+        :return: numpy float:
+        """
         # TODO TEST
-        return safe_div(self.portval, self.get_last_portval())
+
+        # Regret Calculation
+        price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].astype('f').values
+        price_change = np.append(price[-1] / (price[-2] + 1e-16), [1.0])
+        constrained_price_change = price_change / price_change.max()
+
+        port_log_return = np.log(np.dot(self.action_df.iloc[-1].astype('f').values[:-1], constrained_price_change))
+        n_pairs = len(self.pairs)
+        bench_action_vec = np.append(np.ones(n_pairs, dtype='f') / n_pairs, [0.0])
+
+        bench_log_return = np.log(np.dot(bench_action_vec, constrained_price_change))
+
+        #
+        # port_return = np.log(safe_div(self.portval, self.get_last_portval()))
+        # bench_return = np.log(safe_div(self.portval, self.get_last_portval()))
+
+        return port_log_return - bench_log_return
 
     def simulate_trade(self, action, timestamp):
         """
@@ -1295,7 +1321,6 @@ class BacktestEnvironment(TradingEnvironment):
             if reset_dfs:
                 self.obs_df = pd.DataFrame()
                 self.portfolio_df = pd.DataFrame()
-                self.action_df = pd.DataFrame(columns=list(self.symbols)+['online'], index=[self.timestamp])
 
             # Set spaces
             self.set_observation_space()
@@ -1312,6 +1337,11 @@ class BacktestEnvironment(TradingEnvironment):
             self.index += 1
 
             obs = self.get_observation(True)
+
+            if reset_dfs:
+                self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+                                              columns=list(self.symbols) + ['online'],
+                                              index=[self.timestamp])
 
             # Reset portfolio value
             self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
@@ -1348,7 +1378,7 @@ class BacktestEnvironment(TradingEnvironment):
             self.index += 1
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+            return self.get_observation(True).astype('f'), reward, done, self.status
 
         except KeyboardInterrupt:
             self.status["OOD"] += 1
@@ -1377,7 +1407,6 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-        self.action_df = pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp])
 
         self.set_observation_space()
         self.set_action_space()
@@ -1388,6 +1417,10 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
 
         obs = self.get_observation(True)
+
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+                                      columns=list(self.symbols) + ['online'],
+                                      index=[self.timestamp])
 
         self.portval = {'portval': self.calc_total_portval(),
                         'timestamp': self.portfolio_df.index[-1]}
@@ -1408,7 +1441,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             done = True
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+            return self.get_observation(True).astype('f'), reward, done, self.status
 
         except Exception as e:
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))

@@ -69,6 +69,76 @@ class APrioriAgent(Agent):
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False, start_step=0,
+             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
+        """
+        Test agent on environment
+        """
+        try:
+            # Get env params
+            self.fiat = env._fiat
+
+            # Reset observations
+            env.reset_status()
+            obs = env.reset(reset_dfs=True)
+
+            # Get max episode length
+            if nb_max_episode_steps is None:
+                nb_max_episode_steps = env.data_length
+
+            #Reset counters
+            t0 = time()
+            self.step = start_step
+            episode_reward = 0.0
+            while True:
+                try:
+                    # Take actions
+                    action = self.rebalance(obs)
+                    obs, reward, _, status = env.step(action)
+
+                    # Accumulate returns and regret
+                    episode_reward += reward
+
+                    # Increment step counter
+                    self.step += 1
+
+                    if visualize:
+                        env.render()
+
+                    if verbose:
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
+                            self.step,
+                            nb_max_episode_steps - env.obs_steps - 2,
+                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
+                            episode_reward,
+                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
+                                                                 - self.step), unit='s')),
+                            1 / (time() - t0)
+                        ), end="\r", flush=True)
+                        t0 = time()
+
+                    if status['OOD'] or self.step == nb_max_episode_steps:
+                        return episode_reward
+
+                    if status['Error']:
+                        e = status['Error']
+                        print("Env error:",
+                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                        break
+
+                except Exception as e:
+                    print("Model Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                    raise e
+
+        except TypeError:
+            print("\nYou must fit the model or provide indicator parameters in order to test.")
+
+        except KeyboardInterrupt:
+            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
+                                                                             nb_max_episode_steps,
+                                                                             int(100 * self.step / nb_max_episode_steps)))
+
     def fit(self, env, nb_steps, batch_size, search_space, constrains=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None):
@@ -185,73 +255,6 @@ class APrioriAgent(Agent):
         #     print("\nOptimization interrupted by user.")
         #     return None, None
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False, start_step=0,
-             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
-        """
-        Test agent on environment
-        """
-        try:
-            # Get env params
-            self.fiat = env._fiat
-
-            # Reset observations
-            env.reset_status()
-            obs = env.reset(reset_dfs=True)
-
-            # Get max episode length
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.data_length
-
-            #Reset counters
-            t0 = time()
-            self.step = start_step
-            episode_reward = 1
-
-            while True:
-                try:
-                    action = self.rebalance(obs)
-                    obs, reward, _, status = env.step(action)
-                    episode_reward *= np.float64(reward)
-
-                    self.step += 1
-
-                    if visualize:
-                        env.render()
-
-                    if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
-                            self.step,
-                            nb_max_episode_steps - env.obs_steps - 2,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
-                            episode_reward,
-                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
-                                                                 - self.step), unit='s')),
-                            1 / (time() - t0)
-                        ), end="\r", flush=True)
-                        t0 = time()
-
-                    if status['OOD'] or self.step == nb_max_episode_steps:
-                        return episode_reward
-
-                    if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
-                              type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                        break
-
-                except Exception as e:
-                    print("Model Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    raise e
-
-        except TypeError:
-            print("\nYou must fit the model or provide indicator parameters in order to test.")
-
-        except KeyboardInterrupt:
-            print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
-                                                                             nb_max_episode_steps,
-                                                                             int(100 * self.step / nb_max_episode_steps)))
-
     def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
@@ -285,7 +288,7 @@ class APrioriAgent(Agent):
                     if can_act:
                         action = self.rebalance(env.get_observation(True).astype(np.float64))
                         obs, reward, done, status = env.step(action)
-                        episode_reward += np.float64(reward)
+                        episode_reward -= np.float64(reward)
 
                         if done:
                             self.step += 1
@@ -305,7 +308,7 @@ class APrioriAgent(Agent):
                             self.step,
                             str(obs.index[-1]),
                             env.calc_total_portval(),
-                            loop_time,
+                            datetime.now(),
                             str(pd.to_timedelta(time() - t0, unit='s'))
                         )
 
@@ -560,7 +563,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=simplex_proj,
+    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1., 1.], mean_type='kama', activation=simplex_proj,
                  fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -597,9 +600,13 @@ class MomentumTrader(APrioriAgent):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                factor[key] = (self.alpha[0] * (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[0]].iat[-2]) +
-                               self.alpha[1] * ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[0]].iat[-2]) -
-                               (df['%d_ma' % self.ma_span[1]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-2])))
+                p = df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]
+
+                d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
+
+                d2 = d.diff()
+
+                factor[key] = (self.alpha[0] * p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1])
 
             return factor
 
@@ -634,7 +641,7 @@ class MomentumTrader(APrioriAgent):
             raise e
 
     def set_params(self, **kwargs):
-        self.alpha = [kwargs['alpha_v'], kwargs['alpha_a']]
+        self.alpha = [kwargs['alpha_v'], kwargs['alpha_a'],  kwargs['alpha_i']]
         self.mean_type = kwargs['mean_type']
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
         self.std_span = int(kwargs['std_span'])
