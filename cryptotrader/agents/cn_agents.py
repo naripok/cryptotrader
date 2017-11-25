@@ -240,7 +240,7 @@ class ConvBlock(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.conv = L.Convolution2D(in_channels, out_channels, ksize, pad=pad,
-                                        nobias=False, initialW=LeCunNormal())
+                                        nobias=True, initialW=LeCunNormal())
             self.bn = L.BatchNormalization(out_channels)
 
     def __call__(self, x):
@@ -278,7 +278,7 @@ class EIIE(chainer.Chain):
         with self.init_scope():
             self.vision = VisionModel(timesteps, vn_number, pn_number)
             self.portvec = PortfolioVector()
-            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
+            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=True, initialW=LeCunNormal())
             self.cashbias = CashBias()
 
     def __call__(self, x):

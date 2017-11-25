@@ -288,7 +288,7 @@ class APrioriAgent(Agent):
                     if can_act:
                         action = self.rebalance(env.get_observation(True).astype(np.float64))
                         obs, reward, done, status = env.step(action)
-                        episode_reward -= np.float64(reward)
+                        episode_reward += reward
 
                         if done:
                             self.step += 1
@@ -304,7 +304,7 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0}\ntstamp: {1}\nPortval: {2}\nAction time: {3}\nUptime: {4}\n".format(
+                        msg = "\n>> step {0}\nAction time: {3}\nPortval: {2}\ntstamp: {1}\nUptime: {4}\n".format(
                             self.step,
                             str(obs.index[-1]),
                             env.calc_total_portval(),

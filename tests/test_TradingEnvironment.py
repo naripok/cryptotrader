@@ -37,7 +37,7 @@ def ready_env():
         # env.add_pairs("USDT_BTC", "USDT_ETH")
         # env.fiat = "USDT"
         env.balance = env.get_balance()
-        env.crypto = {"BTC": Decimal('1.00000000'), 'ETH': Decimal('0.50000000')}
+        env.crypto = {"BTC": Decimal('0.00000000'), 'ETH': Decimal('0.00000000')}
         yield env
         shutil.rmtree(os.path.join(os.path.abspath(os.path.curdir), 'logs'))
 
@@ -274,6 +274,7 @@ def test_get_sampled_portfolio(ready_env):
     assert env.get_sampled_portfolio().shape == (1, 4)
 
 def test_get_reward(ready_env):
+    # TODO FIX REWARD TEST
     env = ready_env
     env.reset()
     r = env.get_reward()
@@ -289,11 +290,11 @@ def test_get_reward(ready_env):
 
         # env.step(a)
         env.fiat = Decimal(i)
-        # env.portval = env.calc_total_portval()
-        # env.fiat = Decimal(j)
         r = env.get_reward()
+        env.fiat = Decimal(j)
+        r2 = env.get_reward()
+        assert np.allclose(r, r2)
         # assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
-        assert np.allclose(r, np.log(j) - np.log(i)), (r, np.log(j) - np.log(i))
 
 
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
