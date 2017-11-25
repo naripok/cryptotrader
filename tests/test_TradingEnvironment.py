@@ -277,17 +277,24 @@ def test_get_reward(ready_env):
     env = ready_env
     env.reset()
     r = env.get_reward()
-    assert isinstance(r, Decimal)
-    assert r == Decimal('0.0')
-
+    assert isinstance(r, float)
+    # assert r == float()
+    env.fiat = Decimal(1)
+    a = np.zeros(len(env.pairs) + 1)
+    a[-1] = 1
+    env.step(a)
     n_tests = 100
     for i, j in zip(np.random.random(n_tests), np.random.random(n_tests)):
         # env.reset()
+
+        # env.step(a)
         env.fiat = Decimal(i)
-        env.portval = env.calc_total_portval()
-        env.fiat = Decimal(j)
+        # env.portval = env.calc_total_portval()
+        # env.fiat = Decimal(j)
         r = env.get_reward()
-        assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
+        # assert r - Decimal(j / i) < Decimal("1e-4"), r - Decimal(j / i)
+        assert np.allclose(r, np.log(j) - np.log(i)), (r, np.log(j) - np.log(i))
+
 
 index = np.choose(np.random.randint(low=10, high=len(indexes)), indexes)
 class Test_env_reset(object):

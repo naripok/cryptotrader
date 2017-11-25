@@ -174,24 +174,6 @@ class PoloniexConnection(DataFeed):
     def balance(self):
         return self.tapi.returnBalances()
 
-    def returnTicker(self):
-        return self.tapi.returnTicker()
-
-    def returnBalances(self):
-        return self.tapi.returnBalances()
-
-    def returnFeeInfo(self):
-        return self.tapi.returnFeeInfo()
-
-    def returnCurrencies(self):
-        return self.tapi.returnCurrencies()
-
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        try:
-            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-        except PoloniexError:
-            raise ValueError("Bad exchange response data.")
-
     # Trade execution methods
     def sell(self, currencyPair, rate, amount, orderType=False):
         return self.tapi.sell(currencyPair, rate, amount, orderType=orderType)
