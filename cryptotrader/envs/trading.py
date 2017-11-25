@@ -879,6 +879,10 @@ class TradingEnvironment(Env):
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
+            # Calculate new portval
+            self.portval = {'portval': self.calc_total_portval(),
+                            'timestamp': self.portfolio_df.index[-1]}
+
         except Exception as e:
             self.logger.error(TradingEnvironment.simulate_trade, self.parse_error(e))
             if hasattr(self, 'email'):
@@ -907,7 +911,8 @@ class TradingEnvironment(Env):
         # self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
     def reset_status(self):
-        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False}
+        self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False,
+                       'NotEnoughFiat': False}
 
     def reset(self):
         """
@@ -1189,7 +1194,7 @@ class TradingEnvironment(Env):
         try:
             assert isinstance(email, dict)
             self.email = email
-            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (str([addr for addr in email])))
+            self.logger.info(TradingEnvironment.set_email, "Email report address set to: %s" % (str([email[key] for key in email if key == 'to'])))
         except Exception as e:
             self.logger.error(TradingEnvironment.set_email, self.parse_error(e))
 
@@ -1198,23 +1203,27 @@ class TradingEnvironment(Env):
             assert isinstance(self.email, dict) and \
                    isinstance(subject, str) and isinstance(body, str)
             for key in self.email:
-                gmail_user = key
-                gmail_pwd = self.email[key]
-                FROM = key
-                TO = key if type(key) is list else [key]
-                SUBJECT = subject
-                TEXT = body
+                if key == 'email':
+                    gmail_user = self.email[key]
+                elif key == 'psw':
+                    gmail_pwd = self.email[key]
+                elif key == 'to':
+                    TO = self.email[key] if type(self.email[key]) is list else [self.email[key]]
 
-                # Prepare actual message
-                message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-                        """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+            FROM = gmail_user
+            SUBJECT = subject
+            TEXT = body
 
-                server = smtplib.SMTP("smtp.gmail.com", 587)
-                server.ehlo()
-                server.starttls()
-                server.login(gmail_user, gmail_pwd)
-                server.sendmail(FROM, TO, message)
-                server.close()
+            # Prepare actual message
+            message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                    """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_user, gmail_pwd)
+            server.sendmail(FROM, TO, message)
+            server.close()
 
         except Exception as e:
             self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
@@ -1396,10 +1405,6 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Simulate portifolio rebalance
             self.simulate_trade(action, timestamp)
 
-            # Calculate new portval
-            self.portval = {'portval': self.calc_total_portval(),
-                            'timestamp': self.portfolio_df.index[-1]}
-
             done = True
 
             # Return new observation, reward, done flag and status for debugging
@@ -1407,7 +1412,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 
         except Exception as e:
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
+            if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
@@ -1525,7 +1530,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                     self.logger.debug(LiveTradingEnvironment.immediate_sell,
                                       self.parse_error(error))
 
-                    if 'Total must be at least 0.0001.' == error.__str__():
+                    if 'Total must be at least' in error.__str__():
+                        return True
+
+                    elif 'Amount must be at least' in error.__str__():
                         return True
 
                     elif 'Not enough %s.' % symbol == error.__str__():
@@ -1570,7 +1578,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                     self.logger.debug(LiveTradingEnvironment.immediate_buy,
                                       self.parse_error(error))
 
-                    if 'Total must be at least 0.0001.' == error.__str__():
+                    if 'Total must be at least' in error.__str__():
+                        return True
+
+                    elif 'Amount must be at least' in error.__str__():
                         return True
 
                     elif 'Not enough %s.' % self._fiat == error.__str__():
@@ -1635,6 +1646,10 @@ class LiveTradingEnvironment(TradingEnvironment):
             final_balance['timestamp'] = timestamp
             self.balance = final_balance
 
+            # Calculate new portval
+            self.portval = {'portval': self.calc_total_portval(),
+                            'timestamp': self.portfolio_df.index[-1]}
+
             return True
 
         except Exception as e:
@@ -1677,16 +1692,12 @@ class LiveTradingEnvironment(TradingEnvironment):
             # Simulate portifolio rebalance
             done = self.online_rebalance(action, timestamp)
 
-            # Calculate new portval
-            self.portval = {'portval': self.calc_total_portval(),
-                            'timestamp': self.portfolio_df.index[-1]}
-
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.step, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
+            if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))

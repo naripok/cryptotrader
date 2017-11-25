@@ -100,7 +100,7 @@ dist/
 /dev/*
 
 /notebooks/.ipynb_checkpoints/
-/dev/
+/dev
 /dev/eiie_rl_nb.ipynb
 /dev/online_rebalance_nb.ipynb
 /dev/logs/
@@ -111,3 +111,14 @@ dist/
 /dev/eiie_tco_nb.ipynb
 /dev/paper_trading_remote.py
 /dev/eiie_tco_train.py
+/assets/
+/.ipynb_checkpoints/
+/dev/
+assets/
+bin/
+cryptotrader/exchange_api/__pycache__/
+cryptotrader/models/__pycache__/
+docs/
+tests/.hypothesis/
+tests/__pycache__/
+/dev/livetrading_remote_test.py

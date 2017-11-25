@@ -23,7 +23,7 @@ class APrioriAgent(Agent):
 
     def __init__(self, fiat, name=""):
         super().__init__()
-        self.epsilon = 1e-8
+        self.epsilon = 1e-16
         self.fiat = fiat
         self.step = 0
         self.name = name
@@ -560,7 +560,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
+    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=simplex_proj,
                  fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -586,7 +586,7 @@ class MomentumTrader(APrioriAgent):
             raise TypeError("Wrong mean_type param")
         return df
 
-    def predict (self, obs):
+    def predict(self, obs):
         """
         Performs a single step on the environment
         """
@@ -597,9 +597,9 @@ class MomentumTrader(APrioriAgent):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])
+                factor[key] = (self.alpha[0] * (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[0]].iat[-2]) +
+                               self.alpha[1] * ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[0]].iat[-2]) -
+                               (df['%d_ma' % self.ma_span[1]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-2])))
 
             return factor
 
@@ -609,25 +609,21 @@ class MomentumTrader(APrioriAgent):
 
     def rebalance(self, obs):
         try:
+            obs = obs.astype(np.float64)
             if self.step == 0:
                 n_pairs = obs.columns.levels[0].shape[0]
                 action = np.ones(n_pairs)
                 action[-1] = 0
                 return array_normalize(action)
             else:
-                obs = obs.astype(np.float64).ffill()
                 prev_posit = self.get_portfolio_vector(obs)
                 position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
                 factor = self.predict(obs)
                 for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                    if factor[i] >= 0.0:
-                        position[i] = max(0., prev_posit[i] + self.alpha[0] * factor[i] / \
-                                          (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                                           self.epsilon))
-                    else:
-                        position[i] = max(0., prev_posit[i] + self.alpha[1] * factor[i] / \
-                                          (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                                           self.epsilon))
+                    position[i] = max(0., prev_posit[i] + factor[i] /\
+                                      (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
+                                       self.epsilon))
+
 
                 position[-1] = max(0., 1 - position[:-1].sum())
 
@@ -638,7 +634,7 @@ class MomentumTrader(APrioriAgent):
             raise e
 
     def set_params(self, **kwargs):
-        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
+        self.alpha = [kwargs['alpha_v'], kwargs['alpha_a']]
         self.mean_type = kwargs['mean_type']
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
         self.std_span = int(kwargs['std_span'])
@@ -877,12 +873,16 @@ class PAMRTrader(APrioriAgent):
         """
         self.log['price_change'] = {}
 
-        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) / obs.get_value(obs.index[-1], (symbol, 'open')))
+            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
+                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
 
             # Log values
-            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (1 / price_relative[key])})
+            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (1 /
+                                                                    (price_relative[key] + self.epsilon))})
+
+        price_relative[-1] = 1
 
         return price_relative
 
@@ -900,7 +900,7 @@ class PAMRTrader(APrioriAgent):
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_relative = self.predict(obs)
-            return self.update(prev_posit[:-1], price_relative)
+            return self.update(prev_posit, price_relative)
 
     def update(self, b, x):
         """
@@ -947,7 +947,7 @@ class PAMRTrader(APrioriAgent):
         self.log['total_portfolio_change'] = 1 / portvar
 
         # project it onto simplex
-        return np.append(simplex_proj(b), [0])
+        return simplex_proj(b)
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
@@ -1227,4 +1227,3 @@ class FactorTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
-
