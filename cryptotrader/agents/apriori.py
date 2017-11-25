@@ -595,13 +595,13 @@ class MomentumTrader(APrioriAgent):
         """
         try:
             obs = obs.astype(np.float64)
-            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
+            factor = np.ones(obs.columns.levels[0].shape[0], dtype=np.float32)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
                 p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) /\
-                              obs.get_value(obs.index[-1], (symbol, 'open'))
+                    (obs.get_value(obs.index[-1], (symbol, 'open')) +self.epsilon)
 
                 d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
 
@@ -1089,7 +1089,7 @@ class TCOTrader(APrioriAgent):
         else:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_prediction = self.predict(obs)
-            return self.update(prev_posit[:-1], price_prediction)
+            return self.update(prev_posit, price_prediction)
 
     def update(self, b, x):
         """
@@ -1104,7 +1104,7 @@ class TCOTrader(APrioriAgent):
         b = b + np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0, np.inf)
 
         # project it onto simplex
-        return np.append(simplex_proj(b), [0])
+        return simplex_proj(b)
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
