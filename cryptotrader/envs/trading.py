@@ -1023,7 +1023,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=900, plot_height=300,
+                       plot_width=900, plot_height=400,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
@@ -1238,8 +1238,11 @@ class TradingEnvironment(Env):
 
         except Exception as e:
             self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
-        finally:
-            pass
+            if hasattr(self, 'email'):
+                self.send_email("Error sending email: %s at %s" % (e,
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            raise e
 
 
 class BacktestEnvironment(TradingEnvironment):
@@ -1612,7 +1615,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                             amount = str(safe_div(fiat_units, price))
 
                         else:
-                            raise error
+                            return False
 
                     else:
                         raise error
@@ -1634,6 +1637,7 @@ class LiveTradingEnvironment(TradingEnvironment):
         :return: bool: True if fully executed; False otherwise.
         """
         try:
+            done = False
             self.status['NotEnoughFiat'] = False
             # First, assert action is valid
             action = self.assert_action(action)
@@ -1648,13 +1652,22 @@ class LiveTradingEnvironment(TradingEnvironment):
             for i, change in enumerate(balance_change):
                 if change < 0:
                     symbol = self.symbols[i]
-                    self.immediate_sell(symbol, abs(change))
+                    resp = self.immediate_sell(symbol, abs(change))
+                    if not done and resp and not self.status['NotEnoughFiat']:
+                        done = resp
+                    elif done and not resp:
+                        done = resp
+
 
             # Then, buy what you want
             for i, change in enumerate(balance_change):
                 if change > 0:
                     symbol = self.symbols[i]
-                    self.immediate_buy(symbol, abs(change))
+                    resp = self.immediate_buy(symbol, abs(change))
+                    if not done and resp and not self.status['NotEnoughFiat']:
+                        done = resp
+                    elif done and not resp:
+                        done = resp
 
             # Log executed action and final balance
             self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
@@ -1668,7 +1681,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.portval = {'portval': self.calc_total_portval(),
                             'timestamp': self.portfolio_df.index[-1]}
 
-            return True
+            return done
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))

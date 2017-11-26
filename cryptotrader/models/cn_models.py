@@ -178,7 +178,10 @@ class EIIE(chainer.Chain):
 
     def predict(self, obs):
         obs = batch_states([obs[:-1].values], chainer.cuda.get_array_module(obs), phi)
-        return self.__call__(obs).data.ravel() + 1
+        return np.append(self.__call__(obs).data.ravel() + 1, [1])
+
+    def set_params(self, **kwargs):
+        pass
 
 
 # Train functions

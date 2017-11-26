@@ -180,7 +180,7 @@ class APrioriAgent(Agent):
                 constrains = [lambda *args, **kwargs: True]
 
             @ot.constraints.constrained(constrains)
-            @ot.constraints.violations_defaulted(-np.inf)
+            @ot.constraints.violations_defaulted(-100)
             def find_hp(**kwargs):
                 try:
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
@@ -278,7 +278,7 @@ class APrioriAgent(Agent):
             last_action_time = floor_datetime(env.timestamp, env.period)
             can_act = True # TODO: FALSE HERE
             may_report = False
-
+            reward = 0
             while True:
                 try:
                     loop_time = env.timestamp
@@ -304,11 +304,12 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0}\nAction time: {3}\nPortval: {2}\ntstamp: {1}\nUptime: {4}\n".format(
+                        msg = "\n>> step {0}\nPortval: {1}\nregret: {2}\nAction time: {3}\n\ntstamp: {4}\nUptime: {5}\n".format(
                             self.step,
-                            str(obs.index[-1]),
                             env.calc_total_portval(),
+                            reward,
                             datetime.now(),
+                            str(obs.index[-1]),
                             str(pd.to_timedelta(time() - t0, unit='s'))
                         )
 
@@ -333,6 +334,8 @@ class APrioriAgent(Agent):
                         port = env.portfolio_df.iloc[-1].astype(str).to_dict()
                         for symbol in port:
                             msg += str(symbol) + ": " + port[symbol] + '\n'
+
+                        msg += "\nStatus: %s\n" % str(env.status)
 
                         if verbose:
                             print(msg, end="\r", flush=True)
@@ -563,7 +566,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[2, 3], std_span=3, alpha=[1.,1., 1.], mean_type='kama', activation=simplex_proj,
+    def __init__(self, ma_span=[2, 3], std_span=3, alpha=[1., 1., 1.], mean_type='kama', activation=simplex_proj,
                  fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -595,21 +598,21 @@ class MomentumTrader(APrioriAgent):
         """
         try:
             obs = obs.astype(np.float64)
-            factor = np.ones(obs.columns.levels[0].shape[0], dtype=np.float64)
+            factor = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs.loc[:, symbol].copy()
                 df = self.get_ma(df)
 
-                p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) /\
-                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
+                p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])
 
                 d = (df['%d_ma' % self.ma_span[0]].iloc[-4:] - df['%d_ma' % self.ma_span[1]].iloc[-4:]).diff()
 
                 d2 = d.diff()
 
-                factor[key] = (self.alpha[0] * p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1]) /\
-                              (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                               self.epsilon)
+                factor[key] = self.alpha[0] * (p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1]) / \
+                              (df.open.iloc[-self.std_span:].std() + self.epsilon)
+                              # (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
+
 
             return array_normalize(factor) + 1
 
@@ -627,16 +630,8 @@ class MomentumTrader(APrioriAgent):
                 return array_normalize(action)
             else:
                 prev_posit = self.get_portfolio_vector(obs)
-                # position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
                 factor = self.predict(obs)
-                # for i, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                #     position[i] = max(0., prev_posit[i] + factor[i] /\
-                #                       (obs[symbol].open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] +
-                #                        self.epsilon))
-
-                position = prev_posit * factor
-
-                # position[-1] = max(0., 1 - position[:-1].sum())
+                position = prev_posit + (factor - 1)
 
             return self.activation(position)
 
@@ -890,8 +885,8 @@ class PAMRTrader(APrioriAgent):
                                              (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
 
             # Log values
-            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (1 /
-                                                                    (price_relative[key] + self.epsilon))})
+            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
+                                                                    (price_relative[key] + self.epsilon)) - 1))})
 
         price_relative[-1] = 1
 
@@ -954,8 +949,8 @@ class PAMRTrader(APrioriAgent):
         b = b + lam * (x - x_mean)
 
         # Log values
-        self.log['mean_change'] = 1 / x_mean
-        self.log['total_portfolio_change'] = 1 / portvar
+        self.log['mean_change'] = ((1 / x_mean) - 1)* 100
+        self.log['total_portfolio_change'] = ((1 / portvar) - 1) * 100
 
         # project it onto simplex
         return simplex_proj(b)

@@ -361,9 +361,9 @@ class SoftmaxGaussianPolicyWithDiagonalCovariance(chainer.Chain, policies.Policy
             # self.bn_mean = L.BatchNormalization(n_input_channels)
             # self.bn_var = L.BatchNormalization(n_input_channels)
             # self.mean_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
-            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
+            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=True)
             # self.var_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
-            self.var_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
+            self.var_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=True)
 
     def compute_mean_and_var(self, x):
         # mean = F.relu(self.mean_layer_1(x))
@@ -391,7 +391,7 @@ class A3CEIIE(chainer.Chain, a3c.A3CModel):
             self.pi = SoftmaxGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.pi = LinearGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.v_1 = L.Linear(pn_number * action_size, pn_number * action_size, initialW=LeCunNormal(), nobias=False)
-            self.v_2 = L.Linear(pn_number * action_size, 1, initialW=LeCunNormal(), nobias=False)
+            self.v_2 = L.Linear(pn_number * action_size, 1, initialW=LeCunNormal(), nobias=True)
             # self.bn = L.BatchNormalization(pn_number * action_size)
 
     def pi_and_v(self, obs):
