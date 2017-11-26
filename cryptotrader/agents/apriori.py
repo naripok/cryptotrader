@@ -270,14 +270,18 @@ class APrioriAgent(Agent):
         obs = env.reset()
 
         try:
-            t0 = time()
             self.step = start_step
-            episode_reward = 0
+
             action = np.zeros(len(env.symbols))
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
+            t0 = time()
+
             can_act = True # TODO: FALSE HERE
             may_report = False
+
+            init_portval = env.calc_total_portval()
+            episode_reward = 0
             reward = 0
             while True:
                 try:
@@ -304,38 +308,7 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = "\n>> step {0}\nPortval: {1}\nregret: {2}\nAction time: {3}\n\ntstamp: {4}\nUptime: {5}\n".format(
-                            self.step,
-                            env.calc_total_portval(),
-                            reward,
-                            datetime.now(),
-                            str(obs.index[-1]),
-                            str(pd.to_timedelta(time() - t0, unit='s'))
-                        )
-
-                        for key in self.log:
-                            if isinstance(self.log[key], dict):
-                                msg += '\n' + str(key) + '\n'
-                                for subkey in self.log[key]:
-                                    msg += str(subkey) + ": " + str(self.log[key][subkey]) + '\n'
-                            else:
-                                msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
-
-                        msg += "\nCrypto prices:\n"
-                        for symbol in env.pairs:
-                            msg += "%s: %.08f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
-
-                        msg += "\nLast action:\n"
-                        la = env.action_df.iloc[-1].astype(str).to_dict()
-                        for symbol in la:
-                            msg += str(symbol) + ": " + la[symbol] + '\n'
-
-                        msg += "\nPortfolio:\n"
-                        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
-                        for symbol in port:
-                            msg += str(symbol) + ": " + port[symbol] + '\n'
-
-                        msg += "\nStatus: %s\n" % str(env.status)
+                        msg = self.make_report(env, obs, reward)
 
                         if verbose:
                             print(msg, end="\r", flush=True)
@@ -371,9 +344,53 @@ class APrioriAgent(Agent):
 
         except KeyboardInterrupt:
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
-                  "\nElapsed steps: {0}\nUptime: {1}\nFinal Portval: {2}\n".format(self.step,
+                  "\nElapsed steps: {0}\nUptime: {1}\nInitial Portval: {2}\nFinal Portval: {3}\n".format(self.step,
                                                                str(pd.to_timedelta(time() - t0, unit='s')),
+                                                               init_portval,
                                                                env.calc_total_portval()))
+
+    def make_report(self, env, obs, reward):
+        """
+        Report generator
+        :param env:
+        :param obs:
+        :param reward:
+        :return:
+        """
+        msg = "\n>> step {0}\nPortval: {1}\nregret: {2}\nAction time: {3}\n\ntstamp: {4}\nUptime: {5}\n".format(
+            self.step,
+            env.calc_total_portval(),
+            reward,
+            datetime.now(),
+            str(obs.index[-1]),
+            str(pd.to_timedelta(time() - t0, unit='s'))
+            )
+
+        for key in self.log:
+            if isinstance(self.log[key], dict):
+                msg += '\n' + str(key) + '\n'
+                for subkey in self.log[key]:
+                    msg += str(subkey) + ": " + str(self.log[key][subkey]) + '\n'
+            else:
+                msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
+
+        msg += "\nCrypto prices:\n"
+        for symbol in env.pairs:
+            msg += "%s: %.08f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
+
+        msg += "\nLast action:\n"
+        la = env.action_df.iloc[-1].astype(str).to_dict()
+        for symbol in la:
+            msg += str(symbol) + ": " + la[symbol] + '\n'
+
+        msg += "\nPortfolio:\n"
+        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
+        for symbol in port:
+            msg += str(symbol) + ": " + port[symbol] + '\n'
+
+        msg += "\nStatus: %s\n" % str(env.status)
+
+        return msg
 
 
 # Test and benchmark

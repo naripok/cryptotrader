@@ -1695,7 +1695,10 @@ class LiveTradingEnvironment(TradingEnvironment):
     def reset(self):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-        self.action_df = pd.DataFrame(columns=list(self.symbols) + ['online'], index=[self.timestamp])
+
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+                                      columns=list(self.symbols) + ['online'],
+                                      index=[self.timestamp])
 
         self.set_observation_space()
         self.set_action_space()
