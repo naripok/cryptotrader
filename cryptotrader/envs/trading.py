@@ -424,7 +424,11 @@ class TradingEnvironment(Env):
             raise e
 
     def add_pairs(self, *args):
-
+        """
+        Add pairs for tradeable symbol universe
+        :param args: str, list:
+        :return:
+        """
         universe = self.tapi.returnCurrencies()
 
         for arg in args:
@@ -449,11 +453,15 @@ class TradingEnvironment(Env):
     @property
     def timestamp(self):
         # return floor_datetime(datetime.now(timezone.utc) - timedelta(minutes=self.period), self.period)
-        # Poloniex returns utc timestamp delayed from one bar
+        # Poloniex returns utc timestamp delayed one full bar
         return datetime.now(timezone.utc) - timedelta(minutes=self.period)
 
     # Exchange data getters
     def get_balance(self):
+        """
+        Return balance
+        :return:
+        """
         try:
             balance = self.tapi.returnBalances()
 
@@ -468,6 +476,12 @@ class TradingEnvironment(Env):
             raise e
 
     def get_fee(self, symbol, fee_type='takerFee'):
+        """
+        Return transaction fee value for desired symbol
+        :param symbol: str: Pair name
+        :param fee_type: str: Take or Maker fee
+        :return: Decimal:
+        """
         # TODO MAKE IT UNIVERSAL
         try:
             fees = self.tapi.returnFeeInfo()
@@ -558,6 +572,12 @@ class TradingEnvironment(Env):
 
     # Low frequency getter
     def get_ohlc(self, symbol, index):
+        """
+        Return OHLC data for desired pair
+        :param symbol: str: Pair symbol
+        :param index: datetime.datetime: Time span for data retrieval
+        :return: pandas DataFrame: OHLC symbol data
+        """
         # Get range
         start = index[0]
         end = index[-1]
@@ -659,6 +679,11 @@ class TradingEnvironment(Env):
             raise e
 
     def get_observation(self, portfolio_vector=False):
+        """
+        Return observation df with prices and asset amounts
+        :param portfolio_vector: bool: whether to include or not asset amounts
+        :return: pandas DataFrame:
+        """
         try:
             self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
@@ -673,6 +698,11 @@ class TradingEnvironment(Env):
             raise e
 
     def get_sampled_portfolio(self, index=None):
+        """
+        Return sampled portfolio df
+        :param index:
+        :return:
+        """
         if index is None:
             start = self.portfolio_df.index[0]
             end = self.portfolio_df.index[-1]
@@ -688,6 +718,11 @@ class TradingEnvironment(Env):
             return self.portfolio_df.loc[:end].resample("%dmin" % self.period).last()
 
     def get_sampled_actions(self, index=None):
+        """
+        Return sampled action df
+        :param index:
+        :return:
+        """
         if index is None:
             start = self.portfolio_df.index[0]
             end = self.portfolio_df.index[-1]
@@ -701,11 +736,22 @@ class TradingEnvironment(Env):
 
     ## Trading methods
     def get_open_price(self, symbol, timestamp=None):
+        """
+        Get symbol open price
+        :param symbol: str: Pair name
+        :param timestamp:
+        :return: Decimal: Symbol open price
+        """
         if not timestamp:
             timestamp = self.obs_df.index[-1]
         return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'open'))
 
     def calc_total_portval(self, timestamp=None):
+        """
+        Return total portfolio value given optional timestamp
+        :param timestamp: datetime.datetime:
+        :return: Decimal: Portfolio value in fiat units
+        """
         portval = convert_to.decimal('0E-8')
 
         for symbol in self._crypto:
@@ -727,6 +773,10 @@ class TradingEnvironment(Env):
             return safe_div(self.get_crypto(symbol) * self.get_open_price(symbol), portval)
 
     def calc_portfolio_vector(self):
+        """
+        Return portfolio position vector
+        :return: numpy array:
+        """
         portfolio = np.empty(len(self.symbols), dtype=Decimal)
         portval = self.calc_total_portval()
         for i, symbol in enumerate(self.symbols):
@@ -734,6 +784,11 @@ class TradingEnvironment(Env):
         return portfolio
 
     def assert_action(self, action):
+        """
+        Assert that action vector is valid and have norm one
+        :param action: numpy array: Action array
+        :return: numpy array: Valid and normalized action vector
+        """
         # TODO WRITE TEST
         try:
             action = convert_to.decimal(action)
@@ -763,17 +818,35 @@ class TradingEnvironment(Env):
             raise e
 
     def log_action(self, timestamp, symbol, value):
+        """
+        Log action to action df
+        :param timestamp:
+        :param symbol:
+        :param value:
+        :return:
+        """
         if symbol == 'online':
             self.action_df.at[timestamp, symbol] = value
         else:
             self.action_df.at[timestamp, symbol] = convert_to.decimal(value)
 
     def log_action_vector(self, timestamp, vector, online):
+        """
+        Log complete action vector to action df
+        :param timestamp:
+        :param vector:
+        :param online:
+        :return:
+        """
         for i, symbol in enumerate(self.symbols):
             self.log_action(timestamp, symbol, vector[i])
         self.log_action(timestamp, 'online', online)
 
     def get_last_portval(self):
+        """
+        Retrieve last valid portfolio value from portfolio dataframe
+        :return: Decimal
+        """
         try:
             i = -1
             portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
@@ -799,7 +872,13 @@ class TradingEnvironment(Env):
         """
         # TODO TEST
 
-        # Regret Calculation
+        # Relative change
+        # port_return = np.log(safe_div(self.portval, self.get_last_portval()))
+        # bench_return = np.log(safe_div(self.portval, self.get_last_portval()))
+
+        # return port_return - bench_return
+
+        # Regret
         price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].astype('f').values
         price_relative = np.append(price[-1] / (price[-2] + 1e-8), [1.0])
         constrained_price_change = price_relative / price_relative.max()
@@ -809,10 +888,6 @@ class TradingEnvironment(Env):
         bench_action_vec = np.append(np.ones(n_pairs, dtype='f') / n_pairs, [0.0])
 
         bench_log_return = np.log(np.dot(bench_action_vec, constrained_price_change))
-
-        #
-        # port_return = np.log(safe_div(self.portval, self.get_last_portval()))
-        # bench_return = np.log(safe_div(self.portval, self.get_last_portval()))
 
         return port_log_return - bench_log_return
 
@@ -904,6 +979,10 @@ class TradingEnvironment(Env):
 
     ## Env methods
     def set_observation_space(self):
+        """
+        Set environment observation space
+        :return:
+        """
         # Observation space:
         obs_space = []
         # OPEN, HIGH, LOW, CLOSE
@@ -917,6 +996,10 @@ class TradingEnvironment(Env):
         self.observation_space = Tuple(obs_space)
 
     def set_action_space(self):
+        """
+        Set valid action space
+        :return:
+        """
         # Action space
         self.action_space = Box(0., 1., len(self.symbols))
         # self.logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
@@ -1189,7 +1272,7 @@ class TradingEnvironment(Env):
 
         return results
 
-    ## Helper methods
+    ## Report methods
     def parse_error(self, e):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
@@ -1443,6 +1526,7 @@ class PaperTradingEnvironment(TradingEnvironment):
 class LiveTradingEnvironment(TradingEnvironment):
     """
     Live trading environment for financial strategies execution
+    ** USE AT YOUR OWN RISK**
     """
     def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
@@ -1484,6 +1568,10 @@ class LiveTradingEnvironment(TradingEnvironment):
         return convert_to.decimal(portval)
 
     def calc_portfolio_vector(self):
+        """
+        Calculate portfolio position vector
+        :return:
+        """
         portfolio = np.empty(len(self.symbols), dtype=Decimal)
         portval = self.calc_total_portval()
         ticker = self.tapi.returnTicker()
@@ -1525,6 +1613,12 @@ class LiveTradingEnvironment(TradingEnvironment):
         return desired_balance
 
     def immediate_sell(self, symbol, amount):
+        """
+        Immediate or cancel sell order
+        :param symbol: str: Pair name
+        :param amount: str: Asset amount to sell
+        :return: bool: if executed: True, else False
+        """
         try:
             pair = self._fiat + '_' + symbol
             amount = str(amount)
@@ -1573,6 +1667,12 @@ class LiveTradingEnvironment(TradingEnvironment):
             raise e
 
     def immediate_buy(self, symbol, amount):
+        """
+        Immediate or cancel buy order
+        :param symbol: str: Pair name
+        :param amount: str: Asset amount to buy
+        :return: bool: if executed: True, else False
+        """
         try:
             pair = self._fiat + '_' + symbol
             amount = str(amount)
@@ -1684,7 +1784,10 @@ class LiveTradingEnvironment(TradingEnvironment):
             return done
 
         except Exception as e:
+            # Log error for debug
             self.logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))
+
+            # Wake up nerds for the rescue
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
@@ -1727,10 +1830,13 @@ class LiveTradingEnvironment(TradingEnvironment):
             done = self.online_rebalance(action, timestamp)
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+            return self.get_observation(True).astype(np.float64), reward, done, self.status
 
         except Exception as e:
+            # Log error for debug
             self.logger.error(LiveTradingEnvironment.step, self.parse_error(e))
+
+            # Wake up nerds for the rescue
             if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
