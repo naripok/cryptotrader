@@ -423,6 +423,10 @@ class DataFeed(ExchangeConnection):
             self._balance[key] = port[key]
 
     @unexpected_rep_retry
+    def returnTicker(self):
+        return self.tapi.returnTicker()
+
+    @unexpected_rep_retry
     def returnBalances(self):
         """
         Return balance from exchange. API KEYS NEEDED!
@@ -458,15 +462,18 @@ class DataFeed(ExchangeConnection):
         """
         try:
             return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-        except PoloniexError:
-            try:
-                symbols = currencyPair.split('_')
-                pair = symbols[1] + '_' + symbols[0]
-                return json.loads(self.pair_reciprocal(pd.DataFrame.from_records(self.tapi.returnChartData(pair, period,
-                                                                                          start=start, end=end
-                                                                                            ))).to_json(orient='records'))
-            except Exception as e:
-                raise e
+        except PoloniexError as error:
+            if 'Invalid currency pair.' == error.__str__():
+                try:
+                    symbols = currencyPair.split('_')
+                    pair = symbols[1] + '_' + symbols[0]
+                    return json.loads(self.pair_reciprocal(pd.DataFrame.from_records(self.tapi.returnChartData(pair, period,
+                                                                                              start=start, end=end
+                                                                                                ))).to_json(orient='records'))
+                except Exception as e:
+                    raise e
+            else:
+                raise error
 
     def pair_reciprocal(self, df):
         df[['open', 'high', 'low', 'close']] = df.apply(
