@@ -277,7 +277,7 @@ class APrioriAgent(Agent):
             last_action_time = floor_datetime(env.timestamp, env.period)
             t0 = time()
 
-            can_act = True # TODO: FALSE HERE
+            can_act = False # TODO: FALSE HERE
             may_report = False
 
             init_portval = env.calc_total_portval()
@@ -330,7 +330,11 @@ class APrioriAgent(Agent):
                             env.send_email("Trading error: %s" % env.name, env.parse_error(e))
                         break
 
-                    sleep((env.period * 60 + 1) / 8)
+                    # sleep((env.period * 60 + 1) / 8)
+                    try:
+                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period)) - datetime.timestamp(env.timestamp))
+                    except:
+                        sleep(1)
 
                 except Exception as e:
                     print("\nAgent Error:",
@@ -376,10 +380,13 @@ class APrioriAgent(Agent):
             str(pd.to_timedelta(time() - t0, unit='s'))
             )
 
+        try:
+            init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
+            prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
+            last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
+        except IndexError:
+            init_portval = prev_portval = last_portval = float(env.calc_total_portval())
 
-        init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
-        prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
-        last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
         msg += "\nStep portfolio percent change: %f" % (float(
             100 * (last_portval - prev_portval) / (prev_portval + 1e-16)
             )) + " %\n"
@@ -411,7 +418,10 @@ class APrioriAgent(Agent):
             msg += str(symbol) + ": " + la[symbol] + '\n'
 
         msg += "\nSlippage pct\n"
-        sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).astype(str).to_dict()
+        try:
+            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).astype(str).to_dict()
+        except IndexError:
+            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-1])).astype(str).to_dict()
         for symbol in sl:
             if symbol is not 'online':
                 msg += str(symbol) + ": " + sl[symbol] + " %" + '\n'
