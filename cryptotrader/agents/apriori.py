@@ -255,7 +255,7 @@ class APrioriAgent(Agent):
         #     print("\nOptimization interrupted by user.")
         #     return None, None
 
-    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False):
+    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False, save_dir="./"):
         """
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
@@ -281,6 +281,7 @@ class APrioriAgent(Agent):
             may_report = False
 
             init_portval = env.calc_total_portval()
+            init_time = env.timestamp
             episode_reward = 0
             reward = 0
             while True:
@@ -319,6 +320,9 @@ class APrioriAgent(Agent):
 
                     if status['Error']:
                         e = status['Error']
+
+                        self.save_dfs(env, save_dir, init_time)
+
                         if verbose:
                             print("Env error:",
                                   type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -337,12 +341,18 @@ class APrioriAgent(Agent):
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
 
+                    # Save dataframes for analysis
+                    self.save_dfs(env, save_dir, init_time)
+
                     if email:
                         env.send_email("Trading error: %s" % env.name, env.parse_error(e))
 
                     break
 
         except KeyboardInterrupt:
+            # Save dataframes for analysis
+            self.save_dfs(env, save_dir, init_time)
+
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
                   "\nElapsed steps: {0}\nUptime: {1}\nInitial Portval: {2}\nFinal Portval: {3}\n".format(self.step,
                                                                str(pd.to_timedelta(time() - t0, unit='s')),
@@ -357,7 +367,7 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> Step {0}\nPortval: {1}\nRegret: {2}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1}\nReward: {2}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
             self.step,
             env.calc_total_portval(),
             reward,
@@ -409,6 +419,15 @@ class APrioriAgent(Agent):
         msg += "\nStatus: %s\n" % str(env.status)
 
         return msg
+
+    def save_dfs(self, env, save_dir, init_time):
+        env.portfolio_df.to_json(save_dir +
+                                 self.name + "_portfolio_df_" + str(env.period) + "min_" +
+                                 str(init_time) + ".json", orient='records')
+
+        env.action_df.to_json(save_dir +
+                              self.name + "_action_df_" + str(env.period) + "min_" +
+                              str(init_time) + ".json", orient='records')
 
 
 # Test and benchmark
@@ -972,7 +991,7 @@ class PAMRTrader(APrioriAgent):
             action[-1] = 0
             return array_normalize(action)
         else:
-            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            prev_posit = self.get_portfolio_vector(obs, index=-2)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
 
@@ -996,12 +1015,6 @@ class PAMRTrader(APrioriAgent):
             le = portvar - (1 + self.sensitivity)
         elif portvar < 1 - self.sensitivity:
             le = (1 - self.sensitivity) - portvar
-        else:
-            max_posit = np.argmax(abs(x - 1))
-            if x[max_posit] >= 1:
-                le = max(0., (x[max_posit] - (1 + self.sensitivity * self.alpha)))
-            else:
-                le = max(0., (1- self.sensitivity * self.alpha) - x[max_posit])
 
         if self.variant == 'PAMR0':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
@@ -1109,6 +1122,83 @@ class OLMARTrader(APrioriAgent):
         self.eps = kwargs['eps']
         self.window = int(kwargs['window'])
         self.smooth = kwargs['smooth']
+
+
+class STMRTrader(APrioriAgent):
+    """
+    Short term mean reversion strategy for portfolio selection.
+    """
+    def __repr__(self):
+        return "STMRTrader"
+
+    def __init__(self, sensitivity=0.03, fiat="USDT", name=""):
+        """
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.sensitivity = sensitivity
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        self.log['price_pct_change'] = {}
+
+        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
+                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+
+            # Log values
+            self.log['price_pct_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
+                                                                        (price_relative[key] + self.epsilon)) - 1))})
+
+        price_relative[-1] = 1
+
+        return price_relative
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=-2)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+
+    def update(self, b, x):
+        """
+        Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portfolio.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
+        """
+        x_mean = np.mean(x)
+        portvar = np.dot(b, x)
+
+        change = (abs(portvar - 1) + max(abs(x - 1))) / 2
+
+        lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
+
+        # update portfolio
+        b = b + lam * (x - x_mean)
+
+        # Log values
+        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
+        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
+
+        # project it onto simplex
+        return simplex_proj(b)
+
+    def set_params(self, **kwargs):
+        self.sensitivity = kwargs['sensitivity']
 
 
 # Portfolio optimization

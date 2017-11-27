@@ -149,7 +149,7 @@ def running_mean(x, N):
 
 
 class convert_to(object):
-    _quantizer = Decimal('0E-8')
+    _quantizer = Decimal('0E-10')
     _quantize = partialmethod(Decimal.quantize, _quantizer)
     _convert_array = np.vectorize(Decimal)
     _quantize_array = np.vectorize(lambda x: Decimal(x).quantize(convert_to._quantizer))
@@ -175,7 +175,7 @@ class convert_to(object):
             else:
                 return Decimal.from_float(np.float64(data)).quantize(convert_to._quantizer)
         except InvalidOperation:
-            if abs(data) > Decimal('1e15'):
+            if abs(data) > Decimal('1e20'):
                 raise InvalidOperation("Numeric overflow in convert_to.decimal")
             elif data == np.nan or math.nan:
                 raise InvalidOperation("NaN encountered in convert_to.decimal")

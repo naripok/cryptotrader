@@ -25,11 +25,12 @@ import json
 
 
 # Decimal precision
-getcontext().prec = 24
+getcontext().prec = 28
 
 # Debug flag
 debug = True
 
+# Datafeeds
 class BacktestDataFeed(DataFeed):
     """
     Data feeder for backtesting with TradingEnvironment.
@@ -106,7 +107,7 @@ class BacktestDataFeed(DataFeed):
         :return:
         """
         for item in self.ohlc_data:
-            self.ohlc_data[item].to_json(dir+'/'+str(item)+'_'+str(self.period)+'min', orient='records')
+            self.ohlc_data[item].to_json(dir+'/'+str(item)+'_'+str(self.period)+'min.json', orient='records')
 
     def load_data(self, dir):
         """
@@ -118,7 +119,7 @@ class BacktestDataFeed(DataFeed):
         self.ohlc_data = {}
         self.data_length = None
         for key in self.pairs:
-            self.ohlc_data[key] = pd.read_json(self.load_dir + dir +'/'+str(key)+'_'+str(self.period)+'min', convert_dates=False,
+            self.ohlc_data[key] = pd.read_json(self.load_dir + dir +'/'+str(key)+'_'+str(self.period)+'min.json', convert_dates=False,
                                                 orient='records', date_unit='s', keep_default_dates=False, dtype=False)
             self.ohlc_data[key].set_index('date', inplace=True, drop=False)
             if not self.data_length:
@@ -196,6 +197,7 @@ class MultiExchangeConnection(DataFeed):
         super().__init__(tapis, period, pairs)
 
 
+# Environments
 class TradingEnvironment(Env):
     """
     Trading environment base class
@@ -879,15 +881,15 @@ class TradingEnvironment(Env):
         # return port_return - bench_return
 
         # Regret
-        price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].astype('f').values
-        price_relative = np.append(price[-1] / (price[-2] + 1e-8), [1.0])
+        price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
+        price_relative = np.append(price[-1] / (price[-2]), [Decimal('1.00000000')])
         constrained_price_change = price_relative / price_relative.max()
 
-        port_log_return = np.log(np.dot(self.action_df.iloc[-1].astype('f').values[:-1], constrained_price_change))
+        port_log_return = Decimal.log10(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
         n_pairs = len(self.pairs)
-        bench_action_vec = np.append(np.ones(n_pairs, dtype='f') / n_pairs, [0.0])
+        bench_action_vec = np.append(np.ones(n_pairs, dtype=np.dtype(Decimal)) / convert_to.decimal(n_pairs), [Decimal('0E-8')])
 
-        bench_log_return = np.log(np.dot(bench_action_vec, constrained_price_change))
+        bench_log_return = Decimal.log10(np.dot(bench_action_vec, constrained_price_change))
 
         return port_log_return - bench_log_return
 
@@ -1449,7 +1451,7 @@ class BacktestEnvironment(TradingEnvironment):
             self.index += 1
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype('f'), reward, done, self.status
+            return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
 
         except KeyboardInterrupt:
             self.status["OOD"] += 1
@@ -1512,7 +1514,7 @@ class PaperTradingEnvironment(TradingEnvironment):
             done = True
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype('f'), reward, done, self.status
+            return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
 
         except Exception as e:
             self.logger.error(PaperTradingEnvironment.step, self.parse_error(e))
@@ -1830,7 +1832,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             done = self.online_rebalance(action, timestamp)
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype(np.float64), reward, done, self.status
+            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
 
         except Exception as e:
             # Log error for debug

@@ -15,9 +15,9 @@ from decimal import Decimal, InvalidOperation
 
 @given(st.one_of(st.floats(allow_nan=False, allow_infinity=False), st.integers()))
 def test_convert_to(data):
-    if abs(data) < Decimal('1e16'):
+    if abs(data) < Decimal('1e18'):
         number = convert_to.decimal(data)
-        assert number == Decimal.from_float(data).quantize(Decimal('1e-8'))
+        assert number - Decimal.from_float(data).quantize(Decimal('0e-9')) < Decimal("1e-8")
     else:
         with pytest.raises(InvalidOperation):
             convert_to.decimal(data)
