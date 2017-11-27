@@ -1707,7 +1707,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
                     elif 'Not enough %s.' % self._fiat == error.__str__():
                         if not self.status['NotEnoughFiat']:
-                            self.status['NotEnoughFiat'] = True
+                            self.status['NotEnoughFiat'] += 1
 
                             price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
                             fiat_units = self.get_balance()[self._fiat]

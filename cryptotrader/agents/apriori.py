@@ -260,7 +260,7 @@ class APrioriAgent(Agent):
         TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
         """
 
-        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %d fiat units." % (env.period,
+        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
                                                                                             env.calc_total_portval()))
 
         self.fiat = env._fiat
@@ -308,7 +308,7 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = self.make_report(env, obs, reward)
+                        msg = self.make_report(env, obs, reward, t0)
 
                         if verbose:
                             print(msg, end="\r", flush=True)
@@ -349,7 +349,7 @@ class APrioriAgent(Agent):
                                                                init_portval,
                                                                env.calc_total_portval()))
 
-    def make_report(self, env, obs, reward):
+    def make_report(self, env, obs, reward, t0):
         """
         Report generator
         :param env:
@@ -357,7 +357,7 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> step {0}\nPortval: {1}\nregret: {2}\nAction time: {3}\n\ntstamp: {4}\nUptime: {5}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1}\nRegret: {2}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
             self.step,
             env.calc_total_portval(),
             reward,
@@ -365,6 +365,18 @@ class APrioriAgent(Agent):
             str(obs.index[-1]),
             str(pd.to_timedelta(time() - t0, unit='s'))
             )
+
+
+        init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
+        prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
+        last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
+        msg += "\nStep portfolio percent change: %f" % (float(
+            100 * (last_portval - prev_portval) / (prev_portval + 1e-16)
+            )) + " %\n"
+
+        msg += "\nTotal portfolio percent change: %f" % (float(
+            100 * (last_portval - init_portval) / (init_portval + 1e-16)
+            )) + " %\n"
 
         for key in self.log:
             if isinstance(self.log[key], dict):
@@ -378,15 +390,21 @@ class APrioriAgent(Agent):
         for symbol in env.pairs:
             msg += "%s: %.08f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
 
+        msg += "\nPortfolio:\n"
+        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
+        for symbol in port:
+            msg += str(symbol) + ": " + port[symbol] + '\n'
+
         msg += "\nLast action:\n"
         la = env.action_df.iloc[-1].astype(str).to_dict()
         for symbol in la:
             msg += str(symbol) + ": " + la[symbol] + '\n'
 
-        msg += "\nPortfolio:\n"
-        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
-        for symbol in port:
-            msg += str(symbol) + ": " + port[symbol] + '\n'
+        msg += "\nSlippage pct\n"
+        sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).astype(str).to_dict()
+        for symbol in sl:
+            if symbol is not 'online':
+                msg += str(symbol) + ": " + sl[symbol] + " %" + '\n'
 
         msg += "\nStatus: %s\n" % str(env.status)
 
@@ -583,8 +601,8 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[2, 3], std_span=3, alpha=[1., 1., 1.], mean_type='kama', activation=simplex_proj,
-                 fiat="USDT"):
+    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1., 1.], mean_type='kama', sensitivity=0.01, alpha=2,
+                 activation=simplex_proj, fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
@@ -592,6 +610,8 @@ class MomentumTrader(APrioriAgent):
         self.mean_type = mean_type
         self.ma_span = ma_span
         self.std_span = std_span
+        self.weights = weights
+        self.sensitivity = sensitivity
         self.alpha = alpha
         self.activation = activation
 
@@ -626,7 +646,7 @@ class MomentumTrader(APrioriAgent):
 
                 d2 = d.diff()
 
-                factor[key] = self.alpha[0] * (p + self.alpha[1] * d.iat[-1] + self.alpha[2] * d2.iat[-1]) / \
+                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1] + self.weights[2] * d2.iat[-1]) / \
                               (df.open.iloc[-self.std_span:].std() + self.epsilon)
                               # (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
 
@@ -636,6 +656,36 @@ class MomentumTrader(APrioriAgent):
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
             raise e
+
+    def update(self, b, x):
+        x_mean = np.mean(x)
+        portvar = np.dot(b, x)
+
+        if portvar > 1 + self.sensitivity:
+            le = portvar - (1 + self.sensitivity)
+        elif portvar < 1 - self.sensitivity:
+            le = (1 - self.sensitivity) - portvar
+        else:
+            max_posit = np.argmax(abs(x - 1))
+            if x[max_posit] >= 1:
+                le = max(0., (x[max_posit] - (1 + self.sensitivity * self.alpha)))
+            else:
+                le = max(0., (1- self.sensitivity * self.alpha) - x[max_posit])
+
+        lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
+
+        # limit lambda to avoid numerical problems
+        lam = min(100000, lam)
+
+        # update portfolio
+        b = b + lam * (x - x_mean)
+
+        # Log values
+        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1)* 100
+        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
+
+        # project it onto simplex
+        return self.activation(b)
 
     def rebalance(self, obs):
         try:
@@ -648,16 +698,17 @@ class MomentumTrader(APrioriAgent):
             else:
                 prev_posit = self.get_portfolio_vector(obs)
                 factor = self.predict(obs)
-                position = prev_posit + (factor - 1)
-
-            return self.activation(position)
+                return self.update(prev_posit, factor)
+                # position = prev_posit + (factor - 1)
+                # return self.activation(position)
 
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
             raise e
 
     def set_params(self, **kwargs):
-        self.alpha = [kwargs['alpha_v'], kwargs['alpha_a'],  kwargs['alpha_i']]
+        self.weights = [kwargs['alpha_v'], kwargs['alpha_a'],  kwargs['alpha_i']]
+        self.alpha = kwargs['alpha']
         self.mean_type = kwargs['mean_type']
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
         self.std_span = int(kwargs['std_span'])
@@ -894,7 +945,7 @@ class PAMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        self.log['price_change'] = {}
+        self.log['price_pct_change'] = {}
 
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
@@ -902,7 +953,7 @@ class PAMRTrader(APrioriAgent):
                                              (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
 
             # Log values
-            self.log['price_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
+            self.log['price_pct_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
                                                                     (price_relative[key] + self.epsilon)) - 1))})
 
         price_relative[-1] = 1
@@ -952,12 +1003,14 @@ class PAMRTrader(APrioriAgent):
             else:
                 le = max(0., (1- self.sensitivity * self.alpha) - x[max_posit])
 
-        if self.variant == 'PAMR':
+        if self.variant == 'PAMR0':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
         elif self.variant == 'PAMR1':
             lam = min(self.C, le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
         elif self.variant == 'PAMR2':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C + self.epsilon)
+        else:
+            raise TypeError("Bad variant param.")
 
         # limit lambda to avoid numerical problems
         lam = min(100000, lam)
@@ -966,8 +1019,8 @@ class PAMRTrader(APrioriAgent):
         b = b + lam * (x - x_mean)
 
         # Log values
-        self.log['mean_change'] = ((1 / x_mean) - 1)* 100
-        self.log['total_portfolio_change'] = ((1 / portvar) - 1) * 100
+        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1)* 100
+        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
 
         # project it onto simplex
         return simplex_proj(b)
