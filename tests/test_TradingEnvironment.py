@@ -278,7 +278,7 @@ def test_get_reward(ready_env):
     env = ready_env
     env.reset()
     r = env.get_reward()
-    assert isinstance(r, float)
+    assert isinstance(r, Decimal)
     # assert r == float()
     env.fiat = Decimal(1)
     a = np.zeros(len(env.pairs) + 1)

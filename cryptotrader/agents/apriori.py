@@ -620,7 +620,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1., 1.], mean_type='kama', sensitivity=0.01, alpha=2,
+    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1.], mean_type='kama', sensitivity=0.1,
                  activation=simplex_proj, fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -631,7 +631,6 @@ class MomentumTrader(APrioriAgent):
         self.std_span = std_span
         self.weights = weights
         self.sensitivity = sensitivity
-        self.alpha = alpha
         self.activation = activation
 
     def get_ma(self, df):
@@ -663,9 +662,7 @@ class MomentumTrader(APrioriAgent):
 
                 d = (df['%d_ma' % self.ma_span[0]].iloc[-4:] - df['%d_ma' % self.ma_span[1]].iloc[-4:]).diff()
 
-                d2 = d.diff()
-
-                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1] + self.weights[2] * d2.iat[-1]) / \
+                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1]) / \
                               (df.open.iloc[-self.std_span:].std() + self.epsilon)
                               # (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
 
@@ -677,30 +674,24 @@ class MomentumTrader(APrioriAgent):
             raise e
 
     def update(self, b, x):
+        """
+        Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portfolio.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
+        """
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        if portvar > 1 + self.sensitivity:
-            le = portvar - (1 + self.sensitivity)
-        elif portvar < 1 - self.sensitivity:
-            le = (1 - self.sensitivity) - portvar
-        else:
-            max_posit = np.argmax(abs(x - 1))
-            if x[max_posit] >= 1:
-                le = max(0., (x[max_posit] - (1 + self.sensitivity * self.alpha)))
-            else:
-                le = max(0., (1- self.sensitivity * self.alpha) - x[max_posit])
+        change = (abs(portvar - 1) + max(abs(x - 1))) / 2
 
-        lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
-
-        # limit lambda to avoid numerical problems
-        lam = min(100000, lam)
+        lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
         # update portfolio
         b = b + lam * (x - x_mean)
 
         # Log values
-        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1)* 100
+        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
         self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
 
         # project it onto simplex
@@ -715,19 +706,16 @@ class MomentumTrader(APrioriAgent):
                 action[-1] = 0
                 return array_normalize(action)
             else:
-                prev_posit = self.get_portfolio_vector(obs)
+                prev_posit = self.get_portfolio_vector(obs, index=-2)
                 factor = self.predict(obs)
                 return self.update(prev_posit, factor)
-                # position = prev_posit + (factor - 1)
-                # return self.activation(position)
 
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
             raise e
 
     def set_params(self, **kwargs):
-        self.weights = [kwargs['alpha_v'], kwargs['alpha_a'],  kwargs['alpha_i']]
-        self.alpha = kwargs['alpha']
+        self.weights = [kwargs['alpha_v'], kwargs['alpha_a']]
         self.mean_type = kwargs['mean_type']
         self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
         self.std_span = int(kwargs['std_span'])
