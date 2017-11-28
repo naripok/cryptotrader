@@ -381,7 +381,7 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {3}\nTstamp: {4}\nUptime: {5}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {4}\nTstamp: {5}\nUptime: {6}\n".format(
             self.step,
             env.calc_total_portval(),
             reward,
