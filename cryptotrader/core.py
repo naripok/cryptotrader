@@ -379,7 +379,7 @@ class DataFeed(ExchangeConnection):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    retryDelays = [2 ** i for i in range(14)]
+    retryDelays = [2 ** i for i in range(5)]
     logger = Logger("DataFeed")
 
     def unexpected_rep_retry(func):
