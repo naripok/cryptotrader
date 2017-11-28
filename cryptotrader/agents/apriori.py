@@ -1166,12 +1166,13 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.03, rebalance=True, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
+        self.activation = activation
         if rebalance:
             self.reb = -2
         else:
@@ -1231,10 +1232,9 @@ class STMRTrader(APrioriAgent):
 
         # Log values
         self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
-        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
 
         # project it onto simplex
-        return simplex_proj(b)
+        return self.activation(b)
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']

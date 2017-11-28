@@ -882,7 +882,7 @@ class TradingEnvironment(Env):
 
         # Regret
         price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
-        price_relative = np.append(price[-1] / (price[-2]), [Decimal('1.00000000')])
+        price_relative = np.append(price[-1] / (price[-2] + self.epsilon), [Decimal('1.00000000')])
         constrained_price_change = price_relative / price_relative.max()
 
         port_log_return = Decimal.ln(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
