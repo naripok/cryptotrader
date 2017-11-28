@@ -1553,39 +1553,6 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.logger.error(TradingEnvironment.get_balance, self.parse_error(e))
             raise e
 
-    def calc_total_portval(self, timestamp=None):
-        """
-        Calculate total portfolio value given last pair prices
-        :param timestamp: For compatibility only
-        :return: Decimal: Total portfolio value in fiat units
-        """
-        portval = convert_to.decimal('0E-8')
-        balance = self.get_balance()
-        ticker = self.tapi.returnTicker()
-        for pair in self.pairs:
-            portval = balance[pair.split('_')[1]].fma(convert_to.decimal(ticker[pair]['last']),
-                                                      portval)
-        portval += balance[self._fiat]
-
-        return convert_to.decimal(portval)
-
-    def calc_portfolio_vector(self):
-        """
-        Calculate portfolio position vector
-        :return:
-        """
-        portfolio = np.empty(len(self.symbols), dtype=Decimal)
-        portval = self.calc_total_portval()
-        ticker = self.tapi.returnTicker()
-        balance = self.get_balance()
-        for i, pair in enumerate(self.pairs):
-            portfolio[i] = safe_div(balance[pair.split('_')[1]] *
-                                    convert_to.decimal(ticker[pair]['last']),  portval)
-
-        portfolio[-1] = safe_div(balance[self._fiat], portval)
-
-        return convert_to.decimal(portfolio)
-
     def get_balance_array(self):
         """
         Return ordered balance array
@@ -1597,15 +1564,51 @@ class LiveTradingEnvironment(TradingEnvironment):
             balance_array[i] = balance[symbol]
         return balance_array
 
-    def get_desired_balance_array(self, action):
+    def calc_total_portval(self, ticker=None, timestamp=None):
+        """
+        Calculate total portfolio value given last pair prices
+        :param timestamp: For compatibility only
+        :return: Decimal: Total portfolio value in fiat units
+        """
+        portval = convert_to.decimal('0E-8')
+        balance = self.get_balance()
+        if not ticker:
+            ticker = self.tapi.returnTicker()
+        for pair in self.pairs:
+            portval = balance[pair.split('_')[1]].fma(convert_to.decimal(ticker[pair]['last']),
+                                                      portval)
+        portval += balance[self._fiat]
+
+        return convert_to.decimal(portval)
+
+    def calc_portfolio_vector(self, ticker=None):
+        """
+        Calculate portfolio position vector
+        :return:
+        """
+        portfolio = np.empty(len(self.symbols), dtype=Decimal)
+        portval = self.calc_total_portval(ticker)
+        if not ticker:
+            ticker = self.tapi.returnTicker()
+        balance = self.get_balance()
+        for i, pair in enumerate(self.pairs):
+            portfolio[i] = safe_div(balance[pair.split('_')[1]] *
+                                    convert_to.decimal(ticker[pair]['last']),  portval)
+
+        portfolio[-1] = safe_div(balance[self._fiat], portval)
+
+        return convert_to.decimal(portfolio)
+
+    def get_desired_balance_array(self, action, ticker=None):
         """
         Return asset amounts given action array
         :param action: numpy ndarray: action array with norm summing one
         :return: numpy ndarray: asset amount array given action
         """
         desired_balance = np.empty(len(self.symbols), dtype=Decimal)
-        portval = fiat = self.calc_total_portval()
-        ticker = self.tapi.returnTicker()
+        portval = fiat = self.calc_total_portval(ticker)
+        if not ticker:
+            ticker = self.tapi.returnTicker()
         for i, pair in enumerate(self.pairs):
             desired_balance[i] = safe_div(portval * action[i],
                                           convert_to.decimal(ticker[pair]['last']))
@@ -1748,7 +1751,8 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.log_action_vector(timestamp, action, False)
 
             # Calculate position change given last porftolio and action vector
-            balance_change = (self.get_desired_balance_array(action) - self.get_balance_array())[:-1]
+            ticker = self.tapi.returnTicker()
+            balance_change = (self.get_desired_balance_array(action, ticker) - self.get_balance_array())[:-1]
 
             # Sell assets first
             for i, change in enumerate(balance_change):
@@ -1771,8 +1775,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                     elif done and not resp:
                         done = resp
 
+            # Get new ticker
+            ticker = self.tapi.returnTicker()
             # Log executed action and final balance
-            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(), True)
+            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(ticker), True)
 
             # Update portfolio_df
             final_balance = self.get_balance()
@@ -1780,7 +1786,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.balance = final_balance
 
             # Calculate new portval
-            self.portval = {'portval': self.calc_total_portval(),
+            self.portval = {'portval': self.calc_total_portval(ticker),
                             'timestamp': self.portfolio_df.index[-1]}
 
             return done
@@ -1800,8 +1806,8 @@ class LiveTradingEnvironment(TradingEnvironment):
     def reset(self):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-
-        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+        ticker = self.tapi.returnTicker()
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector(ticker)) + [False]],
                                       columns=list(self.symbols) + ['online'],
                                       index=[self.timestamp])
 
@@ -1815,7 +1821,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
         obs = self.get_observation(True)
 
-        self.portval = {'portval': self.calc_total_portval(),
+        self.portval = {'portval': self.calc_total_portval(ticker),
                         'timestamp': self.portfolio_df.index[-1]}
 
         return obs.astype(np.float64)

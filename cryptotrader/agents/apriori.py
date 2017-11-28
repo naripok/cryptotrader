@@ -10,6 +10,7 @@ from decimal import Decimal
 from datetime import timedelta
 
 from scipy.signal import argrelextrema
+from ..exchange_api.poloniex import PoloniexError, RetryException
 
 # Base class
 class APrioriAgent(Agent):
@@ -272,6 +273,7 @@ class APrioriAgent(Agent):
         print("Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
                                                                                             env.calc_total_portval()))
 
+        # Fiat symbol
         self.fiat = env._fiat
 
         # Reset env and get initial env
@@ -279,6 +281,7 @@ class APrioriAgent(Agent):
         obs = env.reset()
 
         try:
+            # Init variables
             self.step = start_step
 
             action = np.zeros(len(env.symbols))
@@ -295,24 +298,29 @@ class APrioriAgent(Agent):
             reward = 0
             while True:
                 try:
+                    # Log action time
                     loop_time = env.timestamp
                     if loop_time >= last_action_time + timedelta(minutes=env.period):
                         can_act = True
 
+                    # If can act, run strategy and step environment
                     if can_act:
                         action = self.rebalance(env.get_observation(True).astype(np.float64))
                         obs, reward, done, status = env.step(action)
                         episode_reward += reward
 
+                        # If action is complete, increment step counter, log action time and allow report
                         if done:
                             self.step += 1
                             last_action_time = floor_datetime(env.timestamp, env.period)
                             can_act = False
                             may_report = True
 
+                    # If cant act, just take a observation and return
                     else:
                         obs = env.get_observation(True).astype(np.float64)
 
+                    # Not implemented yet
                     if render:
                         env.render()
 
@@ -327,6 +335,7 @@ class APrioriAgent(Agent):
                             env.send_email("Trading report " + self.name, msg)
                             may_report = False
 
+                    # If environment return an error,save data frames and break
                     if status['Error']:
                         e = status['Error']
 
@@ -339,13 +348,21 @@ class APrioriAgent(Agent):
                             env.send_email("Trading error: %s" % env.name, env.parse_error(e))
                         break
 
-                    # sleep((env.period * 60 + 1) / 8)
+                    # Wait for next bar open
                     try:
                         sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
                               - datetime.timestamp(env.timestamp) + np.random.random(1) * 3)
                     except:
                         sleep(1 + np.random.random(1) * 3)
 
+                # If you've done enough tries, cancel action and wait for the next bar
+                except RetryException as e:
+                    if 'retryDelays exhausted' in e.__str__():
+                        pass
+                    else:
+                        raise e
+
+                # Catch exceptions
                 except Exception as e:
                     print("\nAgent Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -363,6 +380,7 @@ class APrioriAgent(Agent):
 
                     break
 
+        # If interrupted, save data and quit
         except KeyboardInterrupt:
             # Save dataframes for analysis
             self.save_dfs(env, save_dir, init_time)
@@ -381,22 +399,23 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {4}\nTstamp: {5}\nUptime: {6}\n".format(
-            self.step,
-            env.calc_total_portval(),
-            reward,
-            episode_reward,
-            datetime.now(),
-            str(obs.index[-1]),
-            str(pd.to_timedelta(time() - t0, unit='s'))
-            )
 
         try:
             init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
             prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
             last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
         except IndexError:
-            init_portval = prev_portval = last_portval = float(env.calc_total_portval())
+            init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
+
+        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {4}\nTstamp: {5}\nUptime: {6}\n".format(
+            self.step,
+            last_portval,
+            reward,
+            episode_reward,
+            datetime.now(),
+            str(obs.index[-1]),
+            str(pd.to_timedelta(time() - t0, unit='s'))
+            )
 
         msg += "\nStep portfolio percent change: %f" % (float(
             100 * (last_portval - prev_portval) / (prev_portval + 1e-16)
