@@ -312,7 +312,7 @@ class APrioriAgent(Agent):
                         # If action is complete, increment step counter, log action time and allow report
                         if done:
                             self.step += 1
-                            last_action_time = floor_datetime(env.timestamp, env.period)
+                            last_action_time = floor_datetime(loop_time, env.period)
                             can_act = False
                             may_report = True
 
@@ -351,9 +351,9 @@ class APrioriAgent(Agent):
                     # Wait for next bar open
                     try:
                         sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 3)
-                    except:
-                        sleep(1 + np.random.random(1) * 3)
+                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 5))
+                    except ValueError:
+                        sleep(1 + int(np.random.random(1) * 5))
 
                 # If you've done enough tries, cancel action and wait for the next bar
                 except RetryException as e:
@@ -644,12 +644,12 @@ class ConstantRebalanceTrader(APrioriAgent):
 
     def predict(self, obs):
         n_pairs = obs.columns.levels[0].shape[0]
-        action = np.ones(n_pairs - 1)
-        return array_normalize(action)
+        action = array_normalize(np.ones(n_pairs - 1))
+        return np.append(action, [0.0])
 
     def rebalance(self, obs):
         factor = self.predict(obs)
-        return factor.resize(obs.columns.levels[0].shape[0])
+        return factor
 
 
 # Momentum
@@ -1063,10 +1063,6 @@ class PAMRTrader(APrioriAgent):
         # update portfolio
         b = b + lam * (x - x_mean)
 
-        # Log values
-        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1)* 100
-        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
-
         # project it onto simplex
         return simplex_proj(b)
 
@@ -1231,7 +1227,7 @@ class STMRTrader(APrioriAgent):
         b = b + lam * (x - x_mean)
 
         # Log values
-        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
+        self.log['mean_pct_change'] = ((1 / x[:-1]).mean() - 1) * 100
 
         # project it onto simplex
         return self.activation(b)

@@ -26,6 +26,7 @@ import json
 
 # Decimal precision
 getcontext().prec = 28
+dec_con = getcontext()
 
 # Debug flag
 debug = True
@@ -68,9 +69,15 @@ class BacktestDataFeed(DataFeed):
         self.data_length = None
         for pair in self.pairs:
             try:
-                self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
+                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                    start=start, end=end
                                                                   ))
+                # Get right values to fill nans
+                fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
+                fill_dict.update({'volume': '0E-8'})
+
+                self.ohlc_data[pair] = ohlc_df
+
             except PoloniexError:
                 try:
                     symbols = pair.split('_')
@@ -881,17 +888,18 @@ class TradingEnvironment(Env):
         # return port_return - bench_return
 
         # Regret
-        price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
-        price_relative = np.append(price[-1] / (price[-2] + self.epsilon), [Decimal('1.00000000')])
-        constrained_price_change = price_relative / price_relative.max()
+        pr = np.append(self.obs_df.xs('open', level=1, axis=1).iloc[-2:].pct_change().values[-1] + Decimal('1.00000000'), Decimal('1.00000000'))
+        pr = pr / pr.max()
 
-        port_log_return = Decimal.ln(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
+        port_log_return = dec_con.log10(np.dot(self.action_df.iloc[-1].values[:-1], pr))
+
         n_pairs = len(self.pairs)
-        bench_action_vec = np.append(np.ones(n_pairs, dtype=np.dtype(Decimal)) / convert_to.decimal(n_pairs), [Decimal('0E-8')])
+        bench_action_vec = np.append(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))) /\
+                                     convert_to.decimal(n_pairs), [Decimal('0E-8')])
 
-        bench_log_return = Decimal.ln(np.dot(bench_action_vec, constrained_price_change))
+        bench_log_return = dec_con.log10(np.dot(bench_action_vec, pr))
 
-        return port_log_return - bench_log_return
+        return dec_con.subtract(port_log_return, bench_log_return)
 
     def simulate_trade(self, action, timestamp):
         """
