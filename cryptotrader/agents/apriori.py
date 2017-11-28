@@ -255,9 +255,18 @@ class APrioriAgent(Agent):
         #     print("\nOptimization interrupted by user.")
         #     return None, None
 
-    def trade(self, env, start_step=0, timeout=None, verbose=False, render=False, email=False, save_dir="./"):
+    def trade(self, env, start_step=0, act_now=False, timeout=None, verbose=False, render=False, email=False, save_dir="./"):
         """
-        TRADE REAL ASSETS IN THE EXCHANGE ENVIRONMENT. CAUTION!!!!
+        TRADE REAL ASSETS WITHIN EXCHANGE. USE AT YOUR OWN RISK!
+        :param env: Livetrading or Papertrading environment instance
+        :param start_step: int: strategy start step
+        :param act_now: bool: Whether to act now or at the next bar start
+        :param timeout: int: Not implemented yet
+        :param verbose: bool:
+        :param render: bool: Not implemented yet
+        :param email: bool: Wheter to send report email or not
+        :param save_dir: str: Save directory for logs
+        :return:
         """
 
         print("Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
@@ -277,7 +286,7 @@ class APrioriAgent(Agent):
             last_action_time = floor_datetime(env.timestamp, env.period)
             t0 = time()
 
-            can_act = False # TODO: FALSE HERE
+            can_act = act_now # TODO: FALSE HERE
             may_report = False
 
             init_portval = env.calc_total_portval()
@@ -309,7 +318,7 @@ class APrioriAgent(Agent):
 
                     # Report generation
                     if verbose or email:
-                        msg = self.make_report(env, obs, reward, t0)
+                        msg = self.make_report(env, obs, reward, episode_reward, t0)
 
                         if verbose:
                             print(msg, end="\r", flush=True)
@@ -333,7 +342,7 @@ class APrioriAgent(Agent):
                     # sleep((env.period * 60 + 1) / 8)
                     try:
                         sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 10)
+                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 3)
                     except:
                         sleep(1 + np.random.random(1) * 3)
 
@@ -364,7 +373,7 @@ class APrioriAgent(Agent):
                                                                init_portval,
                                                                env.calc_total_portval()))
 
-    def make_report(self, env, obs, reward, t0):
+    def make_report(self, env, obs, reward, episode_reward, t0):
         """
         Report generator
         :param env:
@@ -372,10 +381,11 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> Step {0}\nPortval: {1:.3f}\nReward: {2:.6f}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {3}\nTstamp: {4}\nUptime: {5}\n".format(
             self.step,
             env.calc_total_portval(),
             reward,
+            episode_reward,
             datetime.now(),
             str(obs.index[-1]),
             str(pd.to_timedelta(time() - t0, unit='s'))
@@ -434,11 +444,11 @@ class APrioriAgent(Agent):
     def save_dfs(self, env, save_dir, init_time):
         env.portfolio_df.to_json(save_dir +
                                  self.name + "_portfolio_df_" + str(env.period) + "min_" +
-                                 str(init_time) + ".json", orient='records')
+                                 str(init_time) + ".json")
 
         env.action_df.to_json(save_dir +
                               self.name + "_action_df_" + str(env.period) + "min_" +
-                              str(init_time) + ".json", orient='records')
+                              str(init_time) + ".json")
 
 
 # Test and benchmark
@@ -1130,6 +1140,9 @@ class OLMARTrader(APrioriAgent):
 class STMRTrader(APrioriAgent):
     """
     Short term mean reversion strategy for portfolio selection.
+
+    Original algo by José Olímpio Mendes
+    27/11/2017
     """
     def __repr__(self):
         return "STMRTrader"

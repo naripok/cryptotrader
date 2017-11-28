@@ -51,7 +51,11 @@ from .coach import Coach
 # logger
 logger = logging.getLogger(__name__)
 
-retryDelays = (0, 2, 5, 30)
+retryDelays = (0, 2, 5, 30, 30, 30, 30,
+               60, 60, 60, 60, 60, 60,
+               120, 120, 120, 120, 120,
+               120, 240, 240, 240, 480,
+               480, 960, 960, 960, 960)
 
 # Possible Commands
 PUBLIC_COMMANDS = [
