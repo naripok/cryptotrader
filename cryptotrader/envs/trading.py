@@ -885,11 +885,11 @@ class TradingEnvironment(Env):
         price_relative = np.append(price[-1] / (price[-2]), [Decimal('1.00000000')])
         constrained_price_change = price_relative / price_relative.max()
 
-        port_log_return = Decimal.log10(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
+        port_log_return = Decimal.ln(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
         n_pairs = len(self.pairs)
         bench_action_vec = np.append(np.ones(n_pairs, dtype=np.dtype(Decimal)) / convert_to.decimal(n_pairs), [Decimal('0E-8')])
 
-        bench_log_return = Decimal.log10(np.dot(bench_action_vec, constrained_price_change))
+        bench_log_return = Decimal.ln(np.dot(bench_action_vec, constrained_price_change))
 
         return port_log_return - bench_log_return
 
