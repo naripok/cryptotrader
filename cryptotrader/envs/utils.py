@@ -5,7 +5,7 @@ import pandas as pd
 from time import time
 
 from ..random_process import ConstrainedOrnsteinUhlenbeckProcess
-from ..utils import convert_to, running_mean
+from ..utils import convert_to
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show

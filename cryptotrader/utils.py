@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, DivisionByZero
+from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext
 from functools import partialmethod
 import zmq
 import msgpack
@@ -9,7 +9,13 @@ import numpy as np
 # from bson import Decimal128
 import math
 
-decimal_cases = 1E-8
+getcontext().prec = 64
+getcontext().Emax = 33
+getcontext().Emin = -33
+dec_con = getcontext()
+dec_zero = dec_con.create_decimal('0E-16')
+dec_eps = dec_con.create_decimal('1E-16')
+
 
 # Helper functions and classes
 class Logger(object):
@@ -65,13 +71,20 @@ class Logger(object):
 
 
 
-def safe_div(x, y, eps=Decimal('1E-8')):
+def safe_div(x, y, eps=dec_eps):
     try:
-        out = x / y
+        out = dec_con.divide(x, y)
     except DivisionByZero:
-        out = x / (y + eps)
+        out = dec_con.divide(x, y + eps)
     except InvalidOperation:
-        out = x / (y + eps)
+        out = dec_con.divide(x, y + eps)
+    except TypeError:
+        try:
+            out = x / y
+        except DivisionByZero:
+            out = x / (y + eps)
+        except InvalidOperation:
+            out = x / (y + eps)
 
     return out
 
@@ -110,11 +123,11 @@ def array_normalize(x, float=True):
     try:
         out /= out.sum()
     except DivisionByZero:
-        out /= (out.sum() + convert_to.decimal('1e-8'))
+        out /= (out.sum() + dec_eps)
     except InvalidOperation:
-        out /= (out.sum() + convert_to.decimal('1e-8'))
+        out /= (out.sum() + dec_eps)
 
-    out[-1] += convert_to.decimal('1.00000000') - out.sum()
+    out[-1] += dec_con.create_decimal('1.00000000') - out.sum()
 
     if float:
         return np.float32(out)
@@ -143,16 +156,11 @@ def simplex_proj(y):
     return np.maximum(y - tmax, 0.)
 
 
-def running_mean(x, N):
-    cumsum = np.cumsum(np.insert(x, 0, 0))
-    return (cumsum[N:] - cumsum[:-N]) / N
-
-
 class convert_to(object):
-    _quantizer = Decimal('0E-10')
+    _quantizer = dec_zero
     _quantize = partialmethod(Decimal.quantize, _quantizer)
-    _convert_array = np.vectorize(Decimal)
-    _quantize_array = np.vectorize(lambda x: Decimal(x).quantize(convert_to._quantizer))
+    _convert_array = np.vectorize(dec_con.create_decimal)
+    _quantize_array = np.vectorize(lambda x: dec_con.create_decimal(x).quantize(convert_to._quantizer))
 
     # @staticmethod
     # def decimal128(data):
@@ -163,14 +171,9 @@ class convert_to(object):
     @staticmethod
     def decimal(data):
         try:
-            return Decimal(data).quantize(convert_to._quantizer)
+            return dec_con.create_decimal(data).quantize(convert_to._quantizer)
         except TypeError:
             if isinstance(data, np.ndarray):
-                # shape = data.shape
-                # output = np.empty(data.flatten().shape, dtype=np.dtype(Decimal))
-                # for i, item in enumerate(data.flatten()):
-                #     output[i] = Decimal(np.float64(item)).quantize(convert_to._quantizer)
-                # return output.reshape(shape)
                 return convert_to._quantize_array(data.astype(str))
             else:
                 return Decimal.from_float(np.float64(data)).quantize(convert_to._quantizer)

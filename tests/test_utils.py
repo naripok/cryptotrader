@@ -11,17 +11,20 @@ from math import nan
 import numpy as np
 
 from cryptotrader.utils import convert_to, array_normalize, array_softmax
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, Overflow
 
 @given(st.one_of(st.floats(allow_nan=False, allow_infinity=False), st.integers()))
 def test_convert_to(data):
     if abs(data) < Decimal('1e18'):
         number = convert_to.decimal(data)
         assert number - Decimal.from_float(data).quantize(Decimal('0e-9')) < Decimal("1e-8")
-    else:
+
+    elif abs(data) < Decimal('1e33'):
         with pytest.raises(InvalidOperation):
             convert_to.decimal(data)
-
+    else:
+        with pytest.raises(Overflow):
+            convert_to.decimal(data)
 
 @given(arrays(dtype=np.float32,
               shape=array_shapes(),

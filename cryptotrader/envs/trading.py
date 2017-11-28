@@ -11,7 +11,7 @@ from .utils import *
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
-from decimal import getcontext, localcontext, ROUND_UP, Decimal
+from decimal import getcontext, localcontext, ROUND_UP, Decimal, Context
 from time import sleep, time
 import pandas as pd
 import empyrical as ec
@@ -25,7 +25,24 @@ import json
 
 
 # Decimal precision
-getcontext().prec = 28
+getcontext().prec = 64
+getcontext().Emax = 33
+getcontext().Emin = -33
+dec_con = getcontext()
+
+# Decimal constants
+dec_zero = dec_con.create_decimal('0E-16')
+dec_one = dec_con.create_decimal('1.0000000000000000')
+dec_eps = dec_con.create_decimal('1E-16')
+
+# Decimal vector operations
+dec_vec_div = np.vectorize(dec_con.divide)
+dec_vec_mul = np.vectorize(dec_con.multiply)
+dec_vec_sub = np.vectorize(dec_con.subtract)
+
+# Reward decimal context
+rew_con = Context(prec=64, Emax=33, Emin=-33)
+rew_quant = rew_con.create_decimal('0E-32')
 
 # Debug flag
 debug = True
@@ -54,7 +71,7 @@ class BacktestDataFeed(DataFeed):
     def returnCurrencies(self):
         if self.load_dir:
             try:
-                with open(self.load_dir+'/currencies.json') as file:
+                with open(self.load_dir + '/currencies.json') as file:
                     return json.load(file)
             except Exception as e:
                 print(str(e.__cause__) + str(e))
@@ -68,9 +85,15 @@ class BacktestDataFeed(DataFeed):
         self.data_length = None
         for pair in self.pairs:
             try:
-                self.ohlc_data[pair] = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
+                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
                                                                    start=start, end=end
                                                                   ))
+                # Get right values to fill nans
+                fill_dict = {col: ohlc_df.loc[ohlc_df.close.last_valid_index(), 'close'] for col in ['open', 'high', 'low', 'close']}
+                fill_dict.update({'volume': '0E-16'})
+
+                self.ohlc_data[pair] = ohlc_df
+
             except PoloniexError:
                 try:
                     symbols = pair.split('_')
@@ -211,7 +234,7 @@ class TradingEnvironment(Env):
         self.tapi = tapi
 
         # Environment configuration
-        self.epsilon = convert_to.decimal('1E-8')
+        self.epsilon = dec_zero
         self._obs_steps = None
         self._period = None
         self.pairs = []
@@ -489,88 +512,88 @@ class TradingEnvironment(Env):
             fees = self.tapi.returnFeeInfo()
 
             assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
-            return convert_to.decimal(fees[fee_type])
+            return dec_con.create_decimal(fees[fee_type])
 
         except Exception as e:
             self.logger.error(TradingEnvironment.get_fee, self.parse_error(e))
             raise e
 
     # High frequency getter
-    def get_pair_trades(self, pair, start=None, end=None):
-        # TODO WRITE TEST
-        # TODO FINISH THIS
-        try:
-            # Pool data from exchage
-            if isinstance(end, float):
-                data = self.tapi.marketTradeHist(pair, end=end)
-            else:
-                data = self.tapi.marketTradeHist(pair)
-            df = pd.DataFrame.from_records(data)
-
-            # Get more data from exchange until have enough to make obs_steps rows
-            if isinstance(start, float):
-                while datetime.fromtimestamp(start) < \
-                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
-
-                    market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
-                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
-
-                    df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
-                    appended = False
-                    i = 0
-                    while not appended:
-                        try:
-                            df = df.append(df2.iloc[i:], verify_integrity=True)
-                            appended = True
-                        except ValueError:
-                            i += 1
-
-            else:
-                while datetime.strptime(df.date.iat[0], "%Y-%m-%d %H:%M:%S") - \
-                        timedelta(minutes=self.period * self.obs_steps) < \
-                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
-
-                    market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
-                        datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
-
-                    df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
-                    appended = False
-                    i = 0
-                    while not appended:
-                        try:
-                            df = df.append(df2.iloc[i:], verify_integrity=True)
-                            appended = True
-                        except ValueError:
-                            i += 1
-
-                return df
-
-        except Exception as e:
-            self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
-            raise e
-
-    def sample_trades(self, pair, start=None, end=None):
-        # TODO WRITE TEST
-        df = self.get_pair_trades(pair, start=start, end=end)
-
-        period = "%dmin" % self.period
-
-        # Sample the trades into OHLC data
-        df['rate'] = df['rate'].ffill().apply(convert_to.decimal, raw=True)
-        df['amount'] = df['amount'].apply(convert_to.decimal, raw=True)
-        df.index = df.date.apply(pd.to_datetime, raw=True)
-
-        # TODO REMOVE NANS
-        index = df.resample(period).first().index
-        out = pd.DataFrame(index=index)
-
-        out['open'] = convert_and_clean(df['rate'].resample(period).first())
-        out['high'] = convert_and_clean(df['rate'].resample(period).max())
-        out['low'] = convert_and_clean(df['rate'].resample(period).min())
-        out['close'] = convert_and_clean(df['rate'].resample(period).last())
-        out['volume'] = convert_and_clean(df['amount'].resample(period).sum())
-
-        return out
+    # def get_pair_trades(self, pair, start=None, end=None):
+    #     # TODO WRITE TEST
+    #     # TODO FINISH THIS
+    #     try:
+    #         # Pool data from exchage
+    #         if isinstance(end, float):
+    #             data = self.tapi.marketTradeHist(pair, end=end)
+    #         else:
+    #             data = self.tapi.marketTradeHist(pair)
+    #         df = pd.DataFrame.from_records(data)
+    #
+    #         # Get more data from exchange until have enough to make obs_steps rows
+    #         if isinstance(start, float):
+    #             while datetime.fromtimestamp(start) < \
+    #                     datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
+    #
+    #                 market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
+    #                     datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
+    #
+    #                 df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
+    #                 appended = False
+    #                 i = 0
+    #                 while not appended:
+    #                     try:
+    #                         df = df.append(df2.iloc[i:], verify_integrity=True)
+    #                         appended = True
+    #                     except ValueError:
+    #                         i += 1
+    #
+    #         else:
+    #             while datetime.strptime(df.date.iat[0], "%Y-%m-%d %H:%M:%S") - \
+    #                     timedelta(minutes=self.period * self.obs_steps) < \
+    #                     datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S"):
+    #
+    #                 market_data = self.tapi.marketTradeHist(pair, end=datetime.timestamp(
+    #                     datetime.strptime(df.date.iat[-1], "%Y-%m-%d %H:%M:%S")))
+    #
+    #                 df2 = pd.DataFrame.from_records(market_data).set_index('globalTradeID')
+    #                 appended = False
+    #                 i = 0
+    #                 while not appended:
+    #                     try:
+    #                         df = df.append(df2.iloc[i:], verify_integrity=True)
+    #                         appended = True
+    #                     except ValueError:
+    #                         i += 1
+    #
+    #             return df
+    #
+    #     except Exception as e:
+    #         self.logger.error(TradingEnvironment.get_pair_trades, self.parse_error(e))
+    #         raise e
+    #
+    # def sample_trades(self, pair, start=None, end=None):
+    #     # TODO WRITE TEST
+    #     df = self.get_pair_trades(pair, start=start, end=end)
+    #
+    #     period = "%dmin" % self.period
+    #
+    #     # Sample the trades into OHLC data
+    #     df['rate'] = df['rate'].ffill().apply(convert_to.decimal, raw=True)
+    #     df['amount'] = df['amount'].apply(convert_to.decimal, raw=True)
+    #     df.index = df.date.apply(pd.to_datetime, raw=True)
+    #
+    #     # TODO REMOVE NANS
+    #     index = df.resample(period).first().index
+    #     out = pd.DataFrame(index=index)
+    #
+    #     out['open'] = convert_and_clean(df['rate'].resample(period).first())
+    #     out['high'] = convert_and_clean(df['rate'].resample(period).max())
+    #     out['low'] = convert_and_clean(df['rate'].resample(period).min())
+    #     out['close'] = convert_and_clean(df['rate'].resample(period).last())
+    #     out['volume'] = convert_and_clean(df['amount'].resample(period).sum())
+    #
+    #     return out
 
     # Low frequency getter
     def get_ohlc(self, symbol, index):
@@ -601,7 +624,7 @@ class TradingEnvironment(Env):
         # TODO: FIND A BETTER PERFORMANCE METHOD
         last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
         fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
-        fill_dict.update({'volume': '0E-8'})
+        fill_dict.update({'volume': '0E-16'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
@@ -754,7 +777,7 @@ class TradingEnvironment(Env):
         :param timestamp: datetime.datetime:
         :return: Decimal: Portfolio value in fiat units
         """
-        portval = convert_to.decimal('0E-8')
+        portval = dec_zero
 
         for symbol in self._crypto:
             portval = self.get_crypto(symbol).fma(self.get_open_price(symbol, timestamp), portval)
@@ -772,7 +795,7 @@ class TradingEnvironment(Env):
         if symbol == self._fiat:
             return safe_div(self.fiat, portval)
         else:
-            return safe_div(self.get_crypto(symbol) * self.get_open_price(symbol), portval)
+            return safe_div(dec_con.multiply(self.get_crypto(symbol), self.get_open_price(symbol)), portval)
 
     def calc_portfolio_vector(self):
         """
@@ -795,24 +818,24 @@ class TradingEnvironment(Env):
         try:
             action = convert_to.decimal(action)
             # normalize
-            if action.sum() != convert_to.decimal('1.00000000'):
+            if action.sum() != dec_one:
                 action = safe_div(action, action.sum())
 
-            action[-1] += convert_to.decimal('1.00000000') - action.sum()
+            action[-1] += dec_one - action.sum()
 
-            assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
+            assert action.sum() - dec_one < dec_eps
             return action
 
         except AssertionError:
             action = safe_div(action, action.sum())
-            action[-1] += convert_to.decimal('1.00000000') - action.sum()
+            action[-1] += dec_one - action.sum()
             try:
-                assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
+                assert action.sum() - dec_one < dec_eps
                 return action
             except AssertionError:
                 action = safe_div(action, action.sum())
-                action[-1] += convert_to.decimal('1.00000000') - action.sum()
-                assert action.sum() - convert_to.decimal('1.00000000') < convert_to.decimal('1e-8')
+                action[-1] += dec_one - action.sum()
+                assert action.sum() - dec_one < dec_eps
                 return action
 
         except Exception as e:
@@ -852,7 +875,7 @@ class TradingEnvironment(Env):
         try:
             i = -1
             portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
-            while not convert_to.decimal(portval).is_finite():
+            while not dec_con.create_decimal(portval).is_finite():
                 i -= 1
                 portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
 
@@ -881,17 +904,27 @@ class TradingEnvironment(Env):
         # return port_return - bench_return
 
         # Regret
-        price = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
-        price_relative = np.append(price[-1] / (price[-2]), [Decimal('1.00000000')])
-        constrained_price_change = price_relative / price_relative.max()
+        pr = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
+        pr = np.append(safe_div(pr[-1], pr[-2]), [dec_one])
+        pr_max = pr.max()
+        pr = safe_div(pr, pr_max)
 
-        port_log_return = Decimal.ln(np.dot(self.action_df.iloc[-1].values[:-1], constrained_price_change))
+        # port_log_return = rew_con.log10(np.dot(convert_to.decimal(self.action_df.iloc[-1].values[:-1]), pr))
+        try:
+            port_change = safe_div(self.portfolio_df.get_value(self.portfolio_df.index[-1], 'portval'),
+                                   self.portfolio_df.get_value(self.portfolio_df.index[-2], 'portval'))
+        except IndexError:
+            port_change = dec_one
+
+        port_log_return = rew_con.log10(safe_div(port_change, pr_max))
+
         n_pairs = len(self.pairs)
-        bench_action_vec = np.append(np.ones(n_pairs, dtype=np.dtype(Decimal)) / convert_to.decimal(n_pairs), [Decimal('0E-8')])
+        bench_action_vec = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
+                                     dec_con.create_decimal(n_pairs)), [dec_zero])
 
-        bench_log_return = Decimal.ln(np.dot(bench_action_vec, constrained_price_change))
+        bench_log_return = rew_con.log10(np.dot(bench_action_vec, pr))
 
-        return port_log_return - bench_log_return
+        return rew_con.subtract(port_log_return, bench_log_return).quantize(dec_zero)
 
     def simulate_trade(self, action, timestamp):
         """
@@ -912,25 +945,25 @@ class TradingEnvironment(Env):
             self.log_action_vector(timestamp, action, False)
 
             # Calculate position change given action
-            posit_change = (action - self.calc_portfolio_vector())[:-1]
+            posit_change = dec_vec_sub(action, self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
             portval = self.calc_total_portval()
 
             # Sell assets first
             for i, change in enumerate(posit_change):
-                if change < convert_to.decimal('0E-8'):
+                if change < dec_zero:
 
                     symbol = self.symbols[i]
 
-                    crypto_pool = safe_div(portval * action[i], self.get_open_price(symbol))
+                    crypto_pool = safe_div(dec_con.multiply(portval, action[i]), self.get_open_price(symbol))
 
                     with localcontext() as ctx:
                         ctx.rounding = ROUND_UP
 
-                        fee = portval * change.copy_abs() * self.tax[symbol]
+                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), self.tax[symbol])
 
-                    self.fiat = {self._fiat: self.fiat + portval.fma(change.copy_abs(), -fee), 'timestamp': timestamp}
+                    self.fiat = {self._fiat: dec_con.add(self.fiat, portval.fma(change.copy_abs(), -fee)), 'timestamp': timestamp}
 
                     self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
@@ -939,21 +972,22 @@ class TradingEnvironment(Env):
 
             # Then buy some goods
             for i, change in enumerate(posit_change):
-                if change > convert_to.decimal('0E-8'):
+                if change > dec_zero:
 
                     symbol = self.symbols[i]
 
-                    self.fiat = {self._fiat: self.fiat - portval * change.copy_abs(), 'timestamp': timestamp}
+                    self.fiat = {self._fiat: dec_con.subtract(self.fiat, dec_con.multiply(portval, change.copy_abs())),
+                                 'timestamp': timestamp}
 
                     # if fiat_pool is negative, deduce it from portval and clip
-                    if self.fiat < convert_to.decimal('0E-8'):
+                    if self.fiat < dec_zero:
                         portval += self.fiat
-                        self.fiat = {self._fiat: convert_to.decimal('0E-8'), 'timestamp': timestamp}
+                        self.fiat = {self._fiat: dec_zero, 'timestamp': timestamp}
 
                     with localcontext() as ctx:
                         ctx.rounding = ROUND_UP
 
-                        fee = self.tax[symbol] * portval * change
+                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), self.tax[symbol])
 
                     crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_open_price(symbol))
 
@@ -1570,14 +1604,14 @@ class LiveTradingEnvironment(TradingEnvironment):
         :param timestamp: For compatibility only
         :return: Decimal: Total portfolio value in fiat units
         """
-        portval = convert_to.decimal('0E-8')
+        portval = dec_zero
         balance = self.get_balance()
         if not ticker:
             ticker = self.tapi.returnTicker()
         for pair in self.pairs:
             portval = balance[pair.split('_')[1]].fma(convert_to.decimal(ticker[pair]['last']),
                                                       portval)
-        portval += balance[self._fiat]
+        portval = dec_con.add(portval, balance[self._fiat])
 
         return convert_to.decimal(portval)
 
@@ -1592,8 +1626,8 @@ class LiveTradingEnvironment(TradingEnvironment):
             ticker = self.tapi.returnTicker()
         balance = self.get_balance()
         for i, pair in enumerate(self.pairs):
-            portfolio[i] = safe_div(balance[pair.split('_')[1]] *
-                                    convert_to.decimal(ticker[pair]['last']),  portval)
+            portfolio[i] = safe_div(dec_con.multiply(balance[pair.split('_')[1]],
+                                    convert_to.decimal(ticker[pair]['last'])),  portval)
 
         portfolio[-1] = safe_div(balance[self._fiat], portval)
 
@@ -1610,10 +1644,10 @@ class LiveTradingEnvironment(TradingEnvironment):
         if not ticker:
             ticker = self.tapi.returnTicker()
         for i, pair in enumerate(self.pairs):
-            desired_balance[i] = safe_div(portval * action[i],
-                                          convert_to.decimal(ticker[pair]['last']))
-            fiat -= portval * action[i]
-        desired_balance[-1] = convert_to.decimal(fiat)
+            desired_balance[i] = safe_div(dec_con.multiply(portval , action[i]),
+                                          dec_con.create_decimal(ticker[pair]['last']))
+            fiat = dec_con.subtract(fiat, dec_con.multiply(portval, action[i]))
+        desired_balance[-1] = dec_con.create_decimal(fiat)
 
         return desired_balance
 
@@ -1752,11 +1786,11 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Calculate position change given last porftolio and action vector
             ticker = self.tapi.returnTicker()
-            balance_change = (self.get_desired_balance_array(action, ticker) - self.get_balance_array())[:-1]
+            balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
 
             # Sell assets first
             for i, change in enumerate(balance_change):
-                if change < 0:
+                if change < dec_zero:
                     symbol = self.symbols[i]
                     resp = self.immediate_sell(symbol, abs(change))
                     if not done and resp and not self.status['NotEnoughFiat']:
@@ -1767,7 +1801,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Then, buy what you want
             for i, change in enumerate(balance_change):
-                if change > 0:
+                if change > dec_zero:
                     symbol = self.symbols[i]
                     resp = self.immediate_buy(symbol, abs(change))
                     if not done and resp and not self.status['NotEnoughFiat']:
