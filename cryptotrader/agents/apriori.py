@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from scipy.signal import argrelextrema
 
-
+# Base class
 class APrioriAgent(Agent):
     """
     Cryptocurrency trading abstract agent
@@ -332,9 +332,10 @@ class APrioriAgent(Agent):
 
                     # sleep((env.period * 60 + 1) / 8)
                     try:
-                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period)) - datetime.timestamp(env.timestamp))
+                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
+                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 10)
                     except:
-                        sleep(1)
+                        sleep(1 + np.random.random(1) * 3)
 
                 except Exception as e:
                     print("\nAgent Error:",
@@ -371,7 +372,7 @@ class APrioriAgent(Agent):
         :param reward:
         :return:
         """
-        msg = "\n>> Step {0}\nPortval: {1}\nReward: {2}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.3f}\nReward: {2:.6f}\nAction time: {3}\n\nTstamp: {4}\nUptime: {5}\n".format(
             self.step,
             env.calc_total_portval(),
             reward,
@@ -417,7 +418,7 @@ class APrioriAgent(Agent):
         for symbol in la:
             msg += str(symbol) + ": " + la[symbol] + '\n'
 
-        msg += "\nSlippage pct\n"
+        msg += "\nSlippage pct:\n"
         try:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).astype(str).to_dict()
         except IndexError:
@@ -630,7 +631,7 @@ class MomentumTrader(APrioriAgent):
     def __repr__(self):
         return "MomentumTrader"
 
-    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1.], mean_type='kama', sensitivity=0.1,
+    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
                  activation=simplex_proj, fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -642,6 +643,11 @@ class MomentumTrader(APrioriAgent):
         self.weights = weights
         self.sensitivity = sensitivity
         self.activation = activation
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
 
     def get_ma(self, df):
         if self.mean_type == 'exp':
@@ -716,7 +722,7 @@ class MomentumTrader(APrioriAgent):
                 action[-1] = 0
                 return array_normalize(action)
             else:
-                prev_posit = self.get_portfolio_vector(obs, index=-2)
+                prev_posit = self.get_portfolio_vector(obs, index=self.reb)
                 factor = self.predict(obs)
                 return self.update(prev_posit, factor)
 
@@ -945,7 +951,7 @@ class PAMRTrader(APrioriAgent):
     def __repr__(self):
         return "PAMRTrader"
 
-    def __init__(self, sensitivity=0.03, alpha=4, C=2444, variant="PAMR1", fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
@@ -954,7 +960,6 @@ class PAMRTrader(APrioriAgent):
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
-        self.alpha = alpha
         self.C = C
         self.variant = variant
 
@@ -1129,12 +1134,16 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.03, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, rebalance=True, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
 
     def predict(self, obs):
         """
@@ -1167,7 +1176,7 @@ class STMRTrader(APrioriAgent):
             action[-1] = 0
             return array_normalize(action)
         else:
-            prev_posit = self.get_portfolio_vector(obs, index=-2)
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
 
