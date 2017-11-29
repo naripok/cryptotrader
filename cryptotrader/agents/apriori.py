@@ -202,7 +202,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
                                                                             nb_steps * 1000,
-                                                                            reward),
+                                                                            float(reward)),
                               end="\r")
                         t0 = time()
 
@@ -426,9 +426,9 @@ class APrioriAgent(Agent):
                     # Wait for next bar open
                     try:
                         sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 5))
+                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 30))
                     except ValueError:
-                        sleep(1 + int(np.random.random(1) * 5))
+                        sleep(1 + int(np.random.random(1) * 30))
 
                 # If you've done enough tries, cancel action and wait for the next bar
                 except RetryException as e:
@@ -508,14 +508,14 @@ class APrioriAgent(Agent):
 
         # Prices summary
         msg += "\nPrices summary:\n"
-        msg += "           Prev open:      Last price:        Pct change:\n"
+        msg += "           Prev open:    Last price:    Pct change:\n"
         for symbol in env.pairs:
 
             pp = obs.get_value(obs.index[-2], (symbol, 'open'))
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
 
-            msg += "%-9s: %11.5f     %11.5f     %11.5f\n" % (symbol, pp, nep, pc)
+            msg += "%-9s: %11.4f   %11.4f %11.2f" % (symbol, pp, nep, pc) + " %\n"
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -524,15 +524,21 @@ class APrioriAgent(Agent):
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:   Action:\n"
+        msg += "        Prev action:  Action:      Action diff:\n"
+        adm = 0.0
+        k = 0
         for symbol in pa:
             if symbol is not "online":
-                pac = float(pa[symbol])
-                nac = float(la[symbol])
+                pac = 100 * float(pa[symbol])
+                nac = 100 * float(la[symbol])
+                ad = 100 * (nac - pac)
+                adm += float(ad)
+                k += 1
 
-                msg += "%-6s: %.04f         %.04f\n" % (symbol, pac, nac)
+                msg += "%-6s:  %5.02f          %5.02f       %5.02f" % (symbol, pac, nac, ad) + " %\n"
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
+        msg += "Mean pct change: %5.02f\n" % (adm / k)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
@@ -1273,12 +1279,13 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.03, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, std_window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
+        self.std_window = std_window
         self.activation = activation
         if rebalance:
             self.reb = -2
@@ -1289,14 +1296,12 @@ class STMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        self.log['price_pct_change'] = {}
-
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1)
 
-        price_relative[-1] = 1
+        price_relative[-1] = 0
 
         return price_relative
 
@@ -1326,7 +1331,7 @@ class STMRTrader(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = (abs(portvar - 1) + max(abs(x - 1))) / 2
+        change = abs((portvar + x[np.argmax(abs(x))]) / 2)
 
         lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
