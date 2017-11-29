@@ -734,7 +734,6 @@ class ConstantRebalanceTrader(APrioriAgent):
         return factor
 
     def set_params(self, **kwargs):
-        print(kwargs)
         self.position = np.append(array_normalize(np.array([kwargs[key]
                                             for key in kwargs]))[:-1], [0.0])
 
