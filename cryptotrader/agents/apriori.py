@@ -15,14 +15,16 @@ from ..exchange_api.poloniex import PoloniexError, RetryException
 # Base class
 class APrioriAgent(Agent):
     """
-    Cryptocurrency trading abstract agent
-    Use this class with the Arena environment to deploy models directly into the market
-    params:
-    env: a instance of the Arena evironment
-    model: a instance of a sklearn/keras like model, with train and test methods
+    Apriori abstract trading agent.
+    Use this class to create trading strategies and deploy to Trading environment
+    to train and deploy models directly into the market
     """
-
     def __init__(self, fiat, name=""):
+        """
+
+        :param fiat: str: symbol to use as quote
+        :param name: str: agent name
+        """
         super().__init__()
         self.epsilon = 1e-16
         self.fiat = fiat
@@ -30,6 +32,7 @@ class APrioriAgent(Agent):
         self.name = name
         self.log = {}
 
+    # Model methods
     def predict(self, obs):
         """
         Select action on actual observation
@@ -67,6 +70,7 @@ class APrioriAgent(Agent):
 
         return port_vec
 
+    # Train methods
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
@@ -139,6 +143,7 @@ class APrioriAgent(Agent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
+            return 0.0
 
     def fit(self, env, nb_steps, batch_size, search_space, constrains=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
@@ -161,14 +166,56 @@ class APrioriAgent(Agent):
         :return: tuple: Optimal parameters, information about the optimization process
         """
         try:
-
-            if verbose:
-                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
-
+            # Initialize train
             i = 0
             t0 = time()
             env.training = True
 
+            if verbose:
+                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
+
+            ## First, optimize benchmark
+            hindsight = env.get_observation().xs('open', level=1, axis=1).rolling(2).apply(lambda x: x[-1] / x[-2]).astype('f').values
+
+            # Define constrains
+            bench_constrains = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+
+            # Define benchmark optimization routine
+            @ot.constraints.constrained(bench_constrains)
+            @ot.constraints.violations_defaulted(-10)
+            def find_bench(**kwargs):
+                try:
+                    # Init variables
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight
+                    benchmark = array_normalize(np.array([kwargs[key] for key in kwargs])[:-1])
+
+                    # Calculate reward
+                    reward = np.dot(hindsight, benchmark)[1:].prod()
+
+                    return reward
+
+                except KeyboardInterrupt:
+                    raise ot.api.fun.MaximumEvaluationsException(0)
+
+            # Define search space
+            n_assets = len(env.symbols)
+            bench_search_space = {str(i): j for i,j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
+
+            print("Optimizing benchmark...")
+
+            # Call optimizer to benchmark
+            BCR, info, _ = ot.maximize_structured(find_bench,
+                                              num_evals=int(nb_steps * 100),
+                                              search_space=bench_search_space
+                                              )
+
+            env.benchmark = np.array([BCR[key] for key in BCR], dtype='f')
+
+            ## Now optimize model w.r.t benchmark
+            i = 0
+            t0 = time()
+
+            # First define optimization constrains
             # Ex constrain:
             # @ot.constraints.constrained([lambda mean_type,
             #         ma1,
@@ -180,20 +227,24 @@ class APrioriAgent(Agent):
             if not constrains:
                 constrains = [lambda *args, **kwargs: True]
 
+            # Then, define optimization routine
             @ot.constraints.constrained(constrains)
             @ot.constraints.violations_defaulted(-100)
             def find_hp(**kwargs):
                 try:
+                    # Init variables
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
+                    # Sample params
                     self.set_params(**kwargs)
 
-                    batch_reward = []
+                    # Try model for a batch
+                    batch_reward = 0
                     for batch in range(batch_size):
                         # Reset env
                         env.reset_status()
                         env.reset(reset_dfs=True)
-                        # run test on the main process
+                        # sample environment
                         r = self.test(env,
                                         nb_episodes=1,
                                         action_repetition=action_repetition,
@@ -204,24 +255,28 @@ class APrioriAgent(Agent):
                                         start_step_policy=start_step_policy,
                                         verbose=False)
 
-                        batch_reward.append(r)
+                        # Accumulate reward
+                        batch_reward += r
 
+                    # Increment step counter
                     i += 1
+
+                    # Update progress
                     if verbose:
-                        try:
-                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
-                                                                                nb_steps,
-                                                                                sum(batch_reward) / batch_size,
-                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                                  end="\r")
-                            t0 = time()
-                        except TypeError:
-                            raise ot.api.fun.MaximumEvaluationsException(0)
-                    return sum(batch_reward) / batch_size
+                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
+                                                                            nb_steps,
+                                                                            batch_reward / batch_size,
+                                                                            str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
+                              end="\r")
+                        t0 = time()
+
+                    # Average rewards and return
+                    return batch_reward / batch_size
 
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
+            # Define params search space
             # Ex search space:
             #
             # hp = {
@@ -238,24 +293,31 @@ class APrioriAgent(Agent):
             #                              }
             #                 }
 
+            print("\nOptimizing model...")
+
+            # Call optimizer
             opt_params, info, _ = ot.maximize_structured(find_hp,
                                               num_evals=nb_steps,
                                               search_space=search_space
                                               )
 
+            # Update model params with optimal
             self.set_params(**opt_params)
+
+            # Set flag off
             env.training = False
+
+            # Return optimal params and information
             return opt_params, info
 
         except KeyboardInterrupt:
+
+            # If interrupted, clean after yourself
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
-        # except KeyError:
-        #     env.training = False
-        #     print("\nOptimization interrupted by user.")
-        #     return None, None
 
+    # Trade methods
     def trade(self, env, start_step=0, act_now=False, timeout=None, verbose=False, render=False, email=False, save_dir="./"):
         """
         TRADE REAL ASSETS WITHIN EXCHANGE. USE AT YOUR OWN RISK!
@@ -733,7 +795,7 @@ class MomentumTrader(APrioriAgent):
         lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
         # update portfolio
-        b = b + lam * (x - x_mean)
+        b = b - lam * (x - x_mean)
 
         # Log values
         self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100

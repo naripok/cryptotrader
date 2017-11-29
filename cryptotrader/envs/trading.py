@@ -5,7 +5,7 @@ author: Tau
 """
 from ..core import Env, ExchangeConnection, DataFeed
 from ..spaces import *
-from ..utils import Logger, safe_div, floor_datetime
+from ..utils import Logger, safe_div, floor_datetime, array_normalize
 from .utils import *
 
 import os
@@ -274,6 +274,11 @@ class TradingEnvironment(Env):
         self.add_pairs(self.tapi.pairs)
         self.fiat = fiat
 
+        n_pairs = len(self.pairs)
+        self.benchmark = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
+                                     dec_con.create_decimal(n_pairs)), [dec_zero])
+
+
     ## Env properties
     @property
     def obs_steps(self):
@@ -447,6 +452,14 @@ class TradingEnvironment(Env):
         except Exception as e:
             self.logger.error(TradingEnvironment.portval, self.parse_error(e))
             raise e
+
+    @property
+    def benchmark(self):
+        return self._benchmark
+
+    @benchmark.setter
+    def benchmark(self, vector):
+        self._benchmark = self.assert_action(vector)
 
     def add_pairs(self, *args):
         """
@@ -918,11 +931,7 @@ class TradingEnvironment(Env):
 
         port_log_return = rew_con.log10(safe_div(port_change, pr_max))
 
-        n_pairs = len(self.pairs)
-        bench_action_vec = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
-                                     dec_con.create_decimal(n_pairs)), [dec_zero])
-
-        bench_log_return = rew_con.log10(np.dot(bench_action_vec, pr))
+        bench_log_return = rew_con.log10(np.dot(self.benchmark, pr))
 
         return rew_con.subtract(port_log_return, bench_log_return).quantize(dec_zero)
 
