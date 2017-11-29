@@ -794,7 +794,7 @@ class TradingEnvironment(Env):
 
         for symbol in self._crypto:
             portval = self.get_crypto(symbol).fma(self.get_open_price(symbol, timestamp), portval)
-        portval += self.fiat
+        portval = dec_con.add(self.fiat, portval)
 
         return portval
 
@@ -925,7 +925,7 @@ class TradingEnvironment(Env):
         # port_log_return = rew_con.log10(np.dot(convert_to.decimal(self.action_df.iloc[-1].values[:-1]), pr))
         try:
             port_change = safe_div(self.portfolio_df.get_value(self.portfolio_df.index[-1], 'portval'),
-                                   self.portfolio_df.get_value(self.portfolio_df.index[-2], 'portval'))
+                               self.portfolio_df.get_value(self.portfolio_df.index[-2], 'portval'))
         except IndexError:
             port_change = dec_one
 
@@ -1472,9 +1472,6 @@ class BacktestEnvironment(TradingEnvironment):
 
     def step(self, action):
         try:
-            # Get reward for previous action
-            reward = self.get_reward()
-
             # Get step timestamp
             timestamp = self.timestamp
 
@@ -1489,6 +1486,9 @@ class BacktestEnvironment(TradingEnvironment):
                 self.status["OOD"] += 1
             else:
                 done = False
+
+            # Get reward for previous action
+            reward = self.get_reward()
 
                 # Get new index
             self.index += 1
@@ -1545,9 +1545,6 @@ class PaperTradingEnvironment(TradingEnvironment):
 
     def step(self, action):
         try:
-            # Get reward for previous action
-            reward = self.get_reward()
-
             # Get step timestamp
             timestamp = self.timestamp
 
@@ -1555,6 +1552,9 @@ class PaperTradingEnvironment(TradingEnvironment):
             self.simulate_trade(action, timestamp)
 
             done = True
+
+            # Get reward for previous action
+            reward = self.get_reward()
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
@@ -1871,14 +1871,14 @@ class LiveTradingEnvironment(TradingEnvironment):
 
     def step(self, action):
         try:
-            # Get reward for previous action
-            reward = self.get_reward()
-
             # Get step timestamp
             timestamp = self.timestamp
 
             # Simulate portifolio rebalance
             done = self.online_rebalance(action, timestamp)
+
+            # Get reward for previous action
+            reward = self.get_reward()
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
