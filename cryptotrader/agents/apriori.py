@@ -12,6 +12,9 @@ from datetime import timedelta
 from scipy.signal import argrelextrema
 from ..exchange_api.poloniex import PoloniexError, RetryException
 
+# TODO LIST
+# HEADING
+
 # Base class
 class APrioriAgent(Agent):
     """
@@ -719,7 +722,7 @@ class ConstantRebalanceTrader(APrioriAgent):
             self.position = False
 
     def predict(self, obs):
-        if not self.position:
+        if not isinstance(self.position, np.ndarray):
             n_symbols = obs.columns.levels[0].shape[0]
             self.position = array_normalize(np.ones(n_symbols - 1))
             self.position = np.append(self.position, [0.0])
@@ -731,7 +734,9 @@ class ConstantRebalanceTrader(APrioriAgent):
         return factor
 
     def set_params(self, **kwargs):
-        self.position = array_normalize(np.array([kwargs[key] for key in kwargs])[:-1])
+        print(kwargs)
+        self.position = np.append(array_normalize(np.array([kwargs[key]
+                                            for key in kwargs]))[:-1], [0.0])
 
 
 # Momentum
