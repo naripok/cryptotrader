@@ -475,6 +475,7 @@ class APrioriAgent(Agent):
         :return:
         """
 
+        # Portfolio values
         try:
             init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
             prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
@@ -482,6 +483,7 @@ class APrioriAgent(Agent):
         except IndexError:
             init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
 
+        # Returns summary
         msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
             self.step,
             last_portval,
@@ -489,50 +491,50 @@ class APrioriAgent(Agent):
             episode_reward,
             )
 
-        msg += "\nStep portfolio percent change: %f" % (float(
+        msg += "\nStep portfolio change: %f" % (float(
             100 * (last_portval - prev_portval) / (prev_portval + 1e-16)
-            )) + " %\n"
+            )) + " %"
 
-        msg += "\nTotal portfolio percent change: %f" % (float(
+        msg += "\nAccumulated portfolio change: %f" % (float(
             100 * (last_portval - init_portval) / (init_portval + 1e-16)
             )) + " %\n"
 
+        # Time summary
         msg += "\nAction time: {0}\nTstamp: {1}\nUptime: {2}\n".format(
             datetime.now(),
             str(obs.index[-1]),
             str(pd.to_timedelta(time() - t0, unit='s'))
             )
 
-        for key in self.log:
-            if isinstance(self.log[key], dict):
-                msg += '\n' + str(key) + '\n'
-                for subkey in self.log[key]:
-                    msg += str(subkey) + ": " + str(self.log[key][subkey]) + '\n'
-            else:
-                msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
-
-        msg += "\nCrypto prices:\n"
+        # Prices summary
+        msg += "\nPrices summary:\n"
+        msg += "           Prev open:      Last price:        Pct change:\n"
         for symbol in env.pairs:
-            msg += "%s: %.06f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
 
-        # msg += "\nPortfolio:\n"
-        # port = env.portfolio_df.iloc[-1].astype(str).to_dict()
-        # for symbol in port:
-        #     msg += str(symbol) + ": " + port[symbol] + '\n'
+            pp = obs.get_value(obs.index[-2], (symbol, 'open'))
+            nep = obs.get_value(obs.index[-1], (symbol, 'close'))
+            pc = 100 * safe_div((nep - pp), pp)
 
+            msg += "%-9s: %11.5f     %11.5f     %11.5f\n" % (symbol, pp, nep, pc)
+
+        # Action summary
         msg += "\nAction Summary:\n"
         try:
-            pa = env.action_df.iloc[-2].astype(str).to_dict()
+            pa = env.action_df.iloc[-3].astype(str).to_dict()
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:   Last action:\n"
+        msg += "        Prev action:   Action:\n"
         for symbol in pa:
             if symbol is not "online":
-                msg += "%-6s: %.04f         %.04f\n" % (symbol, float(pa[symbol]), float(la[symbol]))
+                pac = float(pa[symbol])
+                nac = float(la[symbol])
+
+                msg += "%-6s: %.04f         %.04f\n" % (symbol, pac, nac)
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
 
+        # Slippage summary
         msg += "\nSlippage summary:\n"
         try:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).drop('online').astype('f').\
@@ -544,7 +546,17 @@ class APrioriAgent(Agent):
             if symbol is not 'count':
                 msg += str(symbol) + ": " + sl[symbol] + '\n'
 
+        # Operational status summary
         msg += "\nStatus: %s\n" % str(env.status)
+
+        # Strategy log summary
+        for key in self.log:
+            if isinstance(self.log[key], dict):
+                msg += '\n' + str(key) + '\n'
+                for subkey in self.log[key]:
+                    msg += str(subkey) + ": " + str(self.log[key][subkey]) + '\n'
+            else:
+                msg += '\n' + str(key) + ": " + str(self.log[key]) + '\n'
 
         return msg
 
@@ -1284,10 +1296,6 @@ class STMRTrader(APrioriAgent):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
                                              (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
 
-            # Log values
-            self.log['price_pct_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
-                                                                        (price_relative[key] + self.epsilon)) - 1))})
-
         price_relative[-1] = 1
 
         return price_relative
@@ -1324,9 +1332,6 @@ class STMRTrader(APrioriAgent):
 
         # update portfolio
         b = b + lam * (x - x_mean)
-
-        # Log values
-        self.log['mean_pct_change'] = ((1 / x[:-1]).mean() - 1) * 100
 
         # project it onto simplex
         return self.activation(b)
