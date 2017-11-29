@@ -515,7 +515,7 @@ class APrioriAgent(Agent):
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
 
-            msg += "%-9s: %11.5f   %11.5f %11.5f" % (symbol, pp, nep, pc) + " %\n"
+            msg += "%-9s: %11.4f   %11.4f %11.2f" % (symbol, pp, nep, pc) + " %\n"
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -525,15 +525,20 @@ class APrioriAgent(Agent):
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
         msg += "        Prev action:  Action:      Action diff:\n"
+        adm = 0.0
+        k = 0
         for symbol in pa:
             if symbol is not "online":
-                pac = float(pa[symbol])
-                nac = float(la[symbol])
-                ad = nac - pac
+                pac = 100 * float(pa[symbol])
+                nac = 100 * float(la[symbol])
+                ad = 100 * (nac - pac)
+                adm += float(ad)
+                k += 1
 
-                msg += "%-6s: %.04f        %.04f       %7.04f" % (symbol, pac, nac, ad) + " %\n"
+                msg += "%-6s:  %5.02f          %5.02f       %5.02f" % (symbol, pac, nac, ad) + " %\n"
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
+        msg += "Mean pct change: %5.02f\n" % (adm / k)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
@@ -1274,12 +1279,13 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.03, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, std_window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
+        self.std_window = std_window
         self.activation = activation
         if rebalance:
             self.reb = -2
@@ -1293,9 +1299,9 @@ class STMRTrader(APrioriAgent):
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1)
 
-        price_relative[-1] = 1
+        price_relative[-1] = 0
 
         return price_relative
 
@@ -1325,7 +1331,7 @@ class STMRTrader(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = (abs(portvar - 1) + max(abs(x - 1))) / 2
+        change = abs((portvar + x[np.argmax(abs(x))]) / 2)
 
         lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
