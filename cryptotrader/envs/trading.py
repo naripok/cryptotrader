@@ -271,9 +271,7 @@ class TradingEnvironment(Env):
         self.add_pairs(self.tapi.pairs)
         self.fiat = fiat
 
-        n_pairs = len(self.pairs)
-        self.benchmark = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
-                                     dec_con.create_decimal(n_pairs)), [dec_zero])
+        self.reset_benchmark()
 
 
     ## Env properties
@@ -457,6 +455,11 @@ class TradingEnvironment(Env):
     @benchmark.setter
     def benchmark(self, vector):
         self._benchmark = self.assert_action(vector)
+
+    def reset_benchmark(self):
+        n_pairs = len(self.pairs)
+        self.benchmark = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
+                                     dec_con.create_decimal(n_pairs)), [dec_zero])
 
     def add_pairs(self, *args):
         """
