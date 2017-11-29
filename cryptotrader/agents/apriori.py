@@ -178,11 +178,11 @@ class APrioriAgent(Agent):
             hindsight = env.get_observation().xs('open', level=1, axis=1).rolling(2).apply(lambda x: x[-1] / x[-2]).astype('f').values
 
             # Define constrains
-            bench_constrains = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+            # bench_constrains = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
 
             # Define benchmark optimization routine
-            @ot.constraints.constrained(bench_constrains)
-            @ot.constraints.violations_defaulted(-10)
+            # @ot.constraints.constrained(bench_constrains)
+            # @ot.constraints.violations_defaulted(-10)
             def find_bench(**kwargs):
                 try:
                     # Init variables
@@ -192,6 +192,17 @@ class APrioriAgent(Agent):
                     # Calculate reward
                     reward = np.dot(hindsight, benchmark)[1:].prod()
 
+                    # Increment counter
+                    i += 1
+
+                    # Update progress
+                    if verbose:
+                        print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
+                                                                            nb_steps * 1000,
+                                                                            reward),
+                              end="\r")
+                        t0 = time()
+
                     return reward
 
                 except KeyboardInterrupt:
@@ -200,17 +211,16 @@ class APrioriAgent(Agent):
             # Define search space
             n_assets = len(env.symbols)
             bench_search_space = {str(i): j for i,j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
-
             print("Optimizing benchmark...")
 
             # Call optimizer to benchmark
             BCR, info, _ = ot.maximize_structured(find_bench,
-                                              num_evals=int(nb_steps * 100),
+                                              num_evals=int(nb_steps * 1000),
                                               search_space=bench_search_space
                                               )
 
-            env.benchmark = np.array([BCR[key] for key in BCR], dtype='f')
-
+            env.benchmark = array_normalize(np.array([BCR[key] for key in BCR], dtype='f'))
+            print("\nBest Constant Rebalance portfolio found in %d optimization rounds:\n" % i, env.benchmark.astype(float))
             ## Now optimize model w.r.t benchmark
             i = 0
             t0 = time()
@@ -701,17 +711,27 @@ class ConstantRebalanceTrader(APrioriAgent):
     def __repr__(self):
         return "ContantRebalanceTrader"
 
-    def __init__(self, fiat="USDT"):
+    def __init__(self, position=None, fiat="USDT"):
         super().__init__(fiat)
+        if position:
+            self.position = array_normalize(position)
+        else:
+            self.position = False
 
     def predict(self, obs):
-        n_pairs = obs.columns.levels[0].shape[0]
-        action = array_normalize(np.ones(n_pairs - 1))
-        return np.append(action, [0.0])
+        if not self.position:
+            n_symbols = obs.columns.levels[0].shape[0]
+            self.position = array_normalize(np.ones(n_symbols - 1))
+            self.position = np.append(self.position, [0.0])
+
+        return self.position
 
     def rebalance(self, obs):
         factor = self.predict(obs)
         return factor
+
+    def set_params(self, **kwargs):
+        self.position = array_normalize(np.array([kwargs[key] for key in kwargs])[:-1])
 
 
 # Momentum
@@ -795,7 +815,7 @@ class MomentumTrader(APrioriAgent):
         lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
         # update portfolio
-        b = b - lam * (x - x_mean)
+        b = b + lam * (x - x_mean)
 
         # Log values
         self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
