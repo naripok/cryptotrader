@@ -1702,6 +1702,9 @@ class LiveTradingEnvironment(TradingEnvironment):
                     elif 'Not enough %s.' % symbol == error.__str__():
                         amount = self.get_balance()[symbol]
 
+                    elif 'Order execution timed out.' == error.__str__():
+                        amount = self.get_balance()[symbol]
+
                     else:
                         raise error
 
@@ -1764,6 +1767,9 @@ class LiveTradingEnvironment(TradingEnvironment):
 
                         else:
                             return False
+
+                    elif 'Order execution timed out.' == error.__str__():
+                        amount = self.get_balance()[symbol]
 
                     else:
                         raise error

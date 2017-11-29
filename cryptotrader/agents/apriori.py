@@ -202,7 +202,7 @@ class APrioriAgent(Agent):
                     if verbose:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
                                                                             nb_steps * 1000,
-                                                                            reward),
+                                                                            float(reward)),
                               end="\r")
                         t0 = time()
 
@@ -515,7 +515,7 @@ class APrioriAgent(Agent):
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
 
-            msg += "%-9s: %11.5f     %11.5f     %11.5f\n" % (symbol, pp, nep, pc)
+            msg += "%-9s: %11.5f     %11.5f     %11.5f" % (symbol, pp, nep, pc) + " %\n"
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -524,13 +524,14 @@ class APrioriAgent(Agent):
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:   Action:\n"
+        msg += "        Prev action:   Action:        Action diff:\n"
         for symbol in pa:
             if symbol is not "online":
                 pac = float(pa[symbol])
                 nac = float(la[symbol])
+                ad = nac - pac
 
-                msg += "%-6s: %.04f         %.04f\n" % (symbol, pac, nac)
+                msg += "%-6s: %.04f         %.04f         %6.04f" % (symbol, pac, nac, ad) + " %\n"
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
 
@@ -1289,8 +1290,6 @@ class STMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        self.log['price_pct_change'] = {}
-
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
