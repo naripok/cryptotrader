@@ -482,14 +482,11 @@ class APrioriAgent(Agent):
         except IndexError:
             init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
 
-        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n\nAction time: {4}\nTstamp: {5}\nUptime: {6}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
             self.step,
             last_portval,
             reward,
             episode_reward,
-            datetime.now(),
-            str(obs.index[-1]),
-            str(pd.to_timedelta(time() - t0, unit='s'))
             )
 
         msg += "\nStep portfolio percent change: %f" % (float(
@@ -499,6 +496,12 @@ class APrioriAgent(Agent):
         msg += "\nTotal portfolio percent change: %f" % (float(
             100 * (last_portval - init_portval) / (init_portval + 1e-16)
             )) + " %\n"
+
+        msg += "\nAction time: {0}\nTstamp: {1}\nUptime: {2}\n".format(
+            datetime.now(),
+            str(obs.index[-1]),
+            str(pd.to_timedelta(time() - t0, unit='s'))
+            )
 
         for key in self.log:
             if isinstance(self.log[key], dict):
@@ -510,26 +513,36 @@ class APrioriAgent(Agent):
 
         msg += "\nCrypto prices:\n"
         for symbol in env.pairs:
-            msg += "%s: %.08f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
+            msg += "%s: %.06f\n" % (symbol, obs.get_value(obs.index[-1], (symbol, 'close')))
 
-        msg += "\nPortfolio:\n"
-        port = env.portfolio_df.iloc[-1].astype(str).to_dict()
-        for symbol in port:
-            msg += str(symbol) + ": " + port[symbol] + '\n'
+        # msg += "\nPortfolio:\n"
+        # port = env.portfolio_df.iloc[-1].astype(str).to_dict()
+        # for symbol in port:
+        #     msg += str(symbol) + ": " + port[symbol] + '\n'
 
-        msg += "\nLast action:\n"
-        la = env.action_df.iloc[-1].astype(str).to_dict()
-        for symbol in la:
-            msg += str(symbol) + ": " + la[symbol] + '\n'
-
-        msg += "\nSlippage pct:\n"
+        msg += "\nAction Summary:\n"
         try:
-            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).astype(str).to_dict()
+            pa = env.action_df.iloc[-2].astype(str).to_dict()
         except IndexError:
-            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-1])).astype(str).to_dict()
+            pa = env.action_df.iloc[-1].astype(str).to_dict()
+        la = env.action_df.iloc[-1].astype(str).to_dict()
+        msg += "        Prev action:   Last action:\n"
+        for symbol in pa:
+            if symbol is not "online":
+                msg += "%-6s: %.04f         %.04f\n" % (symbol, float(pa[symbol]), float(la[symbol]))
+            else:
+                msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
+
+        msg += "\nSlippage summary:\n"
+        try:
+            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).drop('online').astype('f').\
+                describe(percentiles=[0.95]).astype(str).to_dict()
+        except IndexError:
+            sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-1])).drop('online').astype('f').\
+                describe(percentiles=[0.95]).astype(str).to_dict()
         for symbol in sl:
-            if symbol is not 'online':
-                msg += str(symbol) + ": " + sl[symbol] + " %" + '\n'
+            if symbol is not 'count':
+                msg += str(symbol) + ": " + sl[symbol] + '\n'
 
         msg += "\nStatus: %s\n" % str(env.status)
 
