@@ -89,7 +89,7 @@ class BacktestDataFeed(DataFeed):
                                                                    start=start, end=end
                                                                   ))
 
-                self.ohlc_data[pair] = ohlc_df.iloc[:-1]
+                self.ohlc_data[pair] = ohlc_df
 
             except PoloniexError:
                 try:
@@ -97,7 +97,7 @@ class BacktestDataFeed(DataFeed):
                     self.ohlc_data[pair] = self.pair_reciprocal(pd.DataFrame.from_records(
                         self.tapi.returnChartData(symbols[1] + '_' + symbols[0], period=self.period * 60,
                                                    start=start, end=end
-                                                  )).iloc[:-1])
+                                                  )))
                 except PoloniexError as e:
                     raise e
 

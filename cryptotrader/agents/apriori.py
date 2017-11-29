@@ -426,9 +426,9 @@ class APrioriAgent(Agent):
                     # Wait for next bar open
                     try:
                         sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 5))
+                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 30))
                     except ValueError:
-                        sleep(1 + int(np.random.random(1) * 5))
+                        sleep(1 + int(np.random.random(1) * 30))
 
                 # If you've done enough tries, cancel action and wait for the next bar
                 except RetryException as e:
@@ -508,14 +508,14 @@ class APrioriAgent(Agent):
 
         # Prices summary
         msg += "\nPrices summary:\n"
-        msg += "           Prev open:      Last price:        Pct change:\n"
+        msg += "           Prev open:    Last price:    Pct change:\n"
         for symbol in env.pairs:
 
             pp = obs.get_value(obs.index[-2], (symbol, 'open'))
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
 
-            msg += "%-9s: %11.5f     %11.5f     %11.5f" % (symbol, pp, nep, pc) + " %\n"
+            msg += "%-9s: %11.5f   %11.5f %11.5f" % (symbol, pp, nep, pc) + " %\n"
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -524,14 +524,14 @@ class APrioriAgent(Agent):
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:   Action:        Action diff:\n"
+        msg += "        Prev action:  Action:      Action diff:\n"
         for symbol in pa:
             if symbol is not "online":
                 pac = float(pa[symbol])
                 nac = float(la[symbol])
                 ad = nac - pac
 
-                msg += "%-6s: %.04f         %.04f         %6.04f" % (symbol, pac, nac, ad) + " %\n"
+                msg += "%-6s: %.04f        %.04f       %7.04f" % (symbol, pac, nac, ad) + " %\n"
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
 
