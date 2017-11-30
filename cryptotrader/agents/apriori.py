@@ -227,7 +227,7 @@ class APrioriAgent(Agent):
                     i += 1
 
                     # Update progress
-                    if verbose and i % 100 == 0:
+                    if verbose and i % 1000 == 0:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
                                                                             nb_steps * 1000,
                                                                             float(reward)),
