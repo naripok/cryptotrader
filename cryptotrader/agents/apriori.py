@@ -155,7 +155,7 @@ class APrioriAgent(Agent):
                                                                              int(100 * self.step / nb_max_episode_steps)))
             return 0.0
 
-    def fit(self, env, nb_steps, batch_size, search_space, constrains=None, action_repetition=1, callbacks=None, verbose=1,
+    def fit(self, env, nb_steps, batch_size, search_space, constraints=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None):
         """
@@ -184,29 +184,53 @@ class APrioriAgent(Agent):
             if verbose:
                 print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
 
-            ## First, optimize benchmark
-            hindsight = env.get_observation().xs('open', level=1, axis=1).rolling(2).apply(lambda x: x[-1] / x[-2]).astype('f').values
+            ### First, optimize benchmark
 
-            # Define constrains
-            # bench_constrains = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+            ## Acquire hindsight
 
-            # Define benchmark optimization routine
+            # Save env obs_steps
+            obs_steps = env.obs_steps
+
+            # Change it so you can recover all the data
+            env.obs_steps = env.tapi.data_length
+
+            # Pull the entire data set
+            hindsight = env.get_observation().xs('open', level=1,
+                            axis=1).rolling(2, min_periods=2).apply(lambda x: (x[-1] / x[-2])).dropna().astype('f')
+            hindsight['USDT'] = 1.0
+
+            hindsight = hindsight.apply(lambda x: x / x.max(), axis=1)
+
+            # Change env obs_steps back
+            env.obs_steps = obs_steps
+
+            ## Define params
+            # Constraints declaration
+            # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+
+            ## Define benchmark optimization routine
             # @ot.constraints.constrained(bench_constrains)
             # @ot.constraints.violations_defaulted(-10)
             def find_bench(**kwargs):
                 try:
                     # Init variables
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight
-                    benchmark = array_normalize(np.array([kwargs[key] for key in kwargs])[:-1])
 
-                    # Calculate reward
-                    reward = np.dot(hindsight, benchmark)[1:].prod()
-                    # TODO (1): CHECK REWARD
+                    # Best constant rebalance portfolio
+                    b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
+
+                    # Benchmark: Equally distributed constant rebalance portfolio
+                    ed_crp = array_normalize(np.append(np.ones(b_crp.shape[0] - 1), [0.0]))
+
+                    # Calculate regret
+                    reward = safe_div(np.log10(np.dot(hindsight, b_crp)).sum() -\
+                             np.log10(np.dot(hindsight, ed_crp)).sum(), np.dot(hindsight, b_crp).std())
+
                     # Increment counter
                     i += 1
 
                     # Update progress
-                    if verbose and i % 100 == 0:
+                    if verbose and i % 1000 == 0:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
                                                                             nb_steps * 1000,
                                                                             float(reward)),
@@ -218,7 +242,7 @@ class APrioriAgent(Agent):
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
 
-            # Define search space
+            # Search space declaration
             n_assets = len(env.symbols)
             bench_search_space = {str(i): j for i,j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
             print("Optimizing benchmark...")
@@ -226,7 +250,7 @@ class APrioriAgent(Agent):
             # Call optimizer to benchmark
             BCR, info, _ = ot.maximize_structured(
                                                   find_bench,
-                                                  num_evals=int(nb_steps * 100),
+                                                  num_evals=int(nb_steps * 1000),
                                                   search_space=bench_search_space
                                               )
 
@@ -247,11 +271,11 @@ class APrioriAgent(Agent):
             #         alpha_up,
             #         alpha_down: ma1 < ma2])
 
-            if not constrains:
-                constrains = [lambda *args, **kwargs: True]
+            if not constraints:
+                constraints = [lambda *args, **kwargs: True]
 
             # Then, define optimization routine
-            @ot.constraints.constrained(constrains)
+            @ot.constraints.constrained(constraints)
             @ot.constraints.violations_defaulted(-100)
             def find_hp(**kwargs):
                 try:
@@ -276,7 +300,7 @@ class APrioriAgent(Agent):
                                         verbose=False)
 
                         # Accumulate reward
-                        batch_reward += r
+                        batch_reward += r / env.portfolio_df.portval.astype('f').std()
 
                     # Increment step counter
                     i += 1
@@ -1317,8 +1341,7 @@ class STMRTrader(APrioriAgent):
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1) /\
-                                    reg
+                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1)
 
         price_relative[-1] = 0
 

@@ -90,9 +90,16 @@ def safe_div(x, y, eps=dec_eps):
 
 
 def floor_datetime(t, period):
-    t -= timedelta(minutes=t.minute % period,
-                      seconds=t.second,
-                      microseconds=t.microsecond)
+    if period > 60:
+        hours = t.hour % 2
+    else:
+        hours = 0
+
+    t -= timedelta(
+        hours=hours,
+        minutes=t.minute % period,
+        seconds=t.second,
+        microseconds=t.microsecond)
     return t
 
 
