@@ -196,7 +196,7 @@ class APrioriAgent(Agent):
 
             # Pull the entire data set
             hindsight = env.get_observation().xs('open', level=1,
-                            axis=1).rolling(2, min_periods=2).dropna().apply(lambda x: x[-1] / x[-2]).astype('f').values
+                            axis=1).rolling(2, min_periods=2).apply(lambda x: x[-1] / x[-2]).dropna().astype('f').values
 
             # Change env obs_steps back
             env.obs_steps = obs_steps
