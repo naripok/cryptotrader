@@ -247,7 +247,7 @@ class APrioriAgent(Agent):
             # Call optimizer to benchmark
             BCR, info, _ = ot.maximize_structured(
                                                   find_bench,
-                                                  num_evals=int(nb_steps * 100),
+                                                  num_evals=int(nb_steps * 1000),
                                                   search_space=bench_search_space
                                               )
 
