@@ -192,7 +192,7 @@ class APrioriAgent(Agent):
             obs_steps = env.obs_steps
 
             # Change it so you can recover all the data
-            env.obs_steps = env.tapi.data_lenght
+            env.obs_steps = env.tapi.data_length
 
             # Pull the entire data set
             hindsight = env.get_observation().xs('open', level=1,
