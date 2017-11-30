@@ -196,7 +196,9 @@ class APrioriAgent(Agent):
 
             # Pull the entire data set
             hindsight = env.get_observation().xs('open', level=1,
-                            axis=1).rolling(2, min_periods=2).apply(lambda x: x[-1] / x[-2]).dropna().astype('f').values
+                            axis=1).rolling(2, min_periods=2).apply(lambda x: (x[-1] / x[-2])).apply(lambda x: x /
+                                                                        x.max(), axis=1).dropna().astype('f')
+            hindsight['USDT'] = 1.0
 
             # Change env obs_steps back
             env.obs_steps = obs_steps
@@ -214,7 +216,7 @@ class APrioriAgent(Agent):
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight
 
                     # Best constant rebalance portfolio
-                    b_crp = array_normalize(np.array([kwargs[key] for key in kwargs])[:-1])
+                    b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
 
                     # Benchmark: Equally distributed constant rebalance portfolio
                     ed_crp = array_normalize(np.append(np.ones(b_crp.shape[0] - 1), [0.0]))

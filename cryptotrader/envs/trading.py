@@ -1090,11 +1090,21 @@ class TradingEnvironment(Env):
 
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
-            for symbol in self.pairs:
-                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
-                                            init_portval / (obs.get_value(init_time,
-                                            (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
+            for i, symbol in enumerate(self.pairs):
+                # self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
+                #                             init_portval / (obs.get_value(init_time,
+                #                             (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
+
+                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * \
+                                                    dec_con.create_decimal(self.benchmark[i]) *\
+                                                    obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
+                                                    (symbol, 'open')))
+
                 self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+
+            self.results[self._fiat + '_benchmark'] = dec_con.create_decimal(self.benchmark[-1]) * init_portval
+
+            self.results['benchmark'] = self.results['benchmark'] + self.results[self._fiat + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
