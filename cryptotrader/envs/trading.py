@@ -10,6 +10,7 @@ from .utils import *
 
 import os
 import smtplib
+from socket import gaierror
 from datetime import datetime, timedelta, timezone
 from decimal import getcontext, localcontext, ROUND_UP, Decimal, Context
 from time import sleep, time
@@ -1364,13 +1365,21 @@ class TradingEnvironment(Env):
             server.sendmail(FROM, TO, message)
             server.close()
 
+        # If we have no internet, wait five seconds and retry
+        except gaierror:
+            try:
+                sleep(5)
+                self.send_email(subject, body)
+            except gaierror as e:
+                # If there is no internet yet, log error and move on
+                self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
+
         except Exception as e:
             self.logger.error(TradingEnvironment.send_email, self.parse_error(e))
             if hasattr(self, 'email'):
                 self.send_email("Error sending email: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
-            raise e
 
 
 class BacktestEnvironment(TradingEnvironment):
@@ -1457,7 +1466,7 @@ class BacktestEnvironment(TradingEnvironment):
             if reset_dfs:
                 self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
                                               columns=list(self.symbols) + ['online'],
-                                              index=[self.timestamp])
+                                              index=[self.portfolio_df.index[0]])
 
             # Reset portfolio value
             self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
@@ -1856,9 +1865,6 @@ class LiveTradingEnvironment(TradingEnvironment):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
         ticker = self.tapi.returnTicker()
-        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector(ticker)) + [False]],
-                                      columns=list(self.symbols) + ['online'],
-                                      index=[self.timestamp])
 
         self.set_observation_space()
         self.set_action_space()
@@ -1869,6 +1875,10 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
 
         obs = self.get_observation(True)
+
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector(ticker)) + [False]],
+                                      columns=list(self.symbols) + ['online'],
+                                      index=[self.timestamp])
 
         self.portval = {'portval': self.calc_total_portval(ticker),
                         'timestamp': self.portfolio_df.index[-1]}
