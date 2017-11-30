@@ -559,10 +559,10 @@ class APrioriAgent(Agent):
         msg += "\nSlippage summary:\n"
         try:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).drop('online').astype('f').\
-                describe(percentiles=[0.95]).astype(str).to_dict()
+                describe(percentiles=[0.95, 0.05]).astype(str).to_dict()
         except IndexError:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-1])).drop('online').astype('f').\
-                describe(percentiles=[0.95]).astype(str).to_dict()
+                describe(percentiles=[0.95, 0.05]).astype(str).to_dict()
         for symbol in sl:
             if symbol is not 'count':
                 msg += str(symbol) + ": " + sl[symbol] + '\n'
