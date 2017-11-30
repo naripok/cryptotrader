@@ -90,6 +90,13 @@ class APrioriAgent(Agent):
             env.reset_status()
             obs = env.reset(reset_dfs=True)
 
+            # Run start steps
+            # Run start steps
+            for i in range(nb_max_start_steps):
+                obs, _, _, status = env.step(start_step_policy.rebalance(obs))
+                if status['OOD'] or self.step == nb_max_episode_steps:
+                    return 0.0
+
             # Get max episode length
             if nb_max_episode_steps is None:
                 nb_max_episode_steps = env.data_length
@@ -199,7 +206,7 @@ class APrioriAgent(Agent):
                     i += 1
 
                     # Update progress
-                    if verbose:
+                    if verbose and i % 100 == 0:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
                                                                             nb_steps * 1000,
                                                                             float(reward)),
@@ -217,13 +224,16 @@ class APrioriAgent(Agent):
             print("Optimizing benchmark...")
 
             # Call optimizer to benchmark
-            BCR, info, _ = ot.maximize_structured(find_bench,
-                                              num_evals=int(nb_steps * 1000),
-                                              search_space=bench_search_space
+            BCR, info, _ = ot.maximize_structured(
+                                                  find_bench,
+                                                  num_evals=int(nb_steps * 1000),
+                                                  search_space=bench_search_space
                                               )
 
             env.benchmark = array_normalize(np.array([BCR[key] for key in BCR], dtype='f'))
-            print("\nBest Constant Rebalance portfolio found in %d optimization rounds:\n" % i, env.benchmark.astype(float))
+            print("\nOptimum benchmark reward: %f" % info.optimum)
+            print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, env.benchmark.astype(float))
+
             ## Now optimize model w.r.t benchmark
             i = 0
             t0 = time()
@@ -254,9 +264,6 @@ class APrioriAgent(Agent):
                     # Try model for a batch
                     batch_reward = 0
                     for batch in range(batch_size):
-                        # Reset env
-                        env.reset_status()
-                        env.reset(reset_dfs=True)
                         # sample environment
                         r = self.test(env,
                                         nb_episodes=1,
@@ -377,6 +384,10 @@ class APrioriAgent(Agent):
                     loop_time = env.timestamp
                     if loop_time >= last_action_time + timedelta(minutes=env.period):
                         can_act = True
+                        try:
+                            del self.log["Trade_incomplete"]
+                        except Exception:
+                            pass
 
                     # If can act, run strategy and step environment
                     if can_act:
@@ -385,11 +396,13 @@ class APrioriAgent(Agent):
                         episode_reward += reward
 
                         # If action is complete, increment step counter, log action time and allow report
-                        if done:
-                            self.step += 1
-                            last_action_time = floor_datetime(loop_time, env.period)
-                            can_act = False
-                            may_report = True
+                        if not done:
+                            self.log["Trade_incomplete"] = "Position change was not fully completed."
+
+                        self.step += 1
+                        last_action_time = floor_datetime(env.timestamp, env.period)
+                        can_act = False
+                        may_report = True
 
                     # If cant act, just take a observation and return
                     else:
@@ -492,11 +505,11 @@ class APrioriAgent(Agent):
             )
 
         msg += "\nStep portfolio change: %f" % (float(
-            100 * (last_portval - prev_portval) / (prev_portval + 1e-16)
+            100 * safe_div(last_portval - prev_portval, prev_portval)
             )) + " %"
 
         msg += "\nAccumulated portfolio change: %f" % (float(
-            100 * (last_portval - init_portval) / (init_portval + 1e-16)
+            100 * safe_div(last_portval - init_portval, init_portval)
             )) + " %\n"
 
         # Time summary
@@ -509,13 +522,20 @@ class APrioriAgent(Agent):
         # Prices summary
         msg += "\nPrices summary:\n"
         msg += "           Prev open:    Last price:    Pct change:\n"
+
+        adm = 0.0
+        k = 0
         for symbol in env.pairs:
 
             pp = obs.get_value(obs.index[-2], (symbol, 'open'))
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
+            adm += pc
+            k += 1
 
             msg += "%-9s: %11.4f   %11.4f %11.2f" % (symbol, pp, nep, pc) + " %\n"
+
+        msg += "Mean pct change: %5.02f %%\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -524,21 +544,16 @@ class APrioriAgent(Agent):
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:  Action:      Action diff:\n"
-        adm = 0.0
-        k = 0
+        msg += "        Prev action:  Last Action:  Action diff:\n"
         for symbol in pa:
             if symbol is not "online":
                 pac = 100 * float(pa[symbol])
                 nac = 100 * float(la[symbol])
-                ad = 100 * (nac - pac)
-                adm += float(ad)
-                k += 1
+                ad = nac - pac
 
-                msg += "%-6s:  %5.02f          %5.02f       %5.02f" % (symbol, pac, nac, ad) + " %\n"
+                msg += "%-6s:  %5.02f %%       %5.02f %%      %5.02f %%\n" % (symbol, pac, nac, ad)
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
-        msg += "Mean pct change: %5.02f\n" % (adm / k)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
@@ -1296,10 +1311,14 @@ class STMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
+        obs = obs.astype(np.float64)
+        reg = np.linalg.norm(obs.xs('open', level=1, axis=1).iloc[-self.std_window - 1:].pct_change().dropna().std().values, ord=2) /\
+                    np.sqrt(obs.columns.levels[0].shape[0]) + 1
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1)
+            price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
+                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1) /\
+                                    reg
 
         price_relative[-1] = 0
 
@@ -1333,7 +1352,7 @@ class STMRTrader(APrioriAgent):
 
         change = abs((portvar + x[np.argmax(abs(x))]) / 2)
 
-        lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
+        lam = np.clip(safe_div(change - self.sensitivity, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
 
         # update portfolio
         b = b + lam * (x - x_mean)
@@ -1343,7 +1362,7 @@ class STMRTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
-
+        self.std_window = max(3, int(kwargs['std_window']))
 
 # Portfolio optimization
 class TCOTrader(APrioriAgent):
