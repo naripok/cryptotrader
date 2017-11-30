@@ -377,6 +377,10 @@ class APrioriAgent(Agent):
                     loop_time = env.timestamp
                     if loop_time >= last_action_time + timedelta(minutes=env.period):
                         can_act = True
+                        try:
+                            del self.log["Trade_incomplete"]
+                        except Exception:
+                            pass
 
                     # If can act, run strategy and step environment
                     if can_act:
@@ -385,11 +389,13 @@ class APrioriAgent(Agent):
                         episode_reward += reward
 
                         # If action is complete, increment step counter, log action time and allow report
-                        if done:
-                            self.step += 1
-                            last_action_time = floor_datetime(loop_time, env.period)
-                            can_act = False
-                            may_report = True
+                        if not done:
+                            self.log["Trade_incomplete"] = "Position change was not fully completed."
+
+                        self.step += 1
+                        last_action_time = floor_datetime(env.timestamp, env.period)
+                        can_act = False
+                        may_report = True
 
                     # If cant act, just take a observation and return
                     else:
@@ -509,13 +515,20 @@ class APrioriAgent(Agent):
         # Prices summary
         msg += "\nPrices summary:\n"
         msg += "           Prev open:    Last price:    Pct change:\n"
+
+        adm = 0.0
+        k = 0
         for symbol in env.pairs:
 
             pp = obs.get_value(obs.index[-2], (symbol, 'open'))
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
+            adm += float(pc)
+            k += 1
 
             msg += "%-9s: %11.4f   %11.4f %11.2f" % (symbol, pp, nep, pc) + " %\n"
+
+        msg += "Mean pct change: %5.02f\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -525,20 +538,15 @@ class APrioriAgent(Agent):
             pa = env.action_df.iloc[-1].astype(str).to_dict()
         la = env.action_df.iloc[-1].astype(str).to_dict()
         msg += "        Prev action:  Action:      Action diff:\n"
-        adm = 0.0
-        k = 0
         for symbol in pa:
             if symbol is not "online":
                 pac = 100 * float(pa[symbol])
                 nac = 100 * float(la[symbol])
-                ad = 100 * (nac - pac)
-                adm += float(ad)
-                k += 1
+                ad = nac - pac
 
                 msg += "%-6s:  %5.02f          %5.02f       %5.02f" % (symbol, pac, nac, ad) + " %\n"
             else:
                 msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
-        msg += "Mean pct change: %5.02f\n" % (adm / k)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
