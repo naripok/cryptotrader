@@ -196,9 +196,10 @@ class APrioriAgent(Agent):
 
             # Pull the entire data set
             hindsight = env.get_observation().xs('open', level=1,
-                            axis=1).rolling(2, min_periods=2).apply(lambda x: (x[-1] / x[-2])).apply(lambda x: x /
-                                                                        x.max(), axis=1).dropna().astype('f')
+                            axis=1).rolling(2, min_periods=2).apply(lambda x: (x[-1] / x[-2])).dropna().astype('f')
             hindsight['USDT'] = 1.0
+
+            hindsight = hindsight.apply(lambda x: x / x.max(), axis=1)
 
             # Change env obs_steps back
             env.obs_steps = obs_steps
@@ -222,8 +223,8 @@ class APrioriAgent(Agent):
                     ed_crp = array_normalize(np.append(np.ones(b_crp.shape[0] - 1), [0.0]))
 
                     # Calculate regret
-                    reward = np.log10(np.dot(hindsight, b_crp)).sum() -\
-                             np.log10(np.dot(hindsight, ed_crp)).sum()
+                    reward = safe_div(np.log10(np.dot(hindsight, b_crp)).sum() -\
+                             np.log10(np.dot(hindsight, ed_crp)).sum(), np.dot(hindsight, b_crp).std())
 
                     # Increment counter
                     i += 1
@@ -299,7 +300,7 @@ class APrioriAgent(Agent):
                                         verbose=False)
 
                         # Accumulate reward
-                        batch_reward += r
+                        batch_reward += r / env.portfolio_df.portval.astype('f').std()
 
                     # Increment step counter
                     i += 1
