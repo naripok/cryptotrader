@@ -94,7 +94,7 @@ class APrioriAgent(Agent):
             # Run start steps
             for i in range(nb_max_start_steps):
                 obs, _, _, status = env.step(start_step_policy.rebalance(obs))
-                if status['OOD'] or self.step == nb_max_episode_steps:
+                if status['OOD']:
                     return 0.0
 
             # Get max episode length
@@ -201,7 +201,7 @@ class APrioriAgent(Agent):
 
                     # Calculate reward
                     reward = np.dot(hindsight, benchmark)[1:].prod()
-
+                    # TODO (1): CHECK REWARD
                     # Increment counter
                     i += 1
 
@@ -226,7 +226,7 @@ class APrioriAgent(Agent):
             # Call optimizer to benchmark
             BCR, info, _ = ot.maximize_structured(
                                                   find_bench,
-                                                  num_evals=int(nb_steps * 1000),
+                                                  num_evals=int(nb_steps * 100),
                                                   search_space=bench_search_space
                                               )
 
@@ -1294,7 +1294,7 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.03, std_window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.02, std_window=2, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
