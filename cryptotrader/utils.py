@@ -111,10 +111,10 @@ def array_softmax(x, SAFETY=2.0):
     amx = x.max()
     if(amx > thr):
         b = np.exp(x - (amx-thr))
-        return b / (b.sum() + decimal_cases)
+        return b / (b.sum() + 1e-16)
     else:
         b = np.exp(x)
-        return b / (b.sum() + decimal_cases)
+        return b / (b.sum() + 1e-16)
 
 
 def array_normalize(x, float=True):
