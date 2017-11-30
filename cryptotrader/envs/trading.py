@@ -274,7 +274,6 @@ class TradingEnvironment(Env):
 
         self.reset_benchmark()
 
-
     ## Env properties
     @property
     def obs_steps(self):
@@ -1091,20 +1090,20 @@ class TradingEnvironment(Env):
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
             for i, symbol in enumerate(self.pairs):
-                # self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
-                #                             init_portval / (obs.get_value(init_time,
-                #                             (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
+                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
+                                            init_portval / (obs.get_value(init_time,
+                                            (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
 
-                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * \
-                                                    dec_con.create_decimal(self.benchmark[i]) *\
-                                                    obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
-                                                    (symbol, 'open')))
+                # self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * \
+                #                                     dec_con.create_decimal(self.benchmark[i]) *\
+                #                                     obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
+                #                                     (symbol, 'open')))
 
                 self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
-            self.results[self._fiat + '_benchmark'] = dec_con.create_decimal(self.benchmark[-1]) * init_portval
-
-            self.results['benchmark'] = self.results['benchmark'] + self.results[self._fiat + '_benchmark']
+            # self.results[self._fiat + '_benchmark'] = dec_con.create_decimal(self.benchmark[-1]) * init_portval
+            #
+            # self.results['benchmark'] = self.results['benchmark'] + self.results[self._fiat + '_benchmark']
 
         self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
         self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
@@ -1725,7 +1724,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                         amount = self.get_balance()[symbol]
 
                     else:
-                        raise error
+                        return False
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
@@ -1791,7 +1790,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                         amount = self.get_balance()[symbol]
 
                     else:
-                        raise error
+                        return False
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(e))
@@ -1803,6 +1802,51 @@ class LiveTradingEnvironment(TradingEnvironment):
             raise e
 
     # Online Trading methods
+    def rebalance_sell(self, balance_change, order_type="immediate"):
+        done = False
+        for i, change in enumerate(balance_change):
+            if change < dec_zero:
+                # Reset flag
+                resp = False
+
+                # Get symbol
+                symbol = self.symbols[i]
+
+                # While order is not completed, try to sell
+                while not resp:
+                    resp = self.immediate_sell(symbol, abs(change))
+
+                # Update flag
+                if not done and resp:
+                    done = True
+                elif done and not resp:
+                    done = False
+
+        return done
+
+    def rebalance_buy(self, balance_change, order_type="immediate"):
+        done = False
+        for i, change in enumerate(balance_change):
+            if change > dec_zero:
+
+                # Reset flag
+                resp = False
+
+                # Get symbol
+                symbol = self.symbols[i]
+
+                # While order is not completed, try to buy
+                while not resp:
+                    resp = self.immediate_buy(symbol, abs(change))
+
+                # Update flag
+                if not done and resp:
+                    done = True
+                elif done and not resp:
+                    done = False
+
+        return done
+
     def online_rebalance(self, action, timestamp):
         """
         Performs online portfolio rebalance within ExchangeConnection
@@ -1823,25 +1867,18 @@ class LiveTradingEnvironment(TradingEnvironment):
             balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
 
             # Sell assets first
-            for i, change in enumerate(balance_change):
-                if change < dec_zero:
-                    symbol = self.symbols[i]
-                    resp = self.immediate_sell(symbol, abs(change))
-                    if not done and resp and not self.status['NotEnoughFiat']:
-                        done = resp
-                    elif done and not resp:
-                        done = resp
-
+            resp = self.rebalance_sell(balance_change)
+            if not done and resp and not self.status['NotEnoughFiat']:
+                done = True
+            elif done and not resp:
+                done = False
 
             # Then, buy what you want
-            for i, change in enumerate(balance_change):
-                if change > dec_zero:
-                    symbol = self.symbols[i]
-                    resp = self.immediate_buy(symbol, abs(change))
-                    if not done and resp and not self.status['NotEnoughFiat']:
-                        done = resp
-                    elif done and not resp:
-                        done = resp
+            resp = self.rebalance_buy(balance_change)
+            if not done and resp and not self.status['NotEnoughFiat']:
+                done = True
+            elif done and not resp:
+                done = False
 
             # Get new ticker
             ticker = self.tapi.returnTicker()

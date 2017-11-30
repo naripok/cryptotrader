@@ -112,7 +112,7 @@ class APrioriAgent(Agent):
                     obs, reward, _, status = env.step(action)
 
                     # Accumulate returns and regret
-                    episode_reward += reward
+                    episode_reward += safe_div(reward, env.portfolio_df.portval.astype('f').std())
 
                     # Increment step counter
                     self.step += 1
@@ -196,13 +196,18 @@ class APrioriAgent(Agent):
 
             # Pull the entire data set
             hindsight = env.get_observation().xs('open', level=1,
-                            axis=1).rolling(2, min_periods=2).apply(lambda x: (x[-1] / x[-2])).dropna().astype('f')
+                            axis=1).rolling(2, min_periods=2).apply(lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
             hindsight['USDT'] = 1.0
 
-            hindsight = hindsight.apply(lambda x: x / x.max(), axis=1)
+            hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
 
             # Change env obs_steps back
             env.obs_steps = obs_steps
+
+            # Calculate benchmark return
+            # Benchmark: Equally distributed constant rebalanced portfolio
+            ed_crp = array_normalize(np.append(np.ones(len(env.symbols) - 1), [0.0]))
+            ed_crp_returns = np.dot(hindsight, ed_crp)
 
             ## Define params
             # Constraints declaration
@@ -214,17 +219,17 @@ class APrioriAgent(Agent):
             def find_bench(**kwargs):
                 try:
                     # Init variables
-                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight, ed_crp_returns
 
                     # Best constant rebalance portfolio
                     b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
 
-                    # Benchmark: Equally distributed constant rebalance portfolio
-                    ed_crp = array_normalize(np.append(np.ones(b_crp.shape[0] - 1), [0.0]))
+                    # Best constant rebalance portfolio returns
+                    b_crp_returns = np.dot(hindsight, b_crp)
 
-                    # Calculate regret
-                    reward = safe_div(np.log10(np.dot(hindsight, b_crp)).sum() -\
-                             np.log10(np.dot(hindsight, ed_crp)).sum(), np.dot(hindsight, b_crp).std())
+                    # Calculate sharpe regret
+                    reward = safe_div(np.log10(b_crp_returns).sum(), b_crp_returns.std()) -\
+                             safe_div(np.log10(ed_crp_returns).sum(), ed_crp_returns.std())
 
                     # Increment counter
                     i += 1
@@ -300,7 +305,7 @@ class APrioriAgent(Agent):
                                         verbose=False)
 
                         # Accumulate reward
-                        batch_reward += r / env.portfolio_df.portval.astype('f').std()
+                        batch_reward += r
 
                     # Increment step counter
                     i += 1
@@ -1324,7 +1329,7 @@ class STMRTrader(APrioriAgent):
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
-        self.std_window = std_window
+        # self.std_window = std_window
         self.activation = activation
         if rebalance:
             self.reb = -2
@@ -1336,8 +1341,8 @@ class STMRTrader(APrioriAgent):
         Performs prediction given environment observation
         """
         obs = obs.astype(np.float64)
-        reg = np.linalg.norm(obs.xs('open', level=1, axis=1).iloc[-self.std_window - 1:].pct_change().dropna().std().values, ord=2) /\
-                    np.sqrt(obs.columns.levels[0].shape[0]) + 1
+        # reg = np.linalg.norm(obs.xs('open', level=1, axis=1).iloc[-self.std_window - 1:].pct_change().dropna().std().values, ord=2) /\
+        #             np.sqrt(obs.columns.levels[0].shape[0] - 1) + 1
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
@@ -1385,7 +1390,7 @@ class STMRTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
-        self.std_window = max(3, int(kwargs['std_window']))
+        # self.std_window = max(3, int(kwargs['std_window']))
 
 # Portfolio optimization
 class TCOTrader(APrioriAgent):
