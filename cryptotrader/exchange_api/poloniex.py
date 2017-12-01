@@ -45,11 +45,11 @@ from requests import post as _post
 from ..exceptions import *
 # local
 from .coach import Coach
-from ..core import Logger
+from ..utils import Logger
 
 # # logger
 # logger = logging.getLogger(__name__)
-logger = Logger
+# logger = Logger
 retryDelays = (0, 2, 5, 30)
 
 # Possible Commands
@@ -114,7 +114,7 @@ class Poloniex(object):
         self.MINUTE, self.HOUR, self.DAY, self.WEEK, self.MONTH, self.YEAR
         """
         # set logger and coach
-        self.logger = logger
+        self.logger = Logger
         self.coach = coach
         if not self.coach:
             self.coach = Coach()

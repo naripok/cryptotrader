@@ -3,11 +3,11 @@ Trading environment class
 data: 12/10/2017
 author: Tau
 """
-from ..core import Env
 from ..datafeed import *
 from ..spaces import *
 from .utils import *
 from ..utils import *
+from ..core import Env
 
 import os
 import smtplib

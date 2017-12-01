@@ -9,8 +9,6 @@ import numpy as np
 # from bson import Decimal128
 import math
 
-logging.basicConfig(level=logging.DEBUG)
-
 # Decimal precision
 getcontext().prec = 64
 getcontext().Emax = 33
@@ -36,14 +34,14 @@ debug = True
 
 # logger
 class Logger(object):
-    logger = None
+    logger = logging.getLogger(__name__)
 
     @staticmethod
     def __init__(name, output_dir=None):
         """
         Initialise the logger
         """
-        Logger.logger = logging.getLogger(name)
+        # Logger.logger = logging.getLogger(name)
         Logger.logger.setLevel(logging.DEBUG)
         Logger.logger.setLevel(logging.ERROR)
         Logger.logger.setLevel(logging.INFO)

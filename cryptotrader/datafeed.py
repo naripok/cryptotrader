@@ -1,7 +1,7 @@
 from functools import wraps as _wraps
 from itertools import chain as _chain
 import json
-from .utils import convert_to
+from .utils import convert_to, Logger
 from decimal import Decimal
 import pandas as pd
 from time import sleep
@@ -9,7 +9,6 @@ from datetime import datetime
 import zmq
 import threading
 from multiprocessing import Process
-from .core import Logger
 from .exceptions import *
 
 # Exceptions
@@ -201,7 +200,7 @@ class FeedDaemon(Process):
                 thread = threading.Thread(target=self.worker, args=())
                 thread.start()
 
-            Logger.info(FeedDaemon.run, "Feed Daemon running.")
+            Logger.info(FeedDaemon.run, "Feed Daemon running. Serving on %s" % self.addr)
 
             zmq.proxy(clients, workers)
 
