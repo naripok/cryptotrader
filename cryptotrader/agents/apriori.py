@@ -449,7 +449,8 @@ class APrioriAgent(Agent):
                             print(msg, end="\r", flush=True)
 
                         if email and may_report:
-                            env.send_email("Trading report " + self.name, msg)
+                            if hasattr(env, 'email'):
+                                env.send_email("Trading report " + self.name, msg)
                             may_report = False
 
                     # If environment return an error,save data frames and break
