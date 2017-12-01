@@ -1758,6 +1758,10 @@ class LiveTradingEnvironment(TradingEnvironment):
             else:
                 return False
 
+        except DataFeedRetryException:
+            Logger.error(LiveTradingEnvironment.online_rebalance, "Retries exhausted. Stopping actions.")
+            return False
+
         except Exception as e:
             # Log error for debug
             Logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))
