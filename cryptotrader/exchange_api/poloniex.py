@@ -31,26 +31,25 @@ try:
 except:
     from urllib.parse import urlencode as _urlencode
 
-from json import loads as _loads
-from hmac import new as _new
-from hashlib import sha512 as _sha512
-from time import time, sleep
-from datetime import datetime, timezone
-from itertools import chain as _chain
+from datetime import datetime
 from functools import wraps as _wraps
-import logging
+from hashlib import sha512 as _sha512
+from hmac import new as _new
+from itertools import chain as _chain
+from json import loads as _loads
+from time import sleep
 
-# 3rd party
-from requests.exceptions import RequestException
-from requests import post as _post
 from requests import get as _get
+from requests import post as _post
 
+from ..exceptions import *
 # local
 from .coach import Coach
+from ..utils import Logger
 
-# logger
-logger = logging.getLogger(__name__)
-
+# # logger
+# logger = logging.getLogger(__name__)
+# logger = Logger
 retryDelays = (0, 2, 5, 30)
 
 # Possible Commands
@@ -94,22 +93,16 @@ PRIVATE_COMMANDS = [
     'closeMarginPosition']
 
 
-class PoloniexError(Exception):
-    """ Exception for handling poloniex api errors """
-    pass
-
-
-class RetryException(PoloniexError):
-    """ Exception for retry decorator """
-    pass
-
+# class ExchangeError(Exception):
+#     """ Exception for handling poloniex api errors """
+#     pass
 
 class Poloniex(object):
     """The Poloniex Object!"""
 
     def __init__(
             self, key=False, secret=False,
-            timeout=None, coach=True, jsonNums=False):
+            timeout=None, coach=None, jsonNums=False):
         """
         key = str api key supplied by Poloniex
         secret = str secret hash supplied by Poloniex
@@ -121,9 +114,8 @@ class Poloniex(object):
         self.MINUTE, self.HOUR, self.DAY, self.WEEK, self.MONTH, self.YEAR
         """
         # set logger and coach
-        self.logger = logger
         self.coach = coach
-        if self.coach is True:
+        if not self.coach:
             self.coach = Coach()
         # create nonce
         self._nonce = int("{:.6f}".format(datetime.utcnow().timestamp()).replace('.', ''))
@@ -151,13 +143,13 @@ class Poloniex(object):
                 except RequestException as problem:
                     problems.append(problem)
                     if delay is None:
-                        logger.debug(problems)
+                        Logger.debug(func, problems)
                         raise RetryException(
                             'retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait
-                        logger.debug(problem)
-                        logger.info("-- delaying for %ds", delay)
+                        Logger.debug(func, problem)
+                        Logger.info(func, "-- delaying for %ds" % delay)
                         sleep(delay)
         return retrying
 
@@ -165,7 +157,7 @@ class Poloniex(object):
     def __call__(self, command, args={}):
         """ Main Api Function
         - encodes and sends <command> with optional [args] to Poloniex api
-        - raises 'poloniex.PoloniexError' if an api key or secret is missing
+        - raises 'poloniex.ExchangeError' if an api key or secret is missing
             (and the command is 'private'), if the <command> is not valid, or
             if an error is returned from poloniex.com
         - returns decoded json api message """
@@ -226,22 +218,26 @@ class Poloniex(object):
     @property
     def nonce(self):
         """ Increments the nonce"""
-        self._nonce += 42
+        self._nonce += 33
         return self._nonce
 
+    @nonce.setter
+    def nonce(self, nonce):
+        self._nonce = nonce
+
     def _checkCmd(self, command):
-        """ Returns if the command is private of public, raises PoloniexError
+        """ Returns if the command is private of public, raises ExchangeError
         if command is not found """
         global PUBLIC_COMMANDS, PRIVATE_COMMANDS
         if command in PRIVATE_COMMANDS:
             # check for keys
             if not self.key or not self.secret:
-                raise PoloniexError("An Api Key and Secret needed!")
+                raise ExchangeError("An Api Key and Secret needed!")
             return 'Private'
         if command in PUBLIC_COMMANDS:
             return 'Public'
 
-        raise PoloniexError("Invalid Command!: %s" % command)
+        raise ExchangeError("Invalid Command!: %s" % command)
 
     def _handleReturned(self, data):
         """ Handles returned data from poloniex"""
@@ -253,8 +249,8 @@ class Poloniex(object):
                              parse_float=self.jsonNums,
                              parse_int=self.jsonNums)
         except:
-            self.logger.debug(data)
-            raise PoloniexError('Invalid json response returned')
+            Logger.debug(Poloniex._handleReturned, data)
+            raise ExchangeError('Invalid json response returned')
 
         # check if poloniex returned an error
         if 'error' in out:
@@ -264,16 +260,16 @@ class Poloniex(object):
                 self._nonce = int(
                     out['error'].split('.')[0].split()[-1])
                 # raise RequestException so we try again
-                raise RequestException('PoloniexError ' + out['error'])
+                raise RequestException('ExchangeError ' + out['error'])
 
             # conncetion timeout from poloniex
             if "please try again" in out['error'].lower():
                 # raise RequestException so we try again
-                raise RequestException('PoloniexError ' + out['error'])
+                raise RequestException('ExchangeError ' + out['error'])
 
             # raise other poloniex errors, ending retry loop
             else:
-                raise PoloniexError(out['error'])
+                raise ExchangeError(out['error'])
         return out
 
     # --PUBLIC COMMANDS-------------------------------------------------------
@@ -324,7 +320,7 @@ class Poloniex(object):
         for the data returned (default date range is start='1 day ago' to
         end='now') """
         if period not in [300, 900, 1800, 7200, 14400, 86400]:
-            raise PoloniexError("%s invalid candle period" % str(period))
+            raise ExchangeError("%s invalid candle period" % str(period))
         if not start:
             start = datetime.utcnow().timestamp() - self.DAY
         if not end:
@@ -430,7 +426,7 @@ class Poloniex(object):
             possTypes = ['fillOrKill', 'immediateOrCancel', 'postOnly']
             # check type
             if not orderType in possTypes:
-                raise PoloniexError('Invalid orderType')
+                raise ExchangeError('Invalid orderType')
             args[orderType] = 1
 
         return self.__call__('buy', args)
@@ -448,7 +444,7 @@ class Poloniex(object):
             possTypes = ['fillOrKill', 'immediateOrCancel', 'postOnly']
             # check type
             if not orderType in possTypes:
-                raise PoloniexError('Invalid orderType')
+                raise ExchangeError('Invalid orderType')
             args[orderType] = 1
 
         return self.__call__('sell', args)
@@ -478,7 +474,7 @@ class Poloniex(object):
             possTypes = ['immediateOrCancel', 'postOnly']
             # check type
             if not orderType in possTypes:
-                raise PoloniexError('Invalid orderType: %s' % str(orderType))
+                raise ExchangeError('Invalid orderType: %s' % str(orderType))
             args[orderType] = 1
 
         return self.__call__('moveOrder', args)

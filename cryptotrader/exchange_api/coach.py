@@ -21,9 +21,10 @@ import logging
 from time import time, sleep
 from threading import Semaphore, Timer
 from collections import deque
+from ..utils import Logger
 
 # logger
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 class Coach(object):
     """
@@ -66,18 +67,18 @@ class Coach2(object):
     @property
     def timeOverTimeframe(self):
         elapsed = self.timeBook[-1] - self.timeBook[0]
-        logger.debug("Elapsed : %f", elapsed)
+        Logger.debug(Coach2.timeOverTimeframe, "Elapsed : %f" % elapsed)
         return elapsed
 
     def maybeSleep(self):
         if len(self.timeBook) == 1:
-            logger.debug("First API call. No need to sleep.")
+            Logger.debug(Coach2.timeOverTimeframe, "First API call. No need to sleep.")
             return
 
         requiredElapsed = self.timeOverTimeframe - self.timeFrame
         if requiredElapsed < 0:
             requiredElapsed *= -1
-            logger.debug("...waiting... %f", requiredElapsed)
+            Logger.debug(Coach2.timeOverTimeframe, "...waiting... %f" % requiredElapsed)
             sleep(requiredElapsed)
 
     def wait(self):
@@ -91,6 +92,6 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     coach = Coach()
     for i in range(50):
-        logger.debug(i)
+        Logger.debug(Coach, i)
         sleep(random.uniform(0.1, 0.01))
         coach.wait()

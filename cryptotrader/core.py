@@ -1,13 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from .exchange_api.poloniex import PoloniexError, RetryException
-from functools import wraps as _wraps
-from itertools import chain as _chain
-import json
-from .utils import Logger, convert_to
-from decimal import Decimal
-import pandas as pd
-from time import sleep
+
 
 class Agent(object):
     """Abstract base class for all implemented agents.
@@ -251,8 +244,6 @@ class MultiInputProcessor(Processor):
 
 # Note: the API of the `Env` and `Space` classes are taken from the OpenAI Gym implementation.
 # https://github.com/openai/gym/blob/master/gym/core.py
-
-
 class Env(object):
     """The abstract environment class that is used by all agents. This class has the exact
     same API that OpenAI Gym uses so that integrating with it is trivial. In contrast to the
@@ -344,141 +335,3 @@ class Space(object):
         """Return boolean specifying if x is a valid member of this space
         """
         raise NotImplementedError()
-
-
-class ExchangeConnection(object):
-    def __init__(self, tapi, period, pairs=[]):
-        """
-        :param tapi: exchange api instance: Exchange api instance
-        :param period: int: Data period
-        :param pairs: list: Pairs to trade
-        """
-        self.tapi = tapi
-        self.period = period
-        self.pairs = pairs
-
-    @property
-    def balance(self):
-        return NotImplementedError("This class is not intended to be used directly.")
-
-    def returnBalances(self):
-        return NotImplementedError("This class is not intended to be used directly.")
-
-    def returnFeeInfo(self):
-        return NotImplementedError("This class is not intended to be used directly.")
-
-    def returnCurrencies(self):
-        return NotImplementedError("This class is not intended to be used directly.")
-
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        return NotImplementedError("This class is not intended to be used directly.")
-
-
-class DataFeed(ExchangeConnection):
-    """
-    Data feeder for backtesting with TradingEnvironment.
-    """
-    # TODO WRITE TESTS
-    retryDelays = [i + 1 for i in range(5)]
-    logger = Logger("DataFeed")
-
-    def unexpected_rep_retry(func):
-        """ Unexected response decorator """
-        @_wraps(func)
-        def retrying(*args, **kwargs):
-            problems = []
-            for delay in _chain(DataFeed.retryDelays, [None]):
-                try:
-                    # attempt call
-                    return func(*args, **kwargs)
-
-                # we need to try again
-                except PoloniexError as problem:
-                    problems.append(problem)
-                    if delay is None:
-                        DataFeed.logger.debug(DataFeed, problems)
-                        raise RetryException(
-                            'retryDelays exhausted ' + str(problem))
-                    else:
-                        # log exception and wait
-                        DataFeed.logger.debug(DataFeed, problem)
-                        DataFeed.logger.info(DataFeed, "-- delaying for %ds" % delay)
-                        sleep(delay)
-
-        return retrying
-
-    def __init__(self, tapi, period, pairs=[], balance={}):
-        super().__init__(tapi, period, pairs)
-        self.ohlc_data = {}
-        self._balance = balance
-
-    @property
-    def balance(self):
-        return self._balance
-
-    @balance.setter
-    def balance(self, port):
-        assert isinstance(port, dict), "Balance must be a dictionary with coin amounts."
-        for key in port:
-            self._balance[key] = port[key]
-
-    @unexpected_rep_retry
-    def returnTicker(self):
-        return self.tapi.returnTicker()
-
-    @unexpected_rep_retry
-    def returnBalances(self):
-        """
-        Return balance from exchange. API KEYS NEEDED!
-        :return: list:
-        """
-        return self.tapi.returnBalances()
-
-    @unexpected_rep_retry
-    def returnFeeInfo(self):
-        """
-        Returns exchange fee informartion
-        :return:
-        """
-        return self.tapi.returnFeeInfo()
-
-    @unexpected_rep_retry
-    def returnCurrencies(self):
-        """
-        Return exchange currency pairs
-        :return: list:
-        """
-        return self.tapi.returnCurrencies()
-
-    @unexpected_rep_retry
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        """
-        Return pair OHLC data
-        :param currencyPair: str: Desired pair str
-        :param period: int: Candle period. Must be in [300, 900, 1800, 7200, 14400, 86400]
-        :param start: str: UNIX timestamp to start from
-        :param end:  str: UNIX timestamp to end returned data
-        :return: list: List containing desired asset data in "records" format
-        """
-        try:
-            return self.tapi.returnChartData(currencyPair, period, start=start, end=end)
-        except PoloniexError as error:
-            if 'Invalid currency pair.' == error.__str__():
-                try:
-                    symbols = currencyPair.split('_')
-                    pair = symbols[1] + '_' + symbols[0]
-                    return json.loads(self.pair_reciprocal(pd.DataFrame.from_records(self.tapi.returnChartData(pair, period,
-                                                                                              start=start, end=end
-                                                                                                ))).to_json(orient='records'))
-                except Exception as e:
-                    raise e
-            else:
-                raise error
-
-    def pair_reciprocal(self, df):
-        df[['open', 'high', 'low', 'close']] = df.apply(
-            {col: lambda x: str((Decimal('1') / convert_to.decimal(x)).quantize(Decimal('0E-8')))
-             for col in ['open', 'low', 'high', 'close']}, raw=True).rename(columns={'low': 'high',
-                                                                                     'high': 'low'}
-            )
-        return df.rename(columns={'quoteVolume': 'volume','volume': 'quoteVolume'})

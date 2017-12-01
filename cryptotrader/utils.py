@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext
+from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext, Context
 from functools import partialmethod
 import zmq
 import msgpack
@@ -9,24 +9,39 @@ import numpy as np
 # from bson import Decimal128
 import math
 
+# Decimal precision
 getcontext().prec = 64
 getcontext().Emax = 33
 getcontext().Emin = -33
 dec_con = getcontext()
+
+# Decimal constants
 dec_zero = dec_con.create_decimal('0E-16')
+dec_one = dec_con.create_decimal('1.0000000000000000')
 dec_eps = dec_con.create_decimal('1E-16')
 
+# Decimal vector operations
+dec_vec_div = np.vectorize(dec_con.divide)
+dec_vec_mul = np.vectorize(dec_con.multiply)
+dec_vec_sub = np.vectorize(dec_con.subtract)
 
-# Helper functions and classes
+# Reward decimal context
+rew_con = Context(prec=64, Emax=33, Emin=-33)
+rew_quant = rew_con.create_decimal('0E-32')
+
+# Debug flag
+debug = True
+
+# logger
 class Logger(object):
-    logger = None
+    logger = logging.getLogger(__name__)
 
     @staticmethod
     def __init__(name, output_dir=None):
         """
         Initialise the logger
         """
-        Logger.logger = logging.getLogger(name)
+        # Logger.logger = logging.getLogger(name)
         Logger.logger.setLevel(logging.DEBUG)
         Logger.logger.setLevel(logging.ERROR)
         Logger.logger.setLevel(logging.INFO)
@@ -70,7 +85,7 @@ class Logger(object):
         Logger.logger.debug('[%s]\n%s\n' % (method, str))
 
 
-
+# Helper functions and classes
 def safe_div(x, y, eps=dec_eps):
     try:
         out = dec_con.divide(x, y)
@@ -103,6 +118,7 @@ def floor_datetime(t, period):
     return t
 
 
+# Array methods
 def array_softmax(x, SAFETY=2.0):
     """
     Compute softmax values for each sets of scores in x.

@@ -10,7 +10,7 @@ from decimal import Decimal
 from datetime import timedelta
 
 from scipy.signal import argrelextrema
-from ..exchange_api.poloniex import PoloniexError, RetryException
+from ..exchange_api.poloniex import ExchangeError, RetryException
 
 # TODO LIST
 # HEADING
@@ -235,9 +235,9 @@ class APrioriAgent(Agent):
                     i += 1
 
                     # Update progress
-                    if verbose and i % 1000 == 0:
+                    if verbose and i % 10 == 0:
                         print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
-                                                                            nb_steps * 1000,
+                                                                            nb_steps * 10,
                                                                             float(reward)),
                               end="\r")
                         t0 = time()
@@ -255,7 +255,7 @@ class APrioriAgent(Agent):
             # Call optimizer to benchmark
             BCR, info, _ = ot.maximize_structured(
                                                   find_bench,
-                                                  num_evals=int(nb_steps * 1000),
+                                                  num_evals=int(nb_steps * 10),
                                                   search_space=bench_search_space
                                               )
 
@@ -449,7 +449,8 @@ class APrioriAgent(Agent):
                             print(msg, end="\r", flush=True)
 
                         if email and may_report:
-                            env.send_email("Trading report " + self.name, msg)
+                            if hasattr(env, 'email'):
+                                env.send_email("Trading report " + self.name, msg)
                             may_report = False
 
                     # If environment return an error,save data frames and break
