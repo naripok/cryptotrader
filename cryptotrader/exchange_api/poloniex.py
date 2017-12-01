@@ -31,22 +31,21 @@ try:
 except:
     from urllib.parse import urlencode as _urlencode
 
-from json import loads as _loads
-from hmac import new as _new
-from hashlib import sha512 as _sha512
-from time import time, sleep
-from datetime import datetime, timezone
-from itertools import chain as _chain
+from datetime import datetime
 from functools import wraps as _wraps
-from ..core import Logger
+from hashlib import sha512 as _sha512
+from hmac import new as _new
+from itertools import chain as _chain
+from json import loads as _loads
+from time import sleep
 
-# 3rd party
-from requests.exceptions import RequestException
-from requests import post as _post
 from requests import get as _get
+from requests import post as _post
 
+from ..exceptions import *
 # local
 from .coach import Coach
+from ..core import Logger
 
 # # logger
 # logger = logging.getLogger(__name__)
@@ -94,15 +93,9 @@ PRIVATE_COMMANDS = [
     'closeMarginPosition']
 
 
-class ExchangeError(Exception):
-    """ Exception for handling poloniex api errors """
-    pass
-
-
-class RetryException(ExchangeError):
-    """ Exception for retry decorator """
-    pass
-
+# class ExchangeError(Exception):
+#     """ Exception for handling poloniex api errors """
+#     pass
 
 class Poloniex(object):
     """The Poloniex Object!"""

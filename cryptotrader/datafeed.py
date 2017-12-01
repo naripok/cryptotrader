@@ -6,22 +6,15 @@ from decimal import Decimal
 import pandas as pd
 from time import sleep
 from datetime import datetime
-from .exchange_api.poloniex import RetryException
 import zmq
 import threading
 from multiprocessing import Process
 from .core import Logger
+from .exceptions import *
 
 # Exceptions
-class ExchangeError(Exception):
-    """ Exception for handling exchange api errors """
-    pass
 
-class DataFeedException(Exception):
-    pass
 
-class DataFeedRetryException(DataFeedException):
-    pass
 
 # Base classes
 class ExchangeConnection(object):
