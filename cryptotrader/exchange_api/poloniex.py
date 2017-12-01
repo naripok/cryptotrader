@@ -114,7 +114,6 @@ class Poloniex(object):
         self.MINUTE, self.HOUR, self.DAY, self.WEEK, self.MONTH, self.YEAR
         """
         # set logger and coach
-        self.logger = Logger
         self.coach = coach
         if not self.coach:
             self.coach = Coach()
@@ -144,13 +143,13 @@ class Poloniex(object):
                 except RequestException as problem:
                     problems.append(problem)
                     if delay is None:
-                        logger.debug(func, problems)
+                        Logger.debug(func, problems)
                         raise RetryException(
                             'retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait
-                        logger.debug(func, problem)
-                        logger.info(func, "-- delaying for %ds" % delay)
+                        Logger.debug(func, problem)
+                        Logger.info(func, "-- delaying for %ds" % delay)
                         sleep(delay)
         return retrying
 
@@ -250,7 +249,7 @@ class Poloniex(object):
                              parse_float=self.jsonNums,
                              parse_int=self.jsonNums)
         except:
-            self.logger.debug(Poloniex._handleReturned, data)
+            Logger.debug(Poloniex._handleReturned, data)
             raise ExchangeError('Invalid json response returned')
 
         # check if poloniex returned an error

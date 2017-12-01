@@ -65,7 +65,7 @@ class FeedDaemon(Process):
     """
     Data Feed server
     """
-    def __init__(self, api={}, addr='ipc://feed.ipc', n_workers=2):
+    def __init__(self, api={}, addr='ipc://feed.ipc', n_workers=4):
         """
 
         :param api: dict: exchange name: api instance
@@ -217,7 +217,7 @@ class DataFeed(ExchangeConnection):
     # TODO WRITE TESTS
     retryDelays = [2 ** i for i in range(4)]
 
-    def __init__(self, period, pairs=[], exchange='', addr='', timeout=10):
+    def __init__(self, period, pairs=[], exchange='', addr='', timeout=30):
         """
 
         :param period: int: Data sampling period
