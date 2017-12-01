@@ -3,7 +3,8 @@ Trading environment class
 data: 12/10/2017
 author: Tau
 """
-from ..core import Env, ExchangeConnection, DataFeed
+from ..core import Env
+from ..datafeed import ExchangeConnection
 from ..spaces import *
 from ..utils import Logger, safe_div, floor_datetime, array_normalize
 from .utils import *
@@ -21,8 +22,7 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import PoloniexError, Poloniex, RetryException
-import json
+from ..exchange_api.poloniex import ExchangeError, Poloniex
 
 
 # Decimal precision
@@ -47,175 +47,6 @@ rew_quant = rew_con.create_decimal('0E-32')
 
 # Debug flag
 debug = True
-
-# Datafeeds
-class BacktestDataFeed(DataFeed):
-    """
-    Data feeder for backtesting with TradingEnvironment.
-    """
-    # TODO WRITE TESTS
-    def __init__(self, tapi, period, pairs=[], balance={}, load_dir=None):
-        super().__init__(tapi, period, pairs, balance)
-        self.ohlc_data = {}
-        self.data_length = 0
-        self.load_dir = load_dir
-
-    def returnBalances(self):
-        return self._balance
-
-    def returnFeeInfo(self):
-        return {'makerFee': '0.00150000',
-                'nextTier': '600.00000000',
-                'takerFee': '0.00250000',
-                'thirtyDayVolume': '0.00000000'}
-
-    def returnCurrencies(self):
-        if self.load_dir:
-            try:
-                with open(self.load_dir + '/currencies.json') as file:
-                    return json.load(file)
-            except Exception as e:
-                print(str(e.__cause__) + str(e))
-                return self.tapi.returnCurrencies()
-        else:
-            return self.tapi.returnCurrencies()
-
-    def download_data(self, start=None, end=None):
-        # TODO WRITE TEST
-        self.ohlc_data = {}
-        self.data_length = None
-        for pair in self.pairs:
-            try:
-                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
-                                                                   start=start, end=end
-                                                                  ))
-
-                self.ohlc_data[pair] = ohlc_df
-
-            except PoloniexError:
-                try:
-                    symbols = pair.split('_')
-                    self.ohlc_data[pair] = self.pair_reciprocal(pd.DataFrame.from_records(
-                        self.tapi.returnChartData(symbols[1] + '_' + symbols[0], period=self.period * 60,
-                                                   start=start, end=end
-                                                  )))
-                except PoloniexError as e:
-                    raise e
-
-
-
-        for key in self.ohlc_data:
-            if not self.data_length or self.ohlc_data[key].shape[0] < self.data_length:
-                self.data_length = self.ohlc_data[key].shape[0]
-
-        for key in self.ohlc_data:
-            if self.ohlc_data[key].shape[0] != self.data_length:
-                self.ohlc_data[key] = pd.DataFrame.from_records(self.tapi.returnChartData(key, period=self.period * 60,
-                                                               start=self.ohlc_data[key].date.iloc[-self.data_length],
-                                                               end=end
-                                                               ))
-
-            self.ohlc_data[key].set_index('date', inplace=True, drop=False)
-
-
-        print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
-                                                                (24 * 60), self.period))
-
-    def save_data(self, dir=None):
-        """
-        Save data to disk
-        :param dir: str: directory relative to ./; eg './data/train
-        :return:
-        """
-        for item in self.ohlc_data:
-            self.ohlc_data[item].to_json(dir+'/'+str(item)+'_'+str(self.period)+'min.json', orient='records')
-
-    def load_data(self, dir):
-        """
-        Load data form disk.
-        JSON like data expected.
-        :param dir: str: directory relative to self.load_dir; eg: './self.load_dir/dir'
-        :return: None
-        """
-        self.ohlc_data = {}
-        self.data_length = None
-        for key in self.pairs:
-            self.ohlc_data[key] = pd.read_json(self.load_dir + dir +'/'+str(key)+'_'+str(self.period)+'min.json', convert_dates=False,
-                                                orient='records', date_unit='s', keep_default_dates=False, dtype=False)
-            self.ohlc_data[key].set_index('date', inplace=True, drop=False)
-            if not self.data_length:
-                self.data_length = self.ohlc_data[key].shape[0]
-            else:
-                assert self.data_length == self.ohlc_data[key].shape[0]
-
-    def returnChartData(self, currencyPair, period, start=None, end=None):
-        try:
-            data = json.loads(self.ohlc_data[currencyPair].loc[start:end, :].to_json(orient='records'))
-
-            return data
-
-        except json.JSONDecodeError:
-            print("Bad exchange response.")
-
-        except AssertionError as e:
-            if "Invalid period" == e:
-                raise PoloniexError("%d invalid candle period" % period)
-            elif "Invalid pair" == e:
-                raise PoloniexError("Invalid currency pair.")
-
-
-class PaperTradingDataFeed(DataFeed):
-    """
-    Data feeder for paper trading with TradingEnvironment.
-    """
-    # TODO WRITE TESTS
-    def __init__(self, tapi, period, pairs=[], balance={}):
-        super().__init__(tapi, period, pairs, balance)
-
-    def returnBalances(self):
-        return self._balance
-
-    def returnFeeInfo(self):
-        return {'makerFee': '0.00150000',
-                'nextTier': '600.00000000',
-                'takerFee': '0.00250000',
-                'thirtyDayVolume': '0.00000000'}
-
-
-class PoloniexConnection(DataFeed):
-    def __init__(self, tapi, period, pairs=[]):
-        """
-        :param tapi: exchange api instance: Exchange api instance
-        :param period: int: Data period
-        :param pairs: list: Pairs to trade
-        """
-        super().__init__(tapi, period, pairs)
-
-    # Data feed methods
-    @property
-    def balance(self):
-        return self.tapi.returnBalances()
-
-    # Trade execution methods
-    def sell(self, currencyPair, rate, amount, orderType=False):
-        return self.tapi.sell(currencyPair, rate, amount, orderType=orderType)
-
-    def buy(self, currencyPair, rate, amount, orderType=False):
-        return self.tapi.buy(currencyPair, rate, amount, orderType=orderType)
-
-
-class MultiExchangeConnection(DataFeed):
-    """
-    Exchanges connection helper.
-    This class communicate with all exchanges apis.
-    """
-    def __init__(self, tapis={}, period=None, pairs=[]):
-        """
-        :param tapis: dict: Dictionary containing the exchanges names and api instances
-        :param period: int: Data period
-        :param pairs: list: Pairs to trade
-        """
-        super().__init__(tapis, period, pairs)
 
 
 # Environments
@@ -726,7 +557,7 @@ class TradingEnvironment(Env):
             self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
             return self.obs_df
 
-        # except PoloniexError:
+        # except ExchangeError:
         #     sleep(1)
         #     self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
         #     return self.obs_df
@@ -1707,8 +1538,8 @@ class LiveTradingEnvironment(TradingEnvironment):
                         else:
                             amount = response['amountUnfilled']
 
-                except PoloniexError as error:
-                    self.logger.debug(LiveTradingEnvironment.immediate_sell,
+                except ExchangeError as error:
+                    self.logger.error(LiveTradingEnvironment.immediate_sell,
                                       self.parse_error(error))
 
                     if 'Total must be at least' in error.__str__():
@@ -1719,12 +1550,14 @@ class LiveTradingEnvironment(TradingEnvironment):
 
                     elif 'Not enough %s.' % symbol == error.__str__():
                         amount = self.get_balance()[symbol]
+                        if dec_con.create_decimal(amount) < dec_con.create_decimal('1E-8'):
+                            return True
 
                     elif 'Order execution timed out.' == error.__str__():
                         amount = self.get_balance()[symbol]
 
                     else:
-                        return False
+                        raise error
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
@@ -1764,8 +1597,8 @@ class LiveTradingEnvironment(TradingEnvironment):
                         else:
                             amount = response['amountUnfilled']
 
-                except PoloniexError as error:
-                    self.logger.debug(LiveTradingEnvironment.immediate_buy,
+                except ExchangeError as error:
+                    self.logger.error(LiveTradingEnvironment.immediate_buy,
                                       self.parse_error(error))
 
                     if 'Total must be at least' in error.__str__():
@@ -1784,13 +1617,14 @@ class LiveTradingEnvironment(TradingEnvironment):
                             amount = str(safe_div(fiat_units, price))
 
                         else:
-                            return False
+                            self.status['NotEnoughFiat'] += 1
+                            return True
 
                     elif 'Order execution timed out.' == error.__str__():
                         amount = self.get_balance()[symbol]
 
                     else:
-                        return False
+                        raise error
 
         except Exception as e:
             self.logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(e))
@@ -1803,7 +1637,13 @@ class LiveTradingEnvironment(TradingEnvironment):
 
     # Online Trading methods
     def rebalance_sell(self, balance_change, order_type="immediate"):
-        done = False
+        """
+        Execute rebalance sell orders sequentially
+        :param balance_change: numpy array: Balance change
+        :param order_type: str: Order type to use
+        :return: bool: True if executed successfully
+        """
+        done = True
         for i, change in enumerate(balance_change):
             if change < dec_zero:
                 # Reset flag
@@ -1814,18 +1654,28 @@ class LiveTradingEnvironment(TradingEnvironment):
 
                 # While order is not completed, try to sell
                 while not resp:
-                    resp = self.immediate_sell(symbol, abs(change))
+                    while not resp:
+                        try:
+                            resp = self.immediate_sell(symbol, abs(change))
+                        except Exception as e:
+                            self.logger.error(LiveTradingEnvironment.rebalance_buy,
+                                              self.parse_error(e))
+                            break
 
                 # Update flag
-                if not done and resp:
-                    done = True
-                elif done and not resp:
+                if not resp:
                     done = False
 
         return done
 
     def rebalance_buy(self, balance_change, order_type="immediate"):
-        done = False
+        """
+        Execute rebalance buy orders sequentially
+        :param balance_change: numpy array: Balance change
+        :param order_type: str: Order type to use
+        :return: bool: True if executed successfully
+        """
+        done = True
         for i, change in enumerate(balance_change):
             if change > dec_zero:
 
@@ -1837,12 +1687,15 @@ class LiveTradingEnvironment(TradingEnvironment):
 
                 # While order is not completed, try to buy
                 while not resp:
-                    resp = self.immediate_buy(symbol, abs(change))
+                    try:
+                        resp = self.immediate_buy(symbol, abs(change))
+                    except Exception as e:
+                        self.logger.error(LiveTradingEnvironment.rebalance_buy,
+                                          self.parse_error(e))
+                        break
 
                 # Update flag
-                if not done and resp:
-                    done = True
-                elif done and not resp:
+                if not resp:
                     done = False
 
         return done
@@ -1854,7 +1707,6 @@ class LiveTradingEnvironment(TradingEnvironment):
         :return: bool: True if fully executed; False otherwise.
         """
         try:
-            done = False
             self.status['NotEnoughFiat'] = False
             # First, assert action is valid
             action = self.assert_action(action)
@@ -1862,26 +1714,19 @@ class LiveTradingEnvironment(TradingEnvironment):
             # Log desired action
             self.log_action_vector(timestamp, action, False)
 
-            # Calculate position change given last porftolio and action vector
+            # Calculate position change given last portftolio and action vector
             ticker = self.tapi.returnTicker()
             balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
 
             # Sell assets first
-            resp = self.rebalance_sell(balance_change)
-            if not done and resp and not self.status['NotEnoughFiat']:
-                done = True
-            elif done and not resp:
-                done = False
+            resp_1 = self.rebalance_sell(balance_change)
 
             # Then, buy what you want
-            resp = self.rebalance_buy(balance_change)
-            if not done and resp and not self.status['NotEnoughFiat']:
-                done = True
-            elif done and not resp:
-                done = False
+            resp_2 = self.rebalance_buy(balance_change)
 
             # Get new ticker
             ticker = self.tapi.returnTicker()
+
             # Log executed action and final balance
             self.log_action_vector(self.timestamp, self.calc_portfolio_vector(ticker), True)
 
@@ -1894,7 +1739,12 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.portval = {'portval': self.calc_total_portval(ticker),
                             'timestamp': self.portfolio_df.index[-1]}
 
-            return done
+            # If everything went well, return True
+            if resp_1 and resp_2:
+                return True
+            # False otherwise
+            else:
+                return False
 
         except Exception as e:
             # Log error for debug

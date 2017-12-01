@@ -16,8 +16,7 @@ dec_con = getcontext()
 dec_zero = dec_con.create_decimal('0E-16')
 dec_eps = dec_con.create_decimal('1E-16')
 
-
-# Helper functions and classes
+# logger
 class Logger(object):
     logger = None
 
@@ -70,7 +69,7 @@ class Logger(object):
         Logger.logger.debug('[%s]\n%s\n' % (method, str))
 
 
-
+# Helper functions and classes
 def safe_div(x, y, eps=dec_eps):
     try:
         out = dec_con.divide(x, y)
@@ -103,6 +102,7 @@ def floor_datetime(t, period):
     return t
 
 
+# Array methods
 def array_softmax(x, SAFETY=2.0):
     """
     Compute softmax values for each sets of scores in x.

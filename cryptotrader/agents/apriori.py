@@ -10,7 +10,7 @@ from decimal import Decimal
 from datetime import timedelta
 
 from scipy.signal import argrelextrema
-from ..exchange_api.poloniex import PoloniexError, RetryException
+from ..exchange_api.poloniex import ExchangeError, RetryException
 
 # TODO LIST
 # HEADING
