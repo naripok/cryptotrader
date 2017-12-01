@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext
+from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext, Context
 from functools import partialmethod
 import zmq
 import msgpack
@@ -9,12 +9,30 @@ import numpy as np
 # from bson import Decimal128
 import math
 
+logging.basicConfig(level=logging.DEBUG)
+
+# Decimal precision
 getcontext().prec = 64
 getcontext().Emax = 33
 getcontext().Emin = -33
 dec_con = getcontext()
+
+# Decimal constants
 dec_zero = dec_con.create_decimal('0E-16')
+dec_one = dec_con.create_decimal('1.0000000000000000')
 dec_eps = dec_con.create_decimal('1E-16')
+
+# Decimal vector operations
+dec_vec_div = np.vectorize(dec_con.divide)
+dec_vec_mul = np.vectorize(dec_con.multiply)
+dec_vec_sub = np.vectorize(dec_con.subtract)
+
+# Reward decimal context
+rew_con = Context(prec=64, Emax=33, Emin=-33)
+rew_quant = rew_con.create_decimal('0E-32')
+
+# Debug flag
+debug = True
 
 # logger
 class Logger(object):

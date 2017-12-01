@@ -102,6 +102,7 @@ class FeedDaemon(Process):
             return req[0], req[1]
 
         else:
+            # Candle data
             if req[1] == 'returnChartData':
 
                 if req[4] == 'None':
@@ -121,6 +122,16 @@ class FeedDaemon(Process):
                     )
                 return call
 
+            if req[1] == 'returnTradeHistory':
+                args = {'currencyPair': str(req[2]).upper()}
+                if req[3] != 'None':
+                    args['start'] = req[3]
+                if req[4] != 'None':
+                    args['end'] = req[4]
+
+                return req[0], req[1], args
+
+            # Buy and sell orders
             if req[1] == 'buy' or req[1] == 'sell':
                 args = {
                     'currencyPair': str(req[2]).upper(),
@@ -252,7 +263,7 @@ class DataFeed(ExchangeConnection):
                     else:
                         # log exception and wait
                         Logger.debug(DataFeed, problem)
-                        Logger.info(DataFeed, "-- delaying for %ds" % delay)
+                        Logger.error(DataFeed, "-- delaying for %ds" % delay)
                         sleep(delay)
 
         return retrying
@@ -262,7 +273,23 @@ class DataFeed(ExchangeConnection):
         req = self.exchange + ' ' + req
 
         # Send request
-        self.sock.send_string(req)
+        try:
+            self.sock.send_string(req)
+        except zmq.ZMQError as e:
+            if 'Operation cannot be accomplished in current state' == e.__str__():
+                # If request timeout, restart socket
+                Logger.error(DataFeed.get_response, "%s request timeout." % req)
+                # Socket is confused. Close and remove it.
+                self.sock.setsockopt(zmq.LINGER, 0)
+                self.sock.close()
+                self.poll.unregister(self.sock)
+
+                # Create new connection
+                self.sock = self.context.socket(zmq.REQ)
+                self.sock.connect(self.addr)
+                self.poll.register(self.sock, zmq.POLLIN)
+
+                raise DataFeedException
 
         # Get response
         socks = dict(self.poll.poll(self.timeout))
@@ -343,6 +370,67 @@ class DataFeed(ExchangeConnection):
                 rep =  json.loads(
                     self.pair_reciprocal(pd.DataFrame.from_records(self.get_response(call))).to_json(
                         orient='records'))
+            except Exception as e:
+                raise e
+
+        return rep
+
+    @retry
+    def returnTradeHistory(self, currencyPair='all', start=None, end=None):
+        call = "returnTradeHistory %s %s %s" % (str(currencyPair),
+                                                    str(start),
+                                                    str(end))
+
+        rep = self.get_response(call)
+        return rep
+
+    @retry
+    def sell(self, currencyPair, rate, amount, orderType=False):
+
+        call = "sell %s %s %s %s" % (str(currencyPair),
+                                                str(rate),
+                                                str(amount),
+                                                str(orderType))
+        rep = self.get_response(call)
+
+        if 'Invalid currency pair.' in rep:
+            try:
+                symbols = currencyPair.split('_')
+                pair = symbols[1] + '_' + symbols[0]
+
+                call = "sell %s %s %s %s" % (str(pair),
+                                             str(rate),
+                                             str(amount),
+                                             str(orderType))
+
+                rep = self.get_response(call)
+
+            except Exception as e:
+                raise e
+
+        return rep
+
+    @retry
+    def buy(self, currencyPair, rate, amount, orderType=False):
+
+        call = "buy %s %s %s %s" % (str(currencyPair),
+                                     str(rate),
+                                     str(amount),
+                                     str(orderType))
+        rep = self.get_response(call)
+
+        if 'Invalid currency pair.' in rep:
+            try:
+                symbols = currencyPair.split('_')
+                pair = symbols[1] + '_' + symbols[0]
+
+                call = "buy %s %s %s %s" % (str(pair),
+                                             str(rate),
+                                             str(amount),
+                                             str(orderType))
+
+                rep = self.get_response(call)
+
             except Exception as e:
                 raise e
 

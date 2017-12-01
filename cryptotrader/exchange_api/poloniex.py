@@ -144,13 +144,13 @@ class Poloniex(object):
                 except RequestException as problem:
                     problems.append(problem)
                     if delay is None:
-                        logger.debug(problems)
+                        logger.debug(func, problems)
                         raise RetryException(
                             'retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait
-                        logger.debug(problem)
-                        logger.info("-- delaying for %ds", delay)
+                        logger.debug(func, problem)
+                        logger.info(func, "-- delaying for %ds" % delay)
                         sleep(delay)
         return retrying
 
@@ -250,7 +250,7 @@ class Poloniex(object):
                              parse_float=self.jsonNums,
                              parse_int=self.jsonNums)
         except:
-            self.logger.debug(data)
+            self.logger.debug(Poloniex._handleReturned, data)
             raise ExchangeError('Invalid json response returned')
 
         # check if poloniex returned an error
