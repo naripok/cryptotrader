@@ -63,7 +63,16 @@ class ExchangeConnection(object):
 ## Feed daemon
 # Server
 class FeedDaemon(Process):
-    def __init__(self, api, addr='ipc://feed.ipc', n_workers=2):
+    """
+    Data Feed server
+    """
+    def __init__(self, api={}, addr='ipc://feed.ipc', n_workers=2):
+        """
+
+        :param api: dict: exchange name: api instance
+        :param addr: str: client side address
+        :param n_workers: int: n threads
+        """
         super(FeedDaemon, self).__init__()
         self.api = api
         self.context = zmq.Context()
@@ -74,52 +83,61 @@ class FeedDaemon(Process):
         self.WEEK, self.MONTH = self.DAY * 7, self.DAY * 30
         self.YEAR = self.DAY * 365
 
+        self._nonce = int("{:.6f}".format(datetime.utcnow().timestamp()).replace('.', ''))
+
+    @property
+    def nonce(self):
+        """ Increments the nonce"""
+        self._nonce += 33
+        return self._nonce
+
     def handle_req(self, req):
 
         req = req.split(' ')
 
-        if req[0] == '':
+        if req[0] == '' or len(req) == 1:
             return False
 
-        elif len(req) == 1:
-            return req[0],
+        elif len(req) == 2:
+            return req[0], req[1]
 
         else:
-            if req[0] == 'returnChartData':
+            if req[1] == 'returnChartData':
 
-                if req[3] == 'None':
-                    req[3] = datetime.utcnow().timestamp() - self.DAY
                 if req[4] == 'None':
-                    req[4] = datetime.utcnow().timestamp()
+                    req[4] = datetime.utcnow().timestamp() - self.DAY
+                if req[5] == 'None':
+                    req[5] = datetime.utcnow().timestamp()
 
                 call = (
                     req[0],
+                    req[1],
                     {
-                        'currencyPair': str(req[1]).upper(),
-                        'period': str(req[2]),
-                        'start': str(req[3]),
-                        'end': str(req[4])
+                        'currencyPair': str(req[2]).upper(),
+                        'period': str(req[3]),
+                        'start': str(req[4]),
+                        'end': str(req[5])
                         }
                     )
                 return call
 
-            if req[0] == 'buy' or req[0] == 'sell':
+            if req[1] == 'buy' or req[1] == 'sell':
                 args = {
-                    'currencyPair': str(req[1]).upper(),
-                    'rate': str(req[2]),
-                    'amount': str(req[3]),
+                    'currencyPair': str(req[2]).upper(),
+                    'rate': str(req[3]),
+                    'amount': str(req[4]),
                     }
                 # order type specified?
                 try:
                     possTypes = ['fillOrKill', 'immediateOrCancel', 'postOnly']
                     # check type
-                    if not req[4] in possTypes:
+                    if not req[5] in possTypes:
                         raise ExchangeError('Invalid orderType')
-                    args[req[4]] = 1
+                    args[req[5]] = 1
                 except IndexError:
                     pass
 
-                return req[0], args
+                return req[0], req[1], args
 
     def worker(self):
         # Init socket
@@ -131,15 +149,20 @@ class FeedDaemon(Process):
                 # Wait for request
                 req = sock.recv_string()
 
+                Logger.debug(FeedDaemon.worker, req)
+
                 # Handle request
                 call = self.handle_req(req)
 
                 # Send request to api
                 if call:
                     try:
-                        rep = self.api.__call__(*call)
+                        self.api[call[0]].nonce = self.nonce
+                        rep = self.api[call[0]].__call__(*call[1:])
                     except ExchangeError as e:
                         rep = e.__str__()
+
+                    Logger.debug(FeedDaemon.worker, rep)
 
                     # send reply back to client
                     sock.send_json(rep)
@@ -184,12 +207,21 @@ class DataFeed(ExchangeConnection):
     # TODO WRITE TESTS
     retryDelays = [2 ** i for i in range(4)]
 
-    def __init__(self, period, pairs=[], addr='', timeout=10):
+    def __init__(self, period, pairs=[], exchange='', addr='', timeout=10):
+        """
+
+        :param period: int: Data sampling period
+        :param pairs: list: Pair symbols to trade
+        :param exchange: str: FeedDaemon exchange to query
+        :param addr: str: Client socked address
+        :param timeout: int:
+        """
         super(DataFeed, self).__init__(period, pairs)
 
         # Sock objects
         self.context = zmq.Context()
         self.addr = addr
+        self.exchange=exchange
         self.timeout = timeout * 1000
 
         self.sock = self.context.socket(zmq.REQ)
@@ -226,6 +258,8 @@ class DataFeed(ExchangeConnection):
         return retrying
 
     def get_response(self, req):
+
+        req = self.exchange + ' ' + req
 
         # Send request
         self.sock.send_string(req)

@@ -102,7 +102,7 @@ class Poloniex(object):
 
     def __init__(
             self, key=False, secret=False,
-            timeout=None, coach=True, jsonNums=False):
+            timeout=None, coach=None, jsonNums=False):
         """
         key = str api key supplied by Poloniex
         secret = str secret hash supplied by Poloniex
@@ -116,7 +116,7 @@ class Poloniex(object):
         # set logger and coach
         self.logger = logger
         self.coach = coach
-        if self.coach is True:
+        if not self.coach:
             self.coach = Coach()
         # create nonce
         self._nonce = int("{:.6f}".format(datetime.utcnow().timestamp()).replace('.', ''))
@@ -221,6 +221,10 @@ class Poloniex(object):
         """ Increments the nonce"""
         self._nonce += 33
         return self._nonce
+
+    @nonce.setter
+    def nonce(self, nonce):
+        self._nonce = nonce
 
     def _checkCmd(self, command):
         """ Returns if the command is private of public, raises ExchangeError
