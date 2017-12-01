@@ -1341,7 +1341,7 @@ class PaperTradingEnvironment(TradingEnvironment):
     Paper trading environment for financial strategies forward testing
     """
     def __init__(self, period, obs_steps, tapi, fiat, name):
-        assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, Poloniex), "Paper trade tapi must be a instance of PaperTradingDataFeed."
+        assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, DataFeed), "Paper trade tapi must be a instance of PaperTradingDataFeed."
         super().__init__(period, obs_steps, tapi, fiat, name)
 
     def reset(self):
@@ -1600,7 +1600,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                             price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
                             fiat_units = self.get_balance()[self._fiat]
 
-                            amount = str(safe_div(fiat_units, price))
+                            amount = str(safe_div(fiat_units, price).quantize(dec_eps))
 
                         else:
                             self.status['NotEnoughFiat'] += 1
@@ -1668,7 +1668,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                 while not resp:
                     while not resp:
                         try:
-                            resp = self.immediate_sell(symbol, abs(change))
+                            resp = self.immediate_sell(symbol, abs(change.quantize(dec_qua)))
                         except Exception as e:
                             Logger.error(LiveTradingEnvironment.rebalance_buy,
                                               self.parse_error(e))
@@ -1700,7 +1700,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                 # While order is not completed, try to buy
                 while not resp:
                     try:
-                        resp = self.immediate_buy(symbol, abs(change))
+                        resp = self.immediate_buy(symbol, abs(change.quantize(dec_qua)))
                     except Exception as e:
                         Logger.error(LiveTradingEnvironment.rebalance_buy,
                                           self.parse_error(e))
