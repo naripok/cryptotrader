@@ -500,39 +500,45 @@ class TradingEnvironment(Env):
 
     # Low frequency getter
     def get_ohlc(self, symbol, index):
-        """
-        Return OHLC data for desired pair
-        :param symbol: str: Pair symbol
-        :param index: datetime.datetime: Time span for data retrieval
-        :return: pandas DataFrame: OHLC symbol data
-        """
-        # Get range
-        start = index[0]
-        end = index[-1]
+        while True:
+            try:
+                """
+                Return OHLC data for desired pair
+                :param symbol: str: Pair symbol
+                :param index: datetime.datetime: Time span for data retrieval
+                :return: pandas DataFrame: OHLC symbol data
+                """
+                # Get range
+                start = index[0]
+                end = index[-1]
 
-        # Call for data
-        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
-                                                                        period=self.period * 60,
-                                                                        start=datetime.timestamp(start),
-                                                                        end=datetime.timestamp(end)),
-                                                                        nrows=index.shape[0])
-        # TODO 1 FIND A BETTER WAY
-        # TODO: FIX TIMESTAMP
+                # Call for data
+                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
+                                                                                period=self.period * 60,
+                                                                                start=datetime.timestamp(start),
+                                                                                end=datetime.timestamp(end)),
+                                                                                nrows=index.shape[0])
+                # TODO 1 FIND A BETTER WAY
+                # TODO: FIX TIMESTAMP
 
-        # Set index
-        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                          inplace=True, drop=True)
+                # Set index
+                ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
+                                  inplace=True, drop=True)
 
-        # Get right values to fill nans
-        # TODO: FIND A BETTER PERFORMANCE METHOD
-        last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
-        fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
-        fill_dict.update({'volume': '0E-16'})
-        # Reindex with desired time range and fill nans
-        ohlc_df = ohlc_df[['open','high','low','close',
-                           'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
+                # Get right values to fill nans
+                # TODO: FIND A BETTER PERFORMANCE METHOD
+                last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+                fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
+                fill_dict.update({'volume': '0E-16'})
+                # Reindex with desired time range and fill nans
+                ohlc_df = ohlc_df[['open','high','low','close',
+                                   'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
 
-        return ohlc_df.astype(str)#.fillna('0.0')
+                return ohlc_df.astype(str)#.fillna('0.0')
+
+            except DataFeedRetryException:
+                Logger.error(TradingEnvironment.get_ohlc, "Retries exhausted. Waiting for connection...")
+                sleep(5)
 
     # Observation maker
     def get_history(self, start=None, end=None, portfolio_vector=False):
