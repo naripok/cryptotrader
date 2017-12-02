@@ -8,7 +8,10 @@ import pandas as pd
 import talib as tl
 from decimal import Decimal
 from datetime import timedelta
+from numpy import diag, sqrt, log, trace
+from numpy.linalg import inv
 
+import scipy
 from scipy.signal import argrelextrema
 from ..exchange_api.poloniex import ExchangeError, RetryException
 
@@ -1151,16 +1154,10 @@ class PAMRTrader(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        self.log['price_pct_change'] = {}
-
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
                                              (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-
-            # Log values
-            self.log['price_pct_change'].update(**{symbol.split('_')[1]: "%.04f" % (100 * ((1 /
-                                                                    (price_relative[key] + self.epsilon)) - 1))})
 
         price_relative[-1] = 1
 
@@ -1381,6 +1378,124 @@ class STMRTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
+
+
+class CWMR(APrioriAgent):
+    """ Confidence weighted mean reversion.
+    Reference:
+        B. Li, S. C. H. Hoi, P.L. Zhao, and V. Gopalkrishnan.
+        Confidence weighted mean reversion strategy for online portfolio selection, 2013.
+        http://jmlr.org/proceedings/papers/v15/li11b/li11b.pdf
+    """
+
+    def __init__(self, eps=-0.5, confidence=0.95, rebalance=True, fiat="USDT", name=""):
+        """
+        :param eps: Mean reversion threshold (expected return on current day must be lower
+                    than this threshold). Recommended value is -0.5.
+        :param confidence: Confidence parameter for profitable mean reversion portfolio.
+                    Recommended value is 0.95.
+        """
+        super(CWMR, self).__init__(fiat=fiat, name=name)
+
+        # input check
+        if not (0 <= confidence <= 1):
+            raise ValueError('confidence must be from interval [0,1]')
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+        self.eps = eps
+        self.theta = scipy.stats.norm.ppf(confidence)
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        obs = obs.astype(np.float64)
+        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
+                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+
+        price_relative[-1] = 1
+        return price_relative
+
+    def update(self, b, x):
+        # initialize
+        m = len(x)
+        mu = np.matrix(b).T
+        sigma = self.sigma
+        theta = self.theta
+        eps = self.eps
+        x = np.matrix(x).T  # matrices are easier to manipulate
+
+        # 4. Calculate the following variables
+        M = mu.T * x
+        V = x.T * sigma * x
+        x_upper = sum(diag(sigma) * x) / trace(sigma)
+
+        # 5. Update the portfolio distribution
+        mu, sigma = self.calculate_change(x, x_upper, mu, sigma, M, V, theta, eps)
+
+        # 6. Normalize mu and sigma
+        mu = simplex_proj(mu)
+        sigma = sigma / (m ** 2 * trace(sigma))
+        """
+        sigma(sigma < 1e-4*eye(m)) = 1e-4;
+        """
+        self.sigma = sigma
+
+        return np.array(mu.T).ravel()
+
+    def calculate_change(self, x, x_upper, mu, sigma, M, V, theta, eps):
+        # lambda from equation 7
+        foo = (V - x_upper * x.T * np.sum(sigma, axis=1)) / M ** 2 + V * theta ** 2 / 2.
+        a = foo ** 2 - V ** 2 * theta ** 4 / 4
+        b = 2 * (eps - log(M)) * foo
+        c = (eps - log(M)) ** 2 - V * theta ** 2
+
+        a, b, c = a[0, 0], b[0, 0], c[0, 0]
+
+        lam = max(0,
+                  (-b + sqrt(b ** 2 - 4 * a * c)) / (2. * a),
+                  (-b - sqrt(b ** 2 - 4 * a * c)) / (2. * a))
+        # bound it due to numerical problems
+        lam = min(lam, 1E+7)
+
+        # update mu and sigma
+        U_sqroot = 0.5 * (-lam * theta * V + sqrt(lam ** 2 * theta ** 2 * V ** 2 + 4 * V))
+        mu = mu - lam * sigma * (x - x_upper) / M
+        sigma = inv(inv(sigma) + theta * lam / U_sqroot * diag(x) ** 2)
+        """
+        tmp_sigma = inv(inv(sigma) + theta*lam/U_sqroot*diag(xt)^2);
+        % Don't update sigma if results are badly scaled.
+        if all(~isnan(tmp_sigma(:)) & ~isinf(tmp_sigma(:)))
+            sigma = tmp_sigma;
+        end
+        """
+
+        return mu, sigma
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        n_pairs = obs.columns.levels[0].shape[0]
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.sigma = np.matrix(np.eye(n_pairs) / n_pairs ** 2)
+            return array_normalize(action)
+
+    def set_params(self, **kwargs):
+        self.eps = kwargs['eps']
+        self.theta = scipy.stats.norm.ppf(kwargs['confidence'])
 
 
 # Portfolio optimization
@@ -1610,9 +1725,9 @@ class AnticorTrader(APrioriAgent):
         price_log2 = np.empty((self.window - 2, obs.columns.levels[0].shape[0] - 1), dtype='f')
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_log1[:, key] = obs[symbol].open.iloc[-2 * self.window + 1:-self.window].rolling(2).apply(
-                lambda x: np.log10(x[-1] / x[-2])).dropna().values.T
+                lambda x: np.log10(safe_div(x[-1], x[-2]))).dropna().values.T
             price_log2[:, key] = obs[symbol].open.iloc[-self.window + 1:].rolling(2).apply(
-                lambda x: np.log10(x[-1] / x[-2])).dropna().values.T
+                lambda x: np.log10(safe_div(x[-1], x[-2]))).dropna().values.T
         return price_log1, price_log2
 
     def rebalance(self, obs):
@@ -1654,13 +1769,11 @@ class AnticorTrader(APrioriAgent):
         # calculate transfer
         transfer = claim * 0.
         for i in range(corr.shape[0]):
-            for j in range(corr.shape[1]):
-                if i == j: continue
-                else:
-                    transfer[i, j] = b[i] * claim[i, j] / (claim[i,:].sum() + self.epsilon)
+            total_claim = sum(claim[i, :])
+            if total_claim != 0:
+                transfer[i, :] = b[i] * safe_div(claim[i, :], total_claim)
 
-        for i in range(b.shape[0]):
-            b[i] += (transfer[:, i].sum() - transfer[i, :].sum())
+        b += + np.sum(transfer, axis=0) - np.sum(transfer, axis=1)
 
         return np.append(simplex_proj(b), [0.0])
 
