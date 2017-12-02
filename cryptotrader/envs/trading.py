@@ -284,7 +284,7 @@ class TradingEnvironment(Env):
         hindsight = self.get_observation().xs('open', level=1,
                                              axis=1).rolling(2, min_periods=2).apply(
             lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
-        hindsight['USDT'] = 1.0
+        hindsight[self._fiat] = 1.0
 
         hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
 
@@ -315,8 +315,8 @@ class TradingEnvironment(Env):
                 b_crp_returns = np.dot(hindsight, b_crp)
 
                 # Calculate sharpe regret
-                reward = safe_div(np.log10(b_crp_returns).sum(), b_crp_returns.std()) - \
-                         safe_div(np.log10(ed_crp_returns).sum(), ed_crp_returns.std())
+                reward = safe_div(np.log(b_crp_returns).sum(), b_crp_returns.std()) - \
+                         safe_div(np.log(ed_crp_returns).sum(), ed_crp_returns.std())
 
                 # Increment counter
                 i += 1
