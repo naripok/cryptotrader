@@ -341,11 +341,11 @@ class TradingEnvironment(Env):
         # Call optimizer to benchmark
         BCR, info, _ = ot.maximize_structured(
             find_bench,
-            num_evals=int(nb_steps * 10),
+            num_evals=int(nb_steps),
             search_space=bench_search_space
             )
 
-        env.benchmark = array_normalize(np.array([BCR[key] for key in BCR], dtype='f'))
+        self.benchmark = convert_to.decimal(array_normalize(np.array([BCR[key] for key in BCR])))
         print("\nOptimum benchmark reward: %f" % info.optimum)
         print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
 
@@ -951,16 +951,21 @@ class TradingEnvironment(Env):
         raise NotImplementedError()
 
     ## Analytics methods
-    def get_results(self, window=3):
+    def get_results(self, window=7, benchmark="crp"):
         """
-        Calculate arbiter desired actions statistics
+        Calculate metrics
+        :param window: int:
+        :param benchmark: str: crp for constant rebalance or bah for buy and hold
         :return:
         """
+        # Sample portfolio df
         self.results = self.get_sampled_portfolio().join(self.get_sampled_actions(), rsuffix='_posit')[1:].ffill()
 
+        # Get history
         obs = self.get_history(self.results.index[0], self.results.index[-1])
 
-        self.results['benchmark'] = convert_to.decimal('0E-8')
+        # Init df
+        self.results['benchmark'] = dec_zero
         self.results['returns'] = convert_to.decimal(np.nan)
         self.results['benchmark_returns'] = convert_to.decimal(np.nan)
         self.results['alpha'] = convert_to.decimal(np.nan)
@@ -968,35 +973,47 @@ class TradingEnvironment(Env):
         self.results['drawdown'] = convert_to.decimal(np.nan)
         self.results['sharpe'] = convert_to.decimal(np.nan)
 
-        ## Calculate benchmark portifolio, just equaly distribute money over all the assets
+
+        ## Calculate benchmark portfolio
         # Calc init portval
-        init_portval = Decimal('0E-8')
+        init_portval = dec_zero
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += convert_to.decimal(self.init_balance[symbol]) * \
                            obs.get_value(init_time, (self._fiat + '_' + symbol, 'open'))
         init_portval += convert_to.decimal(self.init_balance[self._fiat])
 
+        # # Buy and Hold initial equally distributed assets
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
             for i, symbol in enumerate(self.pairs):
-                self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * obs[symbol, 'open'] * \
-                                            init_portval / (obs.get_value(init_time,
+                self.results[symbol+'_benchmark'] = (dec_one - self.tax[symbol.split('_')[1]]) * \
+                                            obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
                                             (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
+                if benchmark == 'bah':
+                    self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
-                # self.results[symbol+'_benchmark'] = (Decimal('1') - self.tax[symbol.split('_')[1]]) * \
-                #                                     dec_con.create_decimal(self.benchmark[i]) *\
-                #                                     obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
-                #                                     (symbol, 'open')))
 
-                self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
+        # Best Constant Rebalance Portfolio without taxes
+        hindsight = obs.xs('open', level=1, axis=1).rolling(2,
+                        min_periods=2).apply(lambda x: (safe_div(x[-1],
+                                                    x[-2]))).fillna(dec_one).applymap(dec_con.create_decimal)
+        hindsight[self._fiat] = dec_one
 
-            # self.results[self._fiat + '_benchmark'] = dec_con.create_decimal(self.benchmark[-1]) * init_portval
-            #
-            # self.results['benchmark'] = self.results['benchmark'] + self.results[self._fiat + '_benchmark']
+        # hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
 
-        self.results['returns'] = pd.to_numeric(self.results.portval).diff().fillna(1e-8)
-        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark).diff().fillna(1e-8)
+        # Take first operation fee just to start at the same point as strategy
+        if benchmark == 'crp':
+            self.results['benchmark'] = np.dot(hindsight, self.benchmark).cumprod() * init_portval * \
+                                    (dec_one - self.tax[symbol.split('_')[1]])
+
+        # Calculate metrics
+        self.results['returns'] = pd.to_numeric(self.results.portval.rolling(2,
+                                                min_periods=2).apply(lambda x: (safe_div(x[-1],
+                                                x[-2]) - 1)).fillna(dec_zero))
+        self.results['benchmark_returns'] = pd.to_numeric(self.results.benchmark.rolling(2,
+                                                min_periods=2).apply(lambda x: (safe_div(x[-1],
+                                                x[-2]) - 1)).fillna(dec_zero))
         self.results['alpha'] = ec.utils.roll(self.results.returns,
                                               self.results.benchmark_returns,
                                               function=ec.alpha_aligned,
@@ -1012,7 +1029,7 @@ class TradingEnvironment(Env):
 
         return self.results
 
-    def plot_results(self):
+    def plot_results(self, window = 7, benchmark='crp'):
         def config_fig(fig):
             fig.background_fill_color = "black"
             fig.background_fill_alpha = 0.1
@@ -1026,7 +1043,7 @@ class TradingEnvironment(Env):
             fig.grid.grid_line_alpha = 0.1
             fig.grid.grid_line_dash = [6, 4]
 
-        df = self.get_results().astype(np.float64)
+        df = self.get_results(window=window, benchmark=benchmark).astype(np.float64)
 
         # Results figures
         results = {}
@@ -1218,9 +1235,13 @@ class TradingEnvironment(Env):
         return results
 
     ## Report methods
-    def parse_error(self, e):
+    def parse_error(self, e, *args):
         error_msg = '\n' + self.name + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
+
+        for args in args:
+            error_msg += "\n" + str(args)
+
         return error_msg
 
     def set_email(self, email):
@@ -1274,12 +1295,14 @@ class TradingEnvironment(Env):
                 Logger.error(TradingEnvironment.send_email, self.parse_error(e))
 
         except Exception as e:
-            Logger.error(TradingEnvironment.send_email, self.parse_error(e))
-            if hasattr(self, 'email'):
-                self.send_email("Error sending email: %s at %s" % (e,
-                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
-
+            try:
+                Logger.error(TradingEnvironment.send_email, self.parse_error(e))
+                if hasattr(self, 'email'):
+                    self.send_email("Error sending email: %s at %s" % (e,
+                                    datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
+                                    self.parse_error(e))
+            except Exception as e:
+                Logger.error(TradingEnvironment.send_email, self.parse_error(e))
 
 class BacktestEnvironment(TradingEnvironment):
     """
@@ -1411,7 +1434,7 @@ class BacktestEnvironment(TradingEnvironment):
 
         except Exception as e:
             Logger.error(BacktestEnvironment.step, self.parse_error(e))
-            if hasattr(self, 'email') and hasattr(self, 'psw'):
+            if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
@@ -1501,7 +1524,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             return filtered_balance
 
         except Exception as e:
-            Logger.error(TradingEnvironment.get_balance, self.parse_error(e))
+            Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e, balance))
             raise e
 
     def get_balance_array(self):
@@ -1612,8 +1635,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                         amount = self.get_balance()[symbol]
 
                 except ExchangeError as error:
-                    Logger.error(LiveTradingEnvironment.immediate_sell,
-                                      self.parse_error(error))
+                    Logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(error))
 
                     if 'Total must be at least' in error.__str__():
                         return True
@@ -1633,7 +1655,12 @@ class LiveTradingEnvironment(TradingEnvironment):
                         raise error
 
         except Exception as e:
-            Logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(e))
+            try:
+                Logger.error(LiveTradingEnvironment.immediate_sell,
+                             self.parse_error(error, price, amount, response))
+            except Exception:
+                Logger.error(LiveTradingEnvironment.immediate_sell,
+                             self.parse_error(error))
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                                                             datetime.strftime(self.timestamp,
@@ -1722,7 +1749,11 @@ class LiveTradingEnvironment(TradingEnvironment):
                         raise error
 
         except Exception as e:
-            Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(e))
+            try:
+                Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error, price, amount, response))
+            except Exception:
+                Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error))
+
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
                                                                             datetime.strftime(self.timestamp,
@@ -1847,7 +1878,12 @@ class LiveTradingEnvironment(TradingEnvironment):
 
         except Exception as e:
             # Log error for debug
-            Logger.error(LiveTradingEnvironment.online_rebalance, self.parse_error(e))
+            try:
+                Logger.error(LiveTradingEnvironment.online_rebalance,
+                             self.parse_error(e, action, ticker, balance_change))
+            except Exception:
+                Logger.error(LiveTradingEnvironment.online_rebalance,
+                             self.parse_error(e))
 
             # Wake up nerds for the rescue
             if hasattr(self, 'email'):
