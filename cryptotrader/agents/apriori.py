@@ -928,86 +928,79 @@ class MomentumTrader(APrioriAgent):
         self.std_span = int(kwargs['std_span'])
 
 
-class ReversedMomentumTrader(APrioriAgent):
+class ONSTrader(APrioriAgent):
     """
-    Momentum trading agent
+    Online Newton Step algorithm.
+    Reference:
+        A.Agarwal, E.Hazan, S.Kale, R.E.Schapire.
+        Algorithms for Portfolio Management based on the Newton Method, 2006.
+        http://machinelearning.wustl.edu/mlpapers/paper_files/icml2006_AgarwalHKS06.pdf
     """
+
     def __repr__(self):
-        return "ReversedMomentumTrader"
+        return "ONSTrader"
 
-    def __init__(self, ma_span=[None, None], std_span=None, alpha=[1.,1.], mean_type='kama', activation=array_normalize,
-                 fiat="USDT"):
+    def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name=""):
         """
-        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
+        :param delta, beta, eta: Model parameters. See paper.
         """
-        super().__init__(fiat=fiat)
-        self.mean_type = mean_type
-        self.ma_span = ma_span
-        self.std_span = std_span
-        self.alpha = alpha
-        self.activation = activation
-
-    def get_ma(self, df):
-        if self.mean_type == 'exp':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
-        elif self.mean_type == 'kama':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
-        elif self.mean_type == 'simple':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.rolling(window).mean()
-        else:
-            raise TypeError("Wrong mean_type param")
-        return df
+        super().__init__(fiat=fiat, name=name)
+        self.delta = delta
+        self.beta = beta
+        self.eta = eta
 
     def predict(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        try:
-            obs = obs.astype(np.float64)
-            factor = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float32)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                df = obs.loc[:, symbol].copy()
-                df = self.get_ma(df)
-
-                factor[key] = ((df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1]) -
-                               (df['%d_ma' % self.ma_span[0]].iat[-2] - df['%d_ma' % self.ma_span[1]].iat[-2])) / \
-                              (df.open.rolling(self.std_span, min_periods=1, center=False).std().iat[-1] + self.epsilon)
-
-            return factor
-
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
+        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_relative[key] = np.float64(
+                obs.get_value(obs.index[-1], (symbol, 'open')) / obs.get_value(obs.index[-2], (symbol, 'open')))
+        return np.append(price_relative, [1.])
 
     def rebalance(self, obs):
-        try:
-            obs = obs.astype(np.float64).ffill()
-            prev_posit = self.get_portfolio_vector(obs)
-            position = np.empty(obs.columns.levels[0].shape[0], dtype=np.float32)
-            factor = self.predict(obs)
-            for i in range(position.shape[0] - 1):
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.A = np.mat(np.eye(n_pairs))
+            self.b = np.mat(np.zeros(n_pairs)).T
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
 
-                if factor[i] >= 0.0:
-                    position[i] = max(0., prev_posit[i] - self.alpha[0] * factor[i])
-                else:
-                    position[i] = max(0., prev_posit[i] - self.alpha[1] * factor[i])
+    def update(self, b, x):
+        # calculate gradient
+        grad = np.mat(x / np.dot(b, x)).T
+        # update A
+        self.A += grad * grad.T
+        # update b
+        self.b += (1 + 1. / self.beta) * grad
 
-            position[-1] = max(0., 1 - position[:-1].sum())
+        # projection of p induced by norm A
+        pp = self.projection_in_norm(self.delta * self.A.I * self.b, self.A)
 
-            return self.activation(position)
+        return pp * (1 - self.eta) + np.ones(len(x)) / float(len(x)) * self.eta
 
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
+    def projection_in_norm(self, x, M):
+        """ Projection of x to simplex indiced by matrix M. Uses quadratic programming.
+        """
+        m = M.shape[0]
+
+        P = matrix(2 * M)
+        q = matrix(-2 * M * x)
+        G = matrix(-np.eye(m))
+        h = matrix(np.zeros((m, 1)))
+        A = matrix(np.ones((1, m)))
+        b = matrix(1.)
+
+        sol = solvers.qp(P, q, G, h, A, b)
+        return np.squeeze(sol['x'])
 
     def set_params(self, **kwargs):
-        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
-        self.mean_type = kwargs['mean_type']
-        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
-        self.std_span = int(kwargs['std_span'])
+        self.delta = kwargs['delta']
+        self.beta = kwargs['beta']
+        self.eta = kwargs['eta']
 
 
 # Pattern trading
@@ -1324,13 +1317,12 @@ class STMRTrader(APrioriAgent):
     def __repr__(self):
         return "STMRTrader"
 
-    def __init__(self, sensitivity=0.02, std_window=2, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.sensitivity = sensitivity
-        # self.std_window = std_window
         self.activation = activation
         if rebalance:
             self.reb = -2
@@ -1342,8 +1334,6 @@ class STMRTrader(APrioriAgent):
         Performs prediction given environment observation
         """
         obs = obs.astype(np.float64)
-        # reg = np.linalg.norm(obs.xs('open', level=1, axis=1).iloc[-self.std_window - 1:].pct_change().dropna().std().values, ord=2) /\
-        #             np.sqrt(obs.columns.levels[0].shape[0] - 1) + 1
         price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
@@ -1391,7 +1381,7 @@ class STMRTrader(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.sensitivity = kwargs['sensitivity']
-        # self.std_window = max(3, int(kwargs['std_window']))
+
 
 # Portfolio optimization
 class TCOTrader(APrioriAgent):
@@ -1586,3 +1576,93 @@ class FactorTrader(APrioriAgent):
             env.training = False
             print("\nOptimization interrupted by user.")
             return opt_params, info
+
+
+class AnticorTrader(APrioriAgent):
+    """ Anticor (anti-correlation) is a heuristic portfolio selection algorithm.
+    It adopts the consistency of positive lagged cross-correlation and negative
+    autocorrelation to adjust the portfolio. Eventhough it has no known bounds and
+    hence is not considered to be universal, it has very strong empirical results.
+    It has implemented C version in scipy.weave to improve performance (around 10x speed up).
+    Another option is to use Numba.
+    Reference:
+        A. Borodin, R. El-Yaniv, and V. Gogan.  Can we learn to beat the best stock, 2005.
+        http://www.cs.technion.ac.il/~rani/el-yaniv-papers/BorodinEG03.pdf
+    """
+
+    def __repr__(self):
+        return "AnticorTrader"
+
+    def __init__(self, window=30, fiat="USDT"):
+        """
+        :param window: Window parameter.
+        """
+        super().__init__(fiat=fiat)
+        self.window = window
+
+    def predict(self, obs):
+        """
+
+        :param obs:
+        :return:
+        """
+        price_log1 = np.empty((self.window - 2, obs.columns.levels[0].shape[0] - 1), dtype='f')
+        price_log2 = np.empty((self.window - 2, obs.columns.levels[0].shape[0] - 1), dtype='f')
+        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
+            price_log1[:, key] = obs[symbol].open.iloc[-2 * self.window + 1:-self.window].rolling(2).apply(
+                lambda x: np.log10(x[-1] / x[-2])).dropna().values.T
+            price_log2[:, key] = obs[symbol].open.iloc[-self.window + 1:].rolling(2).apply(
+                lambda x: np.log10(x[-1] / x[-2])).dropna().values.T
+        return price_log1, price_log2
+
+    def rebalance(self, obs):
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)[:-1]
+            factor = self.predict(obs)
+            return self.update(prev_posit, *factor)
+        else:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+
+    @staticmethod
+    def zero_to_inf(vec):
+        return np.vectorize(lambda x: np.inf if np.allclose(x, [0.0]) else x)(vec)
+
+    def update(self, b, lx1, lx2):
+        mean2 = lx2.mean(axis=0)
+        std1 = self.zero_to_inf(lx1.std(axis=0))
+        std2 = self.zero_to_inf(lx2.std(axis=0))
+
+        corr = np.matmul(((lx1 - lx1.mean(axis=0)) / std1).T, (lx2 - mean2) / std2)
+        claim = np.zeros_like(corr)
+
+        for i in range(corr.shape[0]):
+            for j in range(corr.shape[1]):
+                if i == j: continue
+                else:
+                    if mean2[i] > mean2[j] and corr[i, j] > 0:
+                        # Correlation matrix
+                        claim[i, j] += corr[i, j]
+                        # autocorrelation
+                        if corr[i, i] < 0:
+                            claim[i, j] += abs(corr[i, i])
+                        if corr[j, j] < 0:
+                            claim[i, j] += abs(corr[j, j])
+
+        # calculate transfer
+        transfer = claim * 0.
+        for i in range(corr.shape[0]):
+            for j in range(corr.shape[1]):
+                if i == j: continue
+                else:
+                    transfer[i, j] = b[i] * claim[i, j] / (claim[i,:].sum() + self.epsilon)
+
+        for i in range(b.shape[0]):
+            b[i] += (transfer[:, i].sum() - transfer[i, :].sum())
+
+        return np.append(simplex_proj(b), [0.0])
+
+    def set_params(self, **kwargs):
+        self.window = int(kwargs['window'])
