@@ -791,7 +791,7 @@ class ConstantRebalance(APrioriAgent):
     Equally distribute portfolio every step
     """
     def __repr__(self):
-        return "ContantRebalanceTrader"
+        return "ContantRebalance"
 
     def __init__(self, position=None, fiat="USDT"):
         super().__init__(fiat)
@@ -1387,6 +1387,9 @@ class CWMR(APrioriAgent):
         Confidence weighted mean reversion strategy for online portfolio selection, 2013.
         http://jmlr.org/proceedings/papers/v15/li11b/li11b.pdf
     """
+
+    def __repr__(self):
+        return "CWMR"
 
     def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="USDT", name=""):
         """
