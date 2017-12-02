@@ -387,20 +387,23 @@ class TradingEnvironment(Env):
     # Exchange data getters
     def get_balance(self):
         """
-        Return balance
-        :return:
+        Get last balance from exchange
+        :return: dict: Dict containing Decimal values for portfolio allocation
         """
         try:
             balance = self.tapi.returnBalances()
 
             filtered_balance = {}
             for symbol in self.symbols:
-                filtered_balance[symbol] = balance[symbol]
+                filtered_balance[symbol] = convert_to.decimal(balance[symbol])
 
             return filtered_balance
 
         except Exception as e:
-            Logger.error(TradingEnvironment.get_balance, self.parse_error(e))
+            try:
+                Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e, balance))
+            except Exception:
+                Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e))
             raise e
 
     def get_fee(self, symbol, fee_type='takerFee'):
@@ -1516,24 +1519,6 @@ class LiveTradingEnvironment(TradingEnvironment):
         super().__init__(period, obs_steps, tapi, fiat, name)
 
     # Data feed methods
-    def get_balance(self):
-        """
-        Get last balance from exchange
-        :return: dict: Dict containing Decimal values for portfolio allocation
-        """
-        try:
-            balance = self.tapi.returnBalances()
-
-            filtered_balance = {}
-            for symbol in self.symbols:
-                filtered_balance[symbol] = convert_to.decimal(balance[symbol])
-
-            return filtered_balance
-
-        except Exception as e:
-            Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e, balance))
-            raise e
-
     def get_balance_array(self):
         """
         Return ordered balance array
@@ -1661,6 +1646,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                     else:
                         raise error
 
+                except DataFeedRetryException as error:
+                    Logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(error))
+                    return False
+
         except Exception as e:
             try:
                 Logger.error(LiveTradingEnvironment.immediate_sell,
@@ -1755,6 +1744,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                     else:
                         raise error
 
+                except DataFeedRetryException as error:
+                    Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error))
+                    return False
+
         except Exception as e:
             try:
                 Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error, price, amount, response))
@@ -1840,12 +1833,13 @@ class LiveTradingEnvironment(TradingEnvironment):
         :return: bool: True if fully executed; False otherwise.
         """
         try:
+            done = False
             self.status['NotEnoughFiat'] = False
             # First, assert action is valid
             action = self.assert_action(action)
 
             # Log desired action
-            self.log_action_vector(timestamp, action, False)
+            self.log_action_vector(timestamp, action, done)
 
             # Calculate position change given last portftolio and action vector
             ticker = self.tapi.returnTicker()
@@ -1857,11 +1851,15 @@ class LiveTradingEnvironment(TradingEnvironment):
             # Then, buy what you want
             resp_2 = self.rebalance_buy(balance_change)
 
+            # If everything went well, return True
+            if resp_1 and resp_2:
+                done = True
+
             # Get new ticker
             ticker = self.tapi.returnTicker()
 
             # Log executed action and final balance
-            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(ticker), True)
+            self.log_action_vector(self.timestamp, self.calc_portfolio_vector(ticker), done)
 
             # Update portfolio_df
             final_balance = self.get_balance()
@@ -1872,12 +1870,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.portval = {'portval': self.calc_total_portval(ticker),
                             'timestamp': self.portfolio_df.index[-1]}
 
-            # If everything went well, return True
-            if resp_1 and resp_2:
-                return True
-            # False otherwise
-            else:
-                return False
+            return done
 
         except DataFeedRetryException:
             Logger.error(LiveTradingEnvironment.online_rebalance, "Retries exhausted. Stopping actions.")
