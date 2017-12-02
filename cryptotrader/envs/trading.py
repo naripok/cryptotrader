@@ -13,8 +13,8 @@ import os
 import smtplib
 from socket import gaierror
 from datetime import datetime, timedelta, timezone
-from decimal import getcontext, localcontext, ROUND_UP, Decimal
-from time import sleep, time
+from decimal import localcontext, ROUND_UP, Decimal
+from time import sleep
 import pandas as pd
 import empyrical as ec
 import optunity as ot
@@ -23,7 +23,7 @@ from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
 from bokeh.models import HoverTool, Legend
 
-from ..exchange_api.poloniex import ExchangeError, Poloniex
+from ..exchange_api.poloniex import ExchangeError
 
 
 # Environments
