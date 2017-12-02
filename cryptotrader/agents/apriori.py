@@ -404,7 +404,13 @@ class APrioriAgent(Agent):
                 # If you've done enough tries, cancel action and wait for the next bar
                 except RetryException as e:
                     if 'retryDelays exhausted' in e.__str__():
-                        pass
+                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+
+                        try:
+                            sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
+                                  - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 30))
+                        except ValueError:
+                            sleep(1 + int(np.random.random(1) * 30))
                     else:
                         raise e
 

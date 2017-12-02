@@ -1304,6 +1304,7 @@ class TradingEnvironment(Env):
             except Exception as e:
                 Logger.error(TradingEnvironment.send_email, self.parse_error(e))
 
+
 class BacktestEnvironment(TradingEnvironment):
     """
     Backtest environment for financial strategies history testing
