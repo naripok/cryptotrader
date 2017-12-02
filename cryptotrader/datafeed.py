@@ -11,9 +11,7 @@ import threading
 from multiprocessing import Process
 from .exceptions import *
 
-# Exceptions
-
-
+debug = False
 
 # Base classes
 class ExchangeConnection(object):
@@ -172,7 +170,8 @@ class FeedDaemon(Process):
                     except ExchangeError as e:
                         rep = e.__str__()
 
-                    Logger.debug(FeedDaemon.worker, rep)
+                    if debug:
+                        Logger.debug(FeedDaemon.worker, rep)
 
                     # send reply back to client
                     sock.send_json(rep)
