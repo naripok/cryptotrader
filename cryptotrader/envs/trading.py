@@ -17,6 +17,7 @@ from decimal import getcontext, localcontext, ROUND_UP, Decimal
 from time import sleep, time
 import pandas as pd
 import empyrical as ec
+import optunity as ot
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
@@ -267,6 +268,88 @@ class TradingEnvironment(Env):
         n_pairs = len(self.pairs)
         self.benchmark = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
                                      dec_con.create_decimal(n_pairs)), [dec_zero])
+
+    def optimize_benchmark(self, nb_steps, verbose=False):
+        # Init var
+        i = 0
+
+        ## Acquire hindsight
+        # Save env obs_steps
+        obs_steps = self.obs_steps
+
+        # Change it so you can recover all the data
+        self.obs_steps = self.tapi.data_length
+
+        # Pull the entire data set
+        hindsight = self.get_observation().xs('open', level=1,
+                                             axis=1).rolling(2, min_periods=2).apply(
+            lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
+        hindsight['USDT'] = 1.0
+
+        hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
+
+        # Change env obs_steps back
+        self.obs_steps = obs_steps
+
+        # Calculate benchmark return
+        # Benchmark: Equally distributed constant rebalanced portfolio
+        ed_crp = array_normalize(np.append(np.ones(len(self.symbols) - 1), [0.0]))
+        ed_crp_returns = np.dot(hindsight, ed_crp)
+
+        ## Define params
+        # Constraints declaration
+        # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+
+        ## Define benchmark optimization routine
+        # @ot.constraints.constrained(bench_constrains)
+        # @ot.constraints.violations_defaulted(-10)
+        def find_bench(**kwargs):
+            try:
+                # Init variables
+                nonlocal i, nb_steps, hindsight, ed_crp_returns
+
+                # Best constant rebalance portfolio
+                b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
+
+                # Best constant rebalance portfolio returns
+                b_crp_returns = np.dot(hindsight, b_crp)
+
+                # Calculate sharpe regret
+                reward = safe_div(np.log10(b_crp_returns).sum(), b_crp_returns.std()) - \
+                         safe_div(np.log10(ed_crp_returns).sum(), ed_crp_returns.std())
+
+                # Increment counter
+                i += 1
+
+                # Update progress
+                if verbose and i % 10 == 0:
+                    print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
+                                                                                         nb_steps,
+                                                                                         float(reward)),
+                          end="\r")
+
+                return reward
+
+            except KeyboardInterrupt:
+                raise ot.api.fun.MaximumEvaluationsException(0)
+
+        # Search space declaration
+        n_assets = len(self.symbols)
+        bench_search_space = {str(i): j for i, j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
+        print("Optimizing benchmark...")
+
+        # Call optimizer to benchmark
+        BCR, info, _ = ot.maximize_structured(
+            find_bench,
+            num_evals=int(nb_steps * 10),
+            search_space=bench_search_space
+            )
+
+        env.benchmark = array_normalize(np.array([BCR[key] for key in BCR], dtype='f'))
+        print("\nOptimum benchmark reward: %f" % info.optimum)
+        print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
+
+        return self.benchmark
 
     def add_pairs(self, *args):
         """
@@ -727,7 +810,7 @@ class TradingEnvironment(Env):
         pr = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
         pr = np.append(safe_div(pr[-1], pr[-2]), [dec_one])
         pr_max = pr.max()
-        pr = safe_div(pr, pr_max)
+        # pr = safe_div(pr, pr_max)
 
         # port_log_return = rew_con.log10(np.dot(convert_to.decimal(self.action_df.iloc[-1].values[:-1]), pr))
         try:
@@ -736,11 +819,11 @@ class TradingEnvironment(Env):
         except IndexError:
             port_change = dec_one
 
-        port_log_return = rew_con.log10(safe_div(port_change, pr_max))
+        port_log_return = rew_con.ln(safe_div(port_change, pr_max))
 
-        bench_log_return = rew_con.log10(np.dot(self.benchmark, pr))
+        bench_log_return = rew_con.ln(safe_div(np.dot(self.benchmark, pr), pr_max))
 
-        return rew_con.subtract(port_log_return, bench_log_return).quantize(dec_zero)
+        return rew_con.subtract(port_log_return, bench_log_return)
 
     def simulate_trade(self, action, timestamp):
         """
