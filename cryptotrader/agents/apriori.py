@@ -11,9 +11,13 @@ from datetime import timedelta
 from numpy import diag, sqrt, log, trace
 from numpy.linalg import inv
 
+from ..exchange_api.poloniex import ExchangeError, RetryException
+
 import scipy
 from scipy.signal import argrelextrema
-from ..exchange_api.poloniex import ExchangeError, RetryException
+import cvxopt as opt
+opt.solvers.options['show_progress'] = False
+
 
 # TODO LIST
 # HEADING
@@ -953,14 +957,14 @@ class ONS(APrioriAgent):
         self.eta = eta
 
     def predict(self, obs):
-        price_relative = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
+        price_relative = np.ones(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
             price_relative[key] = np.float64(
                 obs.get_value(obs.index[-1], (symbol, 'open')) / obs.get_value(obs.index[-2], (symbol, 'open')))
-        return np.append(price_relative, [1.])
+        return price_relative
 
     def rebalance(self, obs):
-        if self.step == 0:
+        if not self.step:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
@@ -986,18 +990,21 @@ class ONS(APrioriAgent):
         return pp * (1 - self.eta) + np.ones(len(x)) / float(len(x)) * self.eta
 
     def projection_in_norm(self, x, M):
-        """ Projection of x to simplex indiced by matrix M. Uses quadratic programming.
+        """
+        Projection of x to simplex indiced by matrix M. Uses quadratic programming.
         """
         m = M.shape[0]
 
-        P = matrix(2 * M)
-        q = matrix(-2 * M * x)
-        G = matrix(-np.eye(m))
-        h = matrix(np.zeros((m, 1)))
-        A = matrix(np.ones((1, m)))
-        b = matrix(1.)
+        # Constrains matrices
+        P = opt.matrix(2 * M)
+        q = opt.matrix(-2 * M * x)
+        G = opt.matrix(-np.eye(m))
+        h = opt.matrix(np.zeros((m, 1)))
+        A = opt.matrix(np.ones((1, m)))
+        b = opt.matrix(1.)
 
-        sol = solvers.qp(P, q, G, h, A, b)
+        # Solve using quadratic programming
+        sol = opt.solvers.qp(P, q, G, h, A, b)
         return np.squeeze(sol['x'])
 
     def set_params(self, **kwargs):
@@ -1733,8 +1740,6 @@ class Anticor(APrioriAgent):
     It adopts the consistency of positive lagged cross-correlation and negative
     autocorrelation to adjust the portfolio. Eventhough it has no known bounds and
     hence is not considered to be universal, it has very strong empirical results.
-    It has implemented C version in scipy.weave to improve performance (around 10x speed up).
-    Another option is to use Numba.
     Reference:
         A. Borodin, R. El-Yaniv, and V. Gogan.  Can we learn to beat the best stock, 2005.
         http://www.cs.technion.ac.il/~rani/el-yaniv-papers/BorodinEG03.pdf

@@ -1,5 +1,8 @@
 # Cryptotrader - Cryptocurrency Trader Agent and Agent Development Environment
 
+THIS REPOSITORY IS IN FAST IN DEVELOPMENT STAGE, SO THE PREREQUISITES, DOCUMENTATION AND NOTEBOOKS ARE OFTEN OUTDATED!
+CONTRIBUTIONS ARE VERY WELCOME!
+
 This repository contains infra-structure for agent backtesting and cryptocoin trading. 
 It is under active development and is provided "AS-IS", without any warrants whatsoever.
 ## Getting Started
