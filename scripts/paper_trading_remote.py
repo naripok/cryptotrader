@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
     # Instantiate and setup agent
     # agent = apriori.TestAgent(env.get_observation(True).shape)
-    agent = apriori.PAMRTrader(sensitivity=0.02, alpha=3, C=None, variant='PAMR', name=test_name)
+    agent = apriori.PAMR(sensitivity=0.02, alpha=3, C=None, variant='PAMR', name=test_name)
 
     # Run simulation
     agent.trade(env, start_step=1, verbose=True, email=True)

@@ -719,12 +719,12 @@ class TestAgent(APrioriAgent):
                                                                              int(100 * self.step / nb_max_episode_steps)))
 
 
-class DummyTrader(APrioriAgent):
+class RandomWalk(APrioriAgent):
     """
     Dummytrader that sample actions from a random process
     """
     def __repr__(self):
-        return "DummyTrader"
+        return "RandomWalk"
 
     def __init__(self, random_process=None, activation='softmax', fiat="USDT"):
         """
@@ -761,12 +761,12 @@ class DummyTrader(APrioriAgent):
         return self.predict(obs)
 
 
-class Benchmark(APrioriAgent):
+class BuyAndHold(APrioriAgent):
     """
     Equally distribute cash at the first step and hold
     """
     def __repr__(self):
-        return "Benchmark"
+        return "BuyAndHold"
 
     def __init__(self, fiat="USDT"):
         super().__init__(fiat)
@@ -786,7 +786,7 @@ class Benchmark(APrioriAgent):
         return position
 
 
-class ConstantRebalanceTrader(APrioriAgent):
+class ConstantRebalance(APrioriAgent):
     """
     Equally distribute portfolio every step
     """
@@ -818,12 +818,12 @@ class ConstantRebalanceTrader(APrioriAgent):
 
 
 # Momentum
-class MomentumTrader(APrioriAgent):
+class Momentum(APrioriAgent):
     """
     Momentum trading agent
     """
     def __repr__(self):
-        return "MomentumTrader"
+        return "Momentum"
 
     def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
                  activation=simplex_proj, fiat="USDT"):
@@ -931,7 +931,7 @@ class MomentumTrader(APrioriAgent):
         self.std_span = int(kwargs['std_span'])
 
 
-class ONSTrader(APrioriAgent):
+class ONS(APrioriAgent):
     """
     Online Newton Step algorithm.
     Reference:
@@ -941,7 +941,7 @@ class ONSTrader(APrioriAgent):
     """
 
     def __repr__(self):
-        return "ONSTrader"
+        return "ONS"
 
     def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name=""):
         """
@@ -1126,7 +1126,7 @@ class HarmonicTrader(APrioriAgent):
 
 
 # Mean reversion
-class PAMRTrader(APrioriAgent):
+class PAMR(APrioriAgent):
     """
     Passive aggressive mean reversion strategy for portfolio selection.
 
@@ -1136,7 +1136,7 @@ class PAMRTrader(APrioriAgent):
         https://link.springer.com/content/pdf/10.1007%2Fs10994-012-5281-z.pdf
     """
     def __repr__(self):
-        return "PAMRTrader"
+        return "PAMR"
 
     def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT", name=""):
         """
@@ -1197,8 +1197,8 @@ class PAMRTrader(APrioriAgent):
 
         if portvar > 1 + self.sensitivity:
             le = portvar - (1 + self.sensitivity)
-        elif portvar < 1 - self.sensitivity:
-            le = (1 - self.sensitivity) - portvar
+        # elif portvar < 1 - self.sensitivity:
+        #     le = (1 - self.sensitivity) - portvar
 
         if self.variant == 'PAMR0':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
@@ -1226,7 +1226,7 @@ class PAMRTrader(APrioriAgent):
         self.alpha = kwargs['alpha']
 
 
-class OLMARTrader(APrioriAgent):
+class OLMAR(APrioriAgent):
     """
         On-Line Portfolio Selection with Moving Average Reversio
 
@@ -1237,7 +1237,7 @@ class OLMARTrader(APrioriAgent):
         """
 
     def __repr__(self):
-        return "OLMARTrader"
+        return "OLMAR"
 
     def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT", name=""):
         """
@@ -1304,7 +1304,7 @@ class OLMARTrader(APrioriAgent):
         self.smooth = kwargs['smooth']
 
 
-class STMRTrader(APrioriAgent):
+class STMR(APrioriAgent):
     """
     Short term mean reversion strategy for portfolio selection.
 
@@ -1312,7 +1312,7 @@ class STMRTrader(APrioriAgent):
     27/11/2017
     """
     def __repr__(self):
-        return "STMRTrader"
+        return "STMR"
 
     def __init__(self, sensitivity=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
         """
@@ -1388,7 +1388,7 @@ class CWMR(APrioriAgent):
         http://jmlr.org/proceedings/papers/v15/li11b/li11b.pdf
     """
 
-    def __init__(self, eps=-0.5, confidence=0.95, rebalance=True, fiat="USDT", name=""):
+    def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="USDT", name=""):
         """
         :param eps: Mean reversion threshold (expected return on current day must be lower
                     than this threshold). Recommended value is -0.5.
@@ -1406,6 +1406,7 @@ class CWMR(APrioriAgent):
             self.reb = -1
         self.eps = eps
         self.theta = scipy.stats.norm.ppf(confidence)
+        self.var = var
 
     def predict(self, obs):
         """
@@ -1448,33 +1449,64 @@ class CWMR(APrioriAgent):
         return np.array(mu.T).ravel()
 
     def calculate_change(self, x, x_upper, mu, sigma, M, V, theta, eps):
-        # lambda from equation 7
-        foo = (V - x_upper * x.T * np.sum(sigma, axis=1)) / M ** 2 + V * theta ** 2 / 2.
-        a = foo ** 2 - V ** 2 * theta ** 4 / 4
-        b = 2 * (eps - log(M)) * foo
-        c = (eps - log(M)) ** 2 - V * theta ** 2
+        if not self.var:
+            # lambda from equation 7
+            foo = (V - x_upper * x.T * np.sum(sigma, axis=1)) / M ** 2 + V * theta ** 2 / 2.
+            a = foo ** 2 - V ** 2 * theta ** 4 / 4
+            b = 2 * (eps - log(M)) * foo
+            c = (eps - log(M)) ** 2 - V * theta ** 2
 
-        a, b, c = a[0, 0], b[0, 0], c[0, 0]
+            a, b, c = a[0, 0], b[0, 0], c[0, 0]
 
-        lam = max(0,
-                  (-b + sqrt(b ** 2 - 4 * a * c)) / (2. * a),
-                  (-b - sqrt(b ** 2 - 4 * a * c)) / (2. * a))
-        # bound it due to numerical problems
-        lam = min(lam, 1E+7)
+            lam = max(0,
+                      (-b + sqrt(b ** 2 - 4 * a * c)) / (2. * a),
+                      (-b - sqrt(b ** 2 - 4 * a * c)) / (2. * a))
+            # bound it due to numerical problems
+            lam = min(lam, 1E+7)
 
-        # update mu and sigma
-        U_sqroot = 0.5 * (-lam * theta * V + sqrt(lam ** 2 * theta ** 2 * V ** 2 + 4 * V))
-        mu = mu - lam * sigma * (x - x_upper) / M
-        sigma = inv(inv(sigma) + theta * lam / U_sqroot * diag(x) ** 2)
-        """
-        tmp_sigma = inv(inv(sigma) + theta*lam/U_sqroot*diag(xt)^2);
-        % Don't update sigma if results are badly scaled.
-        if all(~isnan(tmp_sigma(:)) & ~isinf(tmp_sigma(:)))
-            sigma = tmp_sigma;
-        end
-        """
+            # update mu and sigma
+            U_sqroot = 0.5 * (-lam * theta * V + sqrt(lam ** 2 * theta ** 2 * V ** 2 + 4 * V))
+            mu = mu - lam * sigma * (x - x_upper) / M
+            sigma = inv(inv(sigma) + theta * lam / U_sqroot * diag(x) ** 2)
+            """
+            tmp_sigma = inv(inv(sigma) + theta*lam/U_sqroot*diag(xt)^2);
+            % Don't update sigma if results are badly scaled.
+            if all(~isnan(tmp_sigma(:)) & ~isinf(tmp_sigma(:)))
+                sigma = tmp_sigma;
+            end
+            """
 
-        return mu, sigma
+            return mu, sigma
+
+        else:
+            """ First variant of a CWMR outlined in original article. It is
+            only approximation to the posted problem. """
+            # lambda from equation 7
+            foo = (V - x_upper * x.T * np.sum(sigma, axis=1)) / M ** 2
+            a = 2 * theta * V * foo
+            b = foo + 2 * theta * V * (eps - log(M))
+            c = eps - log(M) - theta * V
+
+            a, b, c = a[0, 0], b[0, 0], c[0, 0]
+
+            lam = max(0,
+                      (-b + sqrt(b ** 2 - 4 * a * c)) / (2. * a),
+                      (-b - sqrt(b ** 2 - 4 * a * c)) / (2. * a))
+            # bound it due to numerical problems
+            lam = min(lam, 1E+7)
+
+            # update mu and sigma
+            mu = mu - lam * sigma * (x - x_upper) / M
+            sigma = inv(inv(sigma) + 2 * lam * theta * diag(x) ** 2)
+            """
+            tmp_sigma = inv(inv(sigma) + theta*lam/U_sqroot*diag(xt)^2);
+            % Don't update sigma if results are badly scaled.
+            if all(~isnan(tmp_sigma(:)) & ~isinf(tmp_sigma(:)))
+                sigma = tmp_sigma;
+            end
+            """
+
+            return mu, sigma
 
     def rebalance(self, obs):
         """
@@ -1499,7 +1531,7 @@ class CWMR(APrioriAgent):
 
 
 # Portfolio optimization
-class TCOTrader(APrioriAgent):
+class TCO(APrioriAgent):
     """
     Transaction cost optimization for online portfolio selection
 
@@ -1508,7 +1540,7 @@ class TCOTrader(APrioriAgent):
         http://ink.library.smu.edu.sg/cgi/viewcontent.cgi?article=4761&context=sis_research
     """
     def __repr__(self):
-        return "TCOTrader"
+        return "TCO"
 
     def __init__(self, toff=0.1, predictor=None, fiat="USDT", name=""):
         """
@@ -1693,7 +1725,7 @@ class FactorTrader(APrioriAgent):
             return opt_params, info
 
 
-class AnticorTrader(APrioriAgent):
+class Anticor(APrioriAgent):
     """ Anticor (anti-correlation) is a heuristic portfolio selection algorithm.
     It adopts the consistency of positive lagged cross-correlation and negative
     autocorrelation to adjust the portfolio. Eventhough it has no known bounds and
@@ -1706,7 +1738,7 @@ class AnticorTrader(APrioriAgent):
     """
 
     def __repr__(self):
-        return "AnticorTrader"
+        return "Anticor"
 
     def __init__(self, window=30, fiat="USDT"):
         """
