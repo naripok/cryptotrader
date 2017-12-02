@@ -184,96 +184,17 @@ class APrioriAgent(Agent):
         """
         try:
             # Initialize train
+            env.training = True
             i = 0
             t0 = time()
-            env.training = True
 
             if verbose:
                 print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
 
             ### First, optimize benchmark
-
-            ## Acquire hindsight
-
-            # Save env obs_steps
-            obs_steps = env.obs_steps
-
-            # Change it so you can recover all the data
-            env.obs_steps = env.tapi.data_length
-
-            # Pull the entire data set
-            hindsight = env.get_observation().xs('open', level=1,
-                            axis=1).rolling(2, min_periods=2).apply(lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
-            hindsight['USDT'] = 1.0
-
-            hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
-
-            # Change env obs_steps back
-            env.obs_steps = obs_steps
-
-            # Calculate benchmark return
-            # Benchmark: Equally distributed constant rebalanced portfolio
-            ed_crp = array_normalize(np.append(np.ones(len(env.symbols) - 1), [0.0]))
-            ed_crp_returns = np.dot(hindsight, ed_crp)
-
-            ## Define params
-            # Constraints declaration
-            # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
-
-            ## Define benchmark optimization routine
-            # @ot.constraints.constrained(bench_constrains)
-            # @ot.constraints.violations_defaulted(-10)
-            def find_bench(**kwargs):
-                try:
-                    # Init variables
-                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps, hindsight, ed_crp_returns
-
-                    # Best constant rebalance portfolio
-                    b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
-
-                    # Best constant rebalance portfolio returns
-                    b_crp_returns = np.dot(hindsight, b_crp)
-
-                    # Calculate sharpe regret
-                    reward = safe_div(np.log10(b_crp_returns).sum(), b_crp_returns.std()) -\
-                             safe_div(np.log10(ed_crp_returns).sum(), ed_crp_returns.std())
-
-                    # Increment counter
-                    i += 1
-
-                    # Update progress
-                    if verbose and i % 10 == 0:
-                        print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
-                                                                            nb_steps * 10,
-                                                                            float(reward)),
-                              end="\r")
-                        t0 = time()
-
-                    return reward
-
-                except KeyboardInterrupt:
-                    raise ot.api.fun.MaximumEvaluationsException(0)
-
-            # Search space declaration
-            n_assets = len(env.symbols)
-            bench_search_space = {str(i): j for i,j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
-            print("Optimizing benchmark...")
-
-            # Call optimizer to benchmark
-            BCR, info, _ = ot.maximize_structured(
-                                                  find_bench,
-                                                  num_evals=int(nb_steps * 10),
-                                                  search_space=bench_search_space
-                                              )
-
-            env.benchmark = array_normalize(np.array([BCR[key] for key in BCR], dtype='f'))
-            print("\nOptimum benchmark reward: %f" % info.optimum)
-            print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, env.benchmark.astype(float))
+            env.optimize_benchmark(nb_steps * 100, verbose=True)
 
             ## Now optimize model w.r.t benchmark
-            i = 0
-            t0 = time()
-
             # First define optimization constrains
             # Ex constrain:
             # @ot.constraints.constrained([lambda mean_type,
@@ -531,7 +452,8 @@ class APrioriAgent(Agent):
             prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
             last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
         except IndexError:
-            init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
+            init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0],
+                                                                                          'portval'))
 
         # Returns summary
         msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(

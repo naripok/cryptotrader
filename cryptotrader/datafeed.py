@@ -11,7 +11,7 @@ import threading
 from multiprocessing import Process
 from .exceptions import *
 
-debug = False
+debug = True
 
 # Base classes
 class ExchangeConnection(object):
@@ -256,8 +256,7 @@ class DataFeed(ExchangeConnection):
                     problems.append(problem)
                     if delay is None:
                         Logger.debug(DataFeed, problems)
-                        raise DataFeedRetryException(
-                            'retryDelays exhausted ' + str(problem))
+                        raise DataFeedRetryException('retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait
                         Logger.debug(DataFeed, problem)
@@ -312,7 +311,13 @@ class DataFeed(ExchangeConnection):
 
     @retry
     def returnTicker(self):
-        return self.get_response('returnTicker')
+        try:
+            rep = self.get_response('returnTicker')
+            assert isinstance(rep, dict)
+            return rep
+
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnTicker")
 
     @retry
     def returnBalances(self):
@@ -320,7 +325,13 @@ class DataFeed(ExchangeConnection):
         Return balance from exchange. API KEYS NEEDED!
         :return: list:
         """
-        return self.get_response('returnBalances')
+        try:
+            rep = self.get_response('returnBalances')
+            assert isinstance(rep, dict)
+            return rep
+
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnBalances")
 
     @retry
     def returnFeeInfo(self):
@@ -328,7 +339,13 @@ class DataFeed(ExchangeConnection):
         Returns exchange fee informartion
         :return:
         """
-        return self.get_response('returnFeeInfo')
+        try:
+            rep = self.get_response('returnFeeInfo')
+            assert isinstance(rep, dict)
+            return rep
+
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnFeeInfo")
 
     @retry
     def returnCurrencies(self):
@@ -336,7 +353,13 @@ class DataFeed(ExchangeConnection):
         Return exchange currency pairs
         :return: list:
         """
-        return self.get_response('returnCurrencies')
+        try:
+            rep = self.get_response('returnCurrencies')
+            assert isinstance(rep, dict)
+            return rep
+
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnCurrencies")
 
     @retry
     def returnChartData(self, currencyPair, period, start=None, end=None):
@@ -348,91 +371,108 @@ class DataFeed(ExchangeConnection):
         :param end:  str: UNIX timestamp to end returned data
         :return: list: List containing desired asset data in "records" format
         """
+        try:
+            call = "returnChartData %s %s %s %s" % (str(currencyPair),
+                                                    str(period),
+                                                    str(start),
+                                                    str(end))
+            rep = self.get_response(call)
 
-        call = "returnChartData %s %s %s %s" % (str(currencyPair),
-                                                str(period),
-                                                str(start),
-                                                str(end))
-        rep = self.get_response(call)
+            if 'Invalid currency pair.' in rep:
+                try:
+                    symbols = currencyPair.split('_')
+                    pair = symbols[1] + '_' + symbols[0]
 
-        if 'Invalid currency pair.' in rep:
-            try:
-                symbols = currencyPair.split('_')
-                pair = symbols[1] + '_' + symbols[0]
+                    call = "returnChartData %s %s %s %s" % (str(pair),
+                                                            str(period),
+                                                            str(start),
+                                                            str(end))
 
-                call = "returnChartData %s %s %s %s" % (str(pair),
-                                                        str(period),
-                                                        str(start),
-                                                        str(end))
+                    rep =  json.loads(
+                        self.pair_reciprocal(pd.DataFrame.from_records(self.get_response(call))).to_json(
+                            orient='records'))
+                except Exception as e:
+                    raise e
 
-                rep =  json.loads(
-                    self.pair_reciprocal(pd.DataFrame.from_records(self.get_response(call))).to_json(
-                        orient='records'))
-            except Exception as e:
-                raise e
+            assert isinstance(rep, list)
+            return rep
 
-        return rep
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnChartData")
 
     @retry
     def returnTradeHistory(self, currencyPair='all', start=None, end=None):
-        call = "returnTradeHistory %s %s %s" % (str(currencyPair),
-                                                    str(start),
-                                                    str(end))
+        try:
+            call = "returnTradeHistory %s %s %s" % (str(currencyPair),
+                                                        str(start),
+                                                        str(end))
 
-        rep = self.get_response(call)
-        return rep
+            rep = self.get_response(call)
+
+            assert isinstance(rep, dict)
+            return rep
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.returnTradeHistory")
 
     @retry
     def sell(self, currencyPair, rate, amount, orderType=False):
+        try:
+            call = "sell %s %s %s %s" % (str(currencyPair),
+                                                    str(rate),
+                                                    str(amount),
+                                                    str(orderType))
+            rep = self.get_response(call)
 
-        call = "sell %s %s %s %s" % (str(currencyPair),
-                                                str(rate),
-                                                str(amount),
-                                                str(orderType))
-        rep = self.get_response(call)
+            if 'Invalid currency pair.' in rep:
+                try:
+                    symbols = currencyPair.split('_')
+                    pair = symbols[1] + '_' + symbols[0]
 
-        if 'Invalid currency pair.' in rep:
-            try:
-                symbols = currencyPair.split('_')
-                pair = symbols[1] + '_' + symbols[0]
+                    call = "sell %s %s %s %s" % (str(pair),
+                                                 str(rate),
+                                                 str(amount),
+                                                 str(orderType))
 
-                call = "sell %s %s %s %s" % (str(pair),
-                                             str(rate),
-                                             str(amount),
-                                             str(orderType))
+                    rep = self.get_response(call)
 
-                rep = self.get_response(call)
+                except Exception as e:
+                    raise e
 
-            except Exception as e:
-                raise e
+            assert isinstance(rep, str) or isinstance(rep, dict)
+            return rep
 
-        return rep
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.sell")
 
     @retry
     def buy(self, currencyPair, rate, amount, orderType=False):
+        try:
+            call = "buy %s %s %s %s" % (str(currencyPair),
+                                         str(rate),
+                                         str(amount),
+                                         str(orderType))
+            rep = self.get_response(call)
 
-        call = "buy %s %s %s %s" % (str(currencyPair),
-                                     str(rate),
-                                     str(amount),
-                                     str(orderType))
-        rep = self.get_response(call)
+            if 'Invalid currency pair.' in rep:
+                try:
+                    symbols = currencyPair.split('_')
+                    pair = symbols[1] + '_' + symbols[0]
 
-        if 'Invalid currency pair.' in rep:
-            try:
-                symbols = currencyPair.split('_')
-                pair = symbols[1] + '_' + symbols[0]
+                    call = "buy %s %s %s %s" % (str(pair),
+                                                 str(rate),
+                                                 str(amount),
+                                                 str(orderType))
 
-                call = "buy %s %s %s %s" % (str(pair),
-                                             str(rate),
-                                             str(amount),
-                                             str(orderType))
+                    rep = self.get_response(call)
 
-                rep = self.get_response(call)
+                except Exception as e:
+                    raise e
 
-            except Exception as e:
-                raise e
+            assert isinstance(rep, str) or isinstance(rep, dict)
+            return rep
 
-        return rep
+        except AssertionError:
+            raise DataFeedException("Unexpected response from DataFeed.buy")
 
 
 # Test datafeeds
