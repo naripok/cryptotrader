@@ -308,9 +308,6 @@ class APrioriAgent(Agent):
         :return:
         """
         try:
-            # Init variables
-            self.step = start_step
-
             # Fiat symbol
             self.fiat = env._fiat
 
@@ -339,6 +336,14 @@ class APrioriAgent(Agent):
                 )
 
             Logger.info(APrioriAgent.trade, "Starting trade routine...")
+
+            if verbose:
+                msg = self.make_report(env, obs, reward, episode_reward, t0, init_time, env.calc_portfolio_vector())
+                print(msg, end="\r", flush=True)
+
+            # Init step counter
+            self.step = start_step
+
             while True:
                 try:
                     # Log action time
@@ -527,7 +532,7 @@ class APrioriAgent(Agent):
 
             msg += "%-9s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
 
-        msg += "Mean pct change:                          %5.02f %%\n" % (adm / k)
+        msg += "Mean change:                              %5.02f %%\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -582,7 +587,7 @@ class APrioriAgent(Agent):
                 describe(percentiles=[0.95, 0.05]).to_dict()
         for symbol in sl:
             if symbol is not 'count':
-                msg += "%-4s: %.02f %%\n" % (str(symbol), sl[symbol])
+                msg += "%-4s: %7.02f %%\n" % (str(symbol), sl[symbol])
 
         # Operational status summary
         msg += "\nStatus: %s\n" % str(env.status)
