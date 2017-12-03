@@ -491,15 +491,27 @@ class BacktestDataFeed(ExchangeConnection):
         self._balance = balance
         self.data_length = 0
         self.load_dir = load_dir
+        self.tax = {'makerFee': '0.00150000',
+                'nextTier': '600.00000000',
+                'takerFee': '0.00250000',
+                'thirtyDayVolume': '0.00000000'}
 
     def returnBalances(self):
         return self._balance
 
-    def returnFeeInfo(self):
-        return {'makerFee': '0.00150000',
+    def set_tax(self, tax):
+        """
+        {'makerFee': '0.00150000',
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
+        :param dict:
+        :return:
+        """
+        self.tax.update(tax)
+
+    def returnFeeInfo(self):
+        return self.tax
 
     def returnCurrencies(self):
         if self.load_dir:
