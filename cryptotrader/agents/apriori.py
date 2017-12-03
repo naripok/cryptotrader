@@ -314,44 +314,37 @@ class APrioriAgent(Agent):
             # Fiat symbol
             self.fiat = env._fiat
 
-            # Reset env and get initial env
+            # Reset env and get initial obs
             env.reset_status()
             obs = env.reset()
 
-            action = np.zeros(len(env.symbols))
-            status = env.status
-            last_action_time = floor_datetime(env.timestamp, env.period)
-            t0 = time()
-
+            # Set flags
             can_act = act_now
-            may_report = False
+            may_report = True
+            status = env.status
 
+            # Get initial values
             init_portval = env.calc_total_portval()
-            init_time = loop_time = env.timestamp
+            init_time = env.timestamp
+            last_action_time = floor_datetime(env.timestamp, env.period)
+            t0 = time() # # TODO: use datetime
+
+            # Initialize var
             episode_reward = 0
             reward = 0
 
             print(
                 "Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
-                                                                                                             init_portval))
+                                                                                                             init_portval)
+                )
 
             Logger.info(APrioriAgent.trade, "Starting trade routine...")
             while True:
                 try:
-                    # Report generation
-                    if verbose or email:
-                        msg = self.make_report(env, obs, reward, episode_reward, t0, loop_time)
-
-                        if verbose:
-                            print(msg, end="\r", flush=True)
-
-                        if email and may_report:
-                            if hasattr(env, 'email'):
-                                env.send_email("Trading report " + self.name, msg)
-                            may_report = False
-
                     # Log action time
                     loop_time = env.timestamp
+
+                    # Can act?
                     if loop_time >= last_action_time + timedelta(minutes=env.period):
                         can_act = True
                         try:
@@ -364,8 +357,25 @@ class APrioriAgent(Agent):
                         # Log action time
                         last_action_time = floor_datetime(env.timestamp, env.period)
 
+                        # Ask oracle for a prediction
                         action = self.rebalance(env.get_observation(True).astype(np.float64))
+
+                        # Generate report
+                        if verbose or email:
+                            msg = self.make_report(env, obs, reward, episode_reward, t0, loop_time, action)
+
+                            if verbose:
+                                print(msg, end="\r", flush=True)
+
+                            if email and may_report:
+                                if hasattr(env, 'email'):
+                                    env.send_email("Trading report " + self.name, msg)
+                                may_report = False
+
+                        # Sample environment
                         obs, reward, done, status = env.step(action)
+
+                        # Accumulate reward
                         episode_reward += reward
 
                         # If action is complete, increment step counter, log action time and allow report
@@ -459,7 +469,7 @@ class APrioriAgent(Agent):
                                                                init_portval,
                                                                env.calc_total_portval()))
 
-    def make_report(self, env, obs, reward, episode_reward, t0, action_time):
+    def make_report(self, env, obs, reward, episode_reward, t0, action_time, next_action):
         """
         Report generator
         :param env:
@@ -494,16 +504,16 @@ class APrioriAgent(Agent):
             )) + " %\n"
 
         # Time summary
-        msg += "\nLocal time: {0}\nAction time: {1}\nTstamp: {2}\nUptime: {3}\n".format(
+        msg += "\nLocal time: {0}\nTstamp: {1}\nLoop time: {2}\nUptime: {3}\n".format(
             datetime.now(),
-            action_time,
             str(obs.index[-1]),
+            action_time,
             str(pd.to_timedelta(time() - t0, unit='s'))
             )
 
         # Prices summary
         msg += "\nPrices summary:\n"
-        msg += "           Prev open:    Last price:     Pct change:\n"
+        msg += "Pair:      Prev open:    Last price:     Pct change:\n"
 
         adm = 0.0
         k = 0
@@ -517,7 +527,7 @@ class APrioriAgent(Agent):
 
             msg += "%-9s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
 
-        msg += "Mean pct change: %5.02f %%\n" % (adm / k)
+        msg += "Mean pct change:                          %5.02f %%\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -536,17 +546,21 @@ class APrioriAgent(Agent):
         # Last action
         la = env.action_df.iloc[-1].astype(str).to_dict()
 
-        msg += "        Previous:  Desired:   Executed:  Diff:\n"
-        for symbol in pa:
+        msg += "Symbol: Previous:  Desired:   Executed:  Next:\n"
+        for i, symbol in enumerate(pa):
             if symbol is not "online":
                 pac = 100 * float(pa[symbol])
                 dac = 100 * float(da[symbol])
                 nac = 100 * float(la[symbol])
-                ad = nac - pac
+                na = 100 * float(next_action[i])
 
-                msg += "%-6s:  %5.02f %%    %5.02f %%    %5.02f %%    %5.02f %%\n" % (symbol, pac, dac, nac, ad)
+                msg += "%-6s:  %5.02f %%    %5.02f %%    %5.02f %%    %5.02f %%\n" % (symbol,
+                                                                                       pac,
+                                                                                       dac,
+                                                                                       nac,
+                                                                                       na)
             else:
-                msg += "%s:  %s                 %s\n" % (symbol, pa[symbol], la[symbol])
+                msg += "%s: %s                 %s\n" % (symbol, pa[symbol], la[symbol])
 
         # Turnover
         try:
@@ -556,19 +570,19 @@ class APrioriAgent(Agent):
 
         tu = min(abs(np.clip(ad, 0.0, np.inf).sum()),
                  abs(np.clip(ad, -np.inf, 0.0).sum()))
-        msg += "\nPortfolio Turnover: %f %%\n" % (tu * 100)
+        msg += "\nPortfolio Turnover: %.02f %%\n" % (tu * 100)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
         try:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-2])).drop('online').astype('f').\
-                describe(percentiles=[0.95, 0.05]).astype(str).to_dict()
+                describe(percentiles=[0.95, 0.05]).to_dict()
         except IndexError:
             sl = (100 * (env.action_df.iloc[-1] - env.action_df.iloc[-1])).drop('online').astype('f').\
-                describe(percentiles=[0.95, 0.05]).astype(str).to_dict()
+                describe(percentiles=[0.95, 0.05]).to_dict()
         for symbol in sl:
             if symbol is not 'count':
-                msg += str(symbol) + ": " + sl[symbol] + '\n'
+                msg += "%-4s: %.02f %%\n" % (str(symbol), sl[symbol])
 
         # Operational status summary
         msg += "\nStatus: %s\n" % str(env.status)
