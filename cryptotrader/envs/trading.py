@@ -854,18 +854,12 @@ class TradingEnvironment(Env):
         try:
             # Assert inputs
             action = self.assert_action(action)
-            # for symbol in self._get_df_symbols(no_fiat=True): TODO FIX THIS
-            #     self.observation_space.contains(observation[symbol])
-            # assert isinstance(timestamp, pd.Timestamp)
-
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
 
             # Calculate position change given action
             posit_change = dec_vec_sub(action, self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
-            portval = self.calc_total_portval()
+            portval = self.calc_total_portval(timestamp)
 
             # Sell assets first
             for i, change in enumerate(posit_change):
@@ -885,7 +879,7 @@ class TradingEnvironment(Env):
                     self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
             # Uodate prev portval with deduced taxes
-            portval = self.calc_total_portval()
+            portval = self.calc_total_portval(timestamp)
 
             # Then buy some goods
             for i, change in enumerate(posit_change):
@@ -920,7 +914,7 @@ class TradingEnvironment(Env):
 
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(),
-                            'timestamp': self.portfolio_df.index[-1]}
+                            'timestamp': timestamp}
 
             return True
 
@@ -1433,9 +1427,6 @@ class BacktestEnvironment(TradingEnvironment):
             # Simulate portifolio rebalance
             self.simulate_trade(action, timestamp)
 
-            # Calculate new portval
-            self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
-
             # Check for end condition
             if self.index >= self.data_length - 2:
                 done = True
@@ -1507,8 +1498,11 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Get step timestamp
             timestamp = self.timestamp
 
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
+
             # Save portval for reward calculation
-            previous_portval = self.calc_total_portval()
+            previous_portval = self.calc_total_portval(timestamp)
 
             # Simulate portifolio rebalance
             done = self.simulate_trade(action, timestamp)
@@ -1867,9 +1861,6 @@ class LiveTradingEnvironment(TradingEnvironment):
             # First, assert action is valid
             action = self.assert_action(action)
 
-            # Log desired action
-            self.log_action_vector(timestamp, action, done)
-
             # Calculate position change given last portftolio and action vector
             ticker = self.tapi.returnTicker()
             balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
@@ -1950,6 +1941,9 @@ class LiveTradingEnvironment(TradingEnvironment):
         try:
             # Get step timestamp
             timestamp = self.timestamp
+
+            # Log desired action
+            self.log_action_vector(timestamp, action, False)
 
             # Save portval for reward calculation
             previous_portval = self.calc_total_portval()

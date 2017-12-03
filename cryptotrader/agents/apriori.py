@@ -83,7 +83,7 @@ class APrioriAgent(Agent):
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
-    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False, start_step=0,
+    def test(self, env, nb_episodes=1, reward_type='sharpe', action_repetition=1, callbacks=None, visualize=False, start_step=0,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
         """
         Test agent on environment
@@ -117,8 +117,15 @@ class APrioriAgent(Agent):
                     action = self.rebalance(obs)
                     obs, reward, _, status = env.step(action)
 
-                    # Accumulate returns and regret
-                    episode_reward += safe_div(reward, env.portfolio_df.portval.astype('f').std())
+                    # Accumulate reward
+                    # Sharpe
+                    if reward_type == 'sharpe':
+                        episode_reward += safe_div(reward, env.portfolio_df.portval.astype('f').std())
+                    # Payoff
+                    elif reward_type == 'payoff':
+                        episode_reward += reward
+                    else:
+                        raise TypeError("Bad reward argument.")
 
                     # Increment step counter
                     self.step += 1
@@ -1131,7 +1138,7 @@ class PAMR(APrioriAgent):
     def __repr__(self):
         return "PAMR"
 
-    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT", name="PAMR"):
+    def __init__(self, eps=0.03, C=2444, variant="PAMR1", fiat="USDT", name="PAMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
@@ -1139,7 +1146,7 @@ class PAMR(APrioriAgent):
         :
         """
         super().__init__(fiat=fiat, name=name)
-        self.sensitivity = sensitivity
+        self.eps = eps
         self.C = C
         self.variant = variant
 
@@ -1148,7 +1155,7 @@ class PAMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
 
         return price_relative
 
@@ -1183,10 +1190,10 @@ class PAMR(APrioriAgent):
 
         x_mean = np.mean(x)
 
-        le = max(0., np.dot(b, x) - self.sensitivity)
+        le = max(0., np.dot(b, x) - self.eps)
 
         if self.variant == 'PAMR0':
-            lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
+            lam = safe_div(le, np.linalg.norm(x - x_mean) ** 2)
         elif self.variant == 'PAMR1':
             lam = min(self.C, safe_div(le, np.linalg.norm(x - x_mean) ** 2))
         elif self.variant == 'PAMR2':
@@ -1198,13 +1205,13 @@ class PAMR(APrioriAgent):
         lam = min(100000, lam)
 
         # update portfolio
-        b = b + lam * (x - x_mean)
+        b += lam * (x - x_mean)
 
         # project it onto simplex
         return simplex_proj(b)
 
     def set_params(self, **kwargs):
-        self.sensitivity = kwargs['sensitivity']
+        self.eps = kwargs['eps']
         if 'C' in kwargs:
             self.C = kwargs['C']
         self.variant = kwargs['variant']
@@ -1238,7 +1245,6 @@ class OLMAR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-
         price_predict = np.append(safe_div(prices.iloc[-self.window:].mean().values, prices.iloc[-1].values), [1.0])
 
         return price_predict
@@ -1321,7 +1327,7 @@ class CWMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
 
         return price_relative
 
@@ -1445,12 +1451,12 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, sensitivity=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
-        self.sensitivity = sensitivity
+        self.eps = eps
         self.activation = activation
         if rebalance:
             self.reb = -2
@@ -1462,7 +1468,7 @@ class STMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2]) - 1).values, [0.0])
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
 
         return price_relative
 
@@ -1472,15 +1478,15 @@ class STMR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if self.step == 0:
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
             return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
 
     def update(self, b, x):
         """
@@ -1492,9 +1498,9 @@ class STMR(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = abs((portvar + x[np.argmax(abs(x))]) / 2)
+        change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
 
-        lam = np.clip(safe_div(change - self.sensitivity, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
+        lam = np.clip(safe_div(change - self.eps, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
 
         # update portfolio
         b = b + lam * (x - x_mean)
@@ -1503,7 +1509,7 @@ class STMR(APrioriAgent):
         return self.activation(b)
 
     def set_params(self, **kwargs):
-        self.sensitivity = kwargs['sensitivity']
+        self.eps = kwargs['eps']
 
 
 # Portfolio optimization
