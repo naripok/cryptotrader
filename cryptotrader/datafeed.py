@@ -239,6 +239,9 @@ class DataFeed(ExchangeConnection):
         self.poll = zmq.Poller()
         self.poll.register(self.sock, zmq.POLLIN)
 
+    def __del__(self):
+        self.sock.close()
+
     # Retry decorator
     def retry(func):
         """ Retry decorator """

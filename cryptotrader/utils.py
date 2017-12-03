@@ -21,11 +21,6 @@ dec_one = dec_con.create_decimal('1.0000000000000000')
 dec_eps = dec_con.create_decimal('1E-16')
 dec_qua = dec_con.create_decimal('1E-8')
 
-# Decimal vector operations
-dec_vec_div = np.vectorize(dec_con.divide)
-dec_vec_mul = np.vectorize(dec_con.multiply)
-dec_vec_sub = np.vectorize(dec_con.subtract)
-
 # Reward decimal context
 rew_con = Context(prec=64, Emax=33, Emin=-33)
 rew_quant = rew_con.create_decimal('0E-32')
@@ -87,22 +82,25 @@ class Logger(object):
 
 
 # Helper functions and classes
-def safe_div(x, y, eps=dec_eps):
+def safe_div(x, y, eps=(dec_eps, 1e-8)):
     try:
         out = dec_con.divide(x, y)
     except DivisionByZero:
-        out = dec_con.divide(x, y + eps)
+        out = dec_con.divide(x, y + eps[0])
     except InvalidOperation:
-        out = dec_con.divide(x, y + eps)
+        out = dec_con.divide(x, y + eps[0])
     except TypeError:
         try:
             out = x / y
-        except DivisionByZero:
-            out = x / (y + eps)
-        except InvalidOperation:
-            out = x / (y + eps)
+        except ZeroDivisionError:
+            out = x / (y + eps[1])
 
     return out
+
+# Decimal vector operations
+dec_vec_div = np.vectorize(safe_div)
+dec_vec_mul = np.vectorize(dec_con.multiply)
+dec_vec_sub = np.vectorize(dec_con.subtract)
 
 
 def floor_datetime(t, period):

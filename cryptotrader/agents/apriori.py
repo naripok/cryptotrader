@@ -18,7 +18,6 @@ from scipy.signal import argrelextrema
 import cvxopt as opt
 opt.solvers.options['show_progress'] = False
 
-
 # TODO LIST
 # HEADING
 
@@ -325,7 +324,7 @@ class APrioriAgent(Agent):
             t0 = time()
 
             can_act = act_now
-            may_report = True
+            may_report = False
 
             init_portval = env.calc_total_portval()
             init_time = loop_time = env.timestamp
@@ -343,7 +342,7 @@ class APrioriAgent(Agent):
                     if verbose or email:
                         msg = self.make_report(env, obs, reward, episode_reward, t0, loop_time)
 
-                        if verbose and may_report:
+                        if verbose:
                             print(msg, end="\r", flush=True)
 
                         if email and may_report:
@@ -551,13 +550,13 @@ class APrioriAgent(Agent):
 
         # Turnover
         try:
-            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values)
         except IndexError:
-            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values)
 
-        tu = max(abs(np.clip(ad, 0.0, np.inf).sum()),
+        tu = min(abs(np.clip(ad, 0.0, np.inf).sum()),
                  abs(np.clip(ad, -np.inf, 0.0).sum()))
-        msg += "\nPortfolio Turnover: %f %%\n" % tu
+        msg += "\nPortfolio Turnover: %f %%\n" % (tu * 100)
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
@@ -926,8 +925,8 @@ class ONS(APrioriAgent):
     def predict(self, obs):
         price_relative = np.ones(obs.columns.levels[0].shape[0], dtype=np.float64)
         for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = np.float64(
-                obs.get_value(obs.index[-1], (symbol, 'open')) / obs.get_value(obs.index[-2], (symbol, 'open')))
+            price_relative[key] = safe_div(obs.get_value(obs.index[-1], (symbol, 'open')),
+                                           obs.get_value(obs.index[-2], (symbol, 'open')))
         return price_relative
 
     def rebalance(self, obs):
@@ -945,11 +944,11 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.mat(x / np.dot(b, x)).T
+        grad = np.mat(safe_div(x, np.dot(b, x))).T
         # update A
         self.A += grad * grad.T
         # update b
-        self.b += (1 + 1. / self.beta) * grad
+        self.b += (1 + safe_div(1., self.beta)) * grad
 
         # projection of p induced by norm A
         pp = self.projection_in_norm(self.delta * self.A.I * self.b, self.A)
@@ -1519,7 +1518,7 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, toff=0.1, factor=None, fiat="USDT", name=""):
+    def __init__(self, factor=None, toff=0.1, fiat="USDT", name=""):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1537,8 +1536,9 @@ class TCO(APrioriAgent):
         # for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-        prev_posit = self.get_portfolio_vector(obs, index=-1)
-        return self.factor.rebalance(obs) - prev_posit
+        prev_posit = self.get_portfolio_vector(obs, index=-1) + 1
+        factor_posit = self.factor.rebalance(obs) + 1
+        return safe_div(factor_posit, prev_posit)
 
     def rebalance(self, obs):
         """
@@ -1566,7 +1566,7 @@ class TCO(APrioriAgent):
         vt = safe_div(x, np.dot(b, x))
         vt_mean = np.mean(vt)
         # update portfolio
-        b = b + np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0, np.inf)
+        b += np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0.0, np.inf)
 
         # project it onto simplex
         return simplex_proj(b)
