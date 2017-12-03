@@ -798,24 +798,19 @@ class TradingEnvironment(Env):
 
     def get_reward(self, previous_portval):
         """
-        Regret loss function
+        Payoff loss function
 
         Reference:
-            A.Agarwal, E.Hazan, S.Kale, R.E.Schapire.
-            Algorithms for Portfolio Management based on the Newton Method, 2006.
-            http://machinelearning.wustl.edu/mlpapers/paper_files/icml2006_AgarwalHKS06.pdf
+            E Hazan.
+            Logarithmic Regret Algorithms for Online Convex ... - cs.Princeton
+            www.cs.princeton.edu/~ehazan/papers/log-journal.pdf
 
+        :previous_portval: float: Previous portfolio value
         :return: numpy float:
         """
         # TODO TEST
 
-        # Relative change
-        # port_return = np.log(safe_div(self.portval, self.get_last_portval()))
-        # bench_return = np.log(safe_div(self.portval, self.get_last_portval()))
-
-        # return port_return - bench_return
-
-        # Regret
+        # Price change
         pr = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
         pr = np.append(safe_div(pr[-1], pr[-2]), [dec_one])
         pr_max = pr.max()
@@ -842,10 +837,10 @@ class TradingEnvironment(Env):
         # Portfolio log returns
         port_log_return = rew_con.ln(safe_div(port_change, pr_max))
 
-        # Benchmarklog returns
+        # Benchmark log returns
         bench_log_return = rew_con.ln(safe_div(np.dot(self.benchmark, pr), pr_max))
 
-        # Return -regret (negative regret)
+        # Return -regret (negative regret) = Payoff
         return rew_con.subtract(port_log_return, bench_log_return)
 
     def simulate_trade(self, action, timestamp):
@@ -1518,14 +1513,6 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Simulate portifolio rebalance
             done = self.simulate_trade(action, timestamp)
 
-            # Sanity check before full log
-            msg = "\nTstamp: %s\n" % str(timestamp)
-            msg += "\nAction taken:\n"
-            for i, symbol in enumerate(self.symbols):
-                msg += "%s: %.02f %%\n" % (symbol , action[i] * 100)
-
-            Logger.info(PaperTradingEnvironment.step, msg)
-
             # Wait for next bar open
             try:
                 sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
@@ -1966,14 +1953,6 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Simulate portifolio rebalance
             done = self.online_rebalance(action, timestamp)
-
-            # Sanity check before full log
-            msg = "\nTstamp: %s\n" % str(timestamp)
-            msg += "\nAction taken:\n"
-            for i, symbol in enumerate(self.symbols):
-                msg += "%s: %.02f %%\n" % (symbol , action[i] * 100)
-
-            Logger.info(LiveTradingEnvironment.step, msg)
 
             # Wait for next bar open
             try:
