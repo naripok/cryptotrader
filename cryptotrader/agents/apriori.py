@@ -551,9 +551,9 @@ class APrioriAgent(Agent):
 
         # Turnover
         try:
-            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values) * 100
         except IndexError:
-            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values) * 100
 
         tu = max(abs(np.clip(ad, 0.0, np.inf).sum()),
                  abs(np.clip(ad, -np.inf, 0.0).sum()))
@@ -1538,7 +1538,7 @@ class TCO(APrioriAgent):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         prev_posit = self.get_portfolio_vector(obs, index=-1)
-        return self.factor.rebalance(obs) - prev_posit
+        return self.factor.rebalance(obs) - prev_posit + 1
 
     def rebalance(self, obs):
         """

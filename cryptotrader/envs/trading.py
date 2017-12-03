@@ -1519,9 +1519,11 @@ class PaperTradingEnvironment(TradingEnvironment):
             done = self.simulate_trade(action, timestamp)
 
             # Wait for next bar open
-            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+            try:
+                sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
                       datetime.timestamp(self.timestamp))
-
+            except ValueError:
+                pass
             # Get reward for previous action
             reward = self.get_reward(previous_portval)
 
@@ -1957,8 +1959,11 @@ class LiveTradingEnvironment(TradingEnvironment):
             done = self.online_rebalance(action, timestamp)
 
             # Wait for next bar open
-            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
-                  datetime.timestamp(self.timestamp))
+            try:
+                sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+                      datetime.timestamp(self.timestamp))
+            except ValueError:
+                pass
 
             # Get reward for previous action
             reward = self.get_reward(previous_portval)
