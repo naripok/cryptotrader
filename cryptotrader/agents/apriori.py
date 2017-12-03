@@ -933,7 +933,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name=""):
+    def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -943,10 +943,9 @@ class ONS(APrioriAgent):
         self.eta = eta
 
     def predict(self, obs):
-        price_relative = np.ones(obs.columns.levels[0].shape[0], dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = safe_div(obs.get_value(obs.index[-1], (symbol, 'open')),
-                                           obs.get_value(obs.index[-2], (symbol, 'open')))
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+
         return price_relative
 
     def rebalance(self, obs):
@@ -1008,7 +1007,7 @@ class HarmonicTrader(APrioriAgent):
     def __repr__(self):
         return "HarmonicTrader"
 
-    def __init__(self, peak_order=7, err_allowed=0.05, decay=0.99, activation=array_normalize, fiat="USDT"):
+    def __init__(self, peak_order=7, err_allowed=0.05, decay=0.99, activation=simplex_proj, fiat="USDT", name="Harmonic"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
@@ -1016,7 +1015,7 @@ class HarmonicTrader(APrioriAgent):
         :param decay: float: Decay rate for portfolio selection. Between 0 and 1
         :param fiat: Fiat symbol to use in trading
         """
-        super().__init__(fiat)
+        super().__init__(fiat, name=name)
         self.err_allowed = err_allowed
         self.peak_order = peak_order
         self.alpha = [1., 1.]
@@ -1088,11 +1087,7 @@ class HarmonicTrader(APrioriAgent):
         return action
 
     def rebalance(self, obs):
-        if self.step == 0:
-            n_pairs = obs.columns.levels[0].shape[0]
-            port_vec = np.ones(n_pairs)
-            port_vec[-1] = 0
-        else:
+        if self.step:
             pairs = obs.columns.levels[0]
             prev_port = self.get_portfolio_vector(obs)
             action = self.predict(obs)
@@ -1108,6 +1103,11 @@ class HarmonicTrader(APrioriAgent):
                                           i])
 
             port_vec[-1] = max(0, 1 - port_vec.sum())
+
+        else:
+            n_pairs = obs.columns.levels[0].shape[0]
+            port_vec = np.ones(n_pairs)
+            port_vec[-1] = 0
 
         return self.activation(port_vec)
 
@@ -1131,7 +1131,7 @@ class PAMR(APrioriAgent):
     def __repr__(self):
         return "PAMR"
 
-    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT", name=""):
+    def __init__(self, sensitivity=0.03, C=2444, variant="PAMR1", fiat="USDT", name="PAMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
@@ -1147,12 +1147,8 @@ class PAMR(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = np.float64(obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                             (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-
-        price_relative[-1] = 1
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
 
         return price_relative
 
@@ -1162,15 +1158,15 @@ class PAMR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if self.step == 0:
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-2)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
             return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-2)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
 
     def update(self, b, x):
         """
@@ -1186,19 +1182,15 @@ class PAMR(APrioriAgent):
         #     le = max(0, (1 - self.sensitivity) - np.dot(b, x))
 
         x_mean = np.mean(x)
-        portvar = np.dot(b, x)
 
-        if portvar > 1 + self.sensitivity:
-            le = portvar - (1 + self.sensitivity)
-        # elif portvar < 1 - self.sensitivity:
-        #     le = (1 - self.sensitivity) - portvar
+        le = max(0., np.dot(b, x) - self.sensitivity)
 
         if self.variant == 'PAMR0':
             lam = le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon)
         elif self.variant == 'PAMR1':
-            lam = min(self.C, le / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+            lam = min(self.C, safe_div(le, np.linalg.norm(x - x_mean) ** 2))
         elif self.variant == 'PAMR2':
-            lam = le / (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C + self.epsilon)
+            lam = safe_div(le, (np.linalg.norm(x - x_mean) ** 2 + 0.5 / self.C))
         else:
             raise TypeError("Bad variant param.")
 
@@ -1216,12 +1208,11 @@ class PAMR(APrioriAgent):
         if 'C' in kwargs:
             self.C = kwargs['C']
         self.variant = kwargs['variant']
-        self.alpha = kwargs['alpha']
 
 
 class OLMAR(APrioriAgent):
     """
-        On-Line Portfolio Selection with Moving Average Reversio
+        On-Line Portfolio Selection with Moving Average Reversion
 
         Reference:
             B. Li and S. C. H. Hoi.
@@ -1232,7 +1223,7 @@ class OLMAR(APrioriAgent):
     def __repr__(self):
         return "OLMAR"
 
-    def __init__(self, window=7, eps=0.02, smooth = 0.5, fiat="USDT", name=""):
+    def __init__(self, window=7, eps=0.02, fiat="USDT", name="OLMAR"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1240,17 +1231,16 @@ class OLMAR(APrioriAgent):
         super().__init__(fiat=fiat, name=name)
         self.window = window
         self.eps = eps
-        self.smooth = smooth
 
     def predict(self, obs):
         """
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        price_predict = np.empty(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window - 1:-1].mean() /
-                                            (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+
+        price_predict = np.append(safe_div(prices.iloc[-self.window:].mean().values, prices.iloc[-1].values), [1.0])
+
         return price_predict
 
     def rebalance(self, obs):
@@ -1259,15 +1249,15 @@ class OLMAR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if self.step == 0:
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-2)
+            price_predict = self.predict(obs)
+            return self.update(prev_posit, price_predict)
+        else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
             return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-2)
-            price_predict = self.predict(obs)
-            return self.update(prev_posit[:-1], price_predict)
 
     def update(self, b, x):
         """
@@ -1276,101 +1266,23 @@ class OLMAR(APrioriAgent):
         :param b: numpy array: Last portfolio vector
         :param x: numpy array: Price movement prediction
         """
+        xt = np.dot(b, x)
         x_mean = np.mean(x)
-        if np.dot(b, x) >= 1:
-            lam = max(0., (np.dot(b, x) - 1 - self.eps) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
-        else:
-            lam = max(0, (1 - self.eps - np.dot(b, x)) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon))
+
+        lam = max(0., safe_div((xt - self.eps), np.linalg.norm(x - x_mean) ** 2))
 
         # limit lambda to avoid numerical problems
         lam = min(100000, lam)
 
         # update portfolio
-        b = b + self.smooth * lam * (x - x_mean)
+        b += lam * (x - x_mean)
 
         # project it onto simplex
-        return np.append(simplex_proj(b), [0])
+        return simplex_proj(b)
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
         self.window = int(kwargs['window'])
-        self.smooth = kwargs['smooth']
-
-
-class STMR(APrioriAgent):
-    """
-    Short term mean reversion strategy for portfolio selection.
-
-    Original algo by José Olímpio Mendes
-    27/11/2017
-    """
-    def __repr__(self):
-        return "STMR"
-
-    def __init__(self, sensitivity=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name=""):
-        """
-        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
-        """
-        super().__init__(fiat=fiat, name=name)
-        self.sensitivity = sensitivity
-        self.activation = activation
-        if rebalance:
-            self.reb = -2
-        else:
-            self.reb = -1
-
-    def predict(self, obs):
-        """
-        Performs prediction given environment observation
-        """
-        obs = obs.astype(np.float64)
-        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon) - 1)
-
-        price_relative[-1] = 0
-
-        return price_relative
-
-    def rebalance(self, obs):
-        """
-        Performs portfolio rebalance within environment
-        :param obs: pandas DataFrame: Environment observation
-        :return: numpy array: Portfolio vector
-        """
-        if self.step == 0:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
-
-    def update(self, b, x):
-        """
-        Update portfolio weights to satisfy constraint b * x <= eps
-        and minimize distance to previous portfolio.
-        :param b: numpy array: Last portfolio vector
-        :param x: numpy array: Price movement prediction
-        """
-        x_mean = np.mean(x)
-        portvar = np.dot(b, x)
-
-        change = abs((portvar + x[np.argmax(abs(x))]) / 2)
-
-        lam = np.clip(safe_div(change - self.sensitivity, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
-
-        # update portfolio
-        b = b + lam * (x - x_mean)
-
-        # project it onto simplex
-        return self.activation(b)
-
-    def set_params(self, **kwargs):
-        self.sensitivity = kwargs['sensitivity']
 
 
 class CWMR(APrioriAgent):
@@ -1384,7 +1296,7 @@ class CWMR(APrioriAgent):
     def __repr__(self):
         return "CWMR"
 
-    def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="USDT", name=""):
+    def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="USDT", name="CWMR"):
         """
         :param eps: Mean reversion threshold (expected return on current day must be lower
                     than this threshold). Recommended value is -0.5.
@@ -1408,13 +1320,9 @@ class CWMR(APrioriAgent):
         """
         Performs prediction given environment observation
         """
-        obs = obs.astype(np.float64)
-        price_relative = np.empty(obs.columns.levels[0].shape[0], dtype=np.float64)
-        for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-            price_relative[key] = (obs.get_value(obs.index[-2], (symbol, 'open')) /
-                                    (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
 
-        price_relative[-1] = 1
         return price_relative
 
     def update(self, b, x):
@@ -1526,6 +1434,78 @@ class CWMR(APrioriAgent):
         self.theta = scipy.stats.norm.ppf(kwargs['confidence'])
 
 
+class STMR(APrioriAgent):
+    """
+    Short term mean reversion strategy for portfolio selection.
+
+    Original algo by José Olímpio Mendes
+    27/11/2017
+    """
+
+    def __repr__(self):
+        return "STMR"
+
+    def __init__(self, sensitivity=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+        """
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.sensitivity = sensitivity
+        self.activation = activation
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2]) - 1).values, [0.0])
+
+        return price_relative
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if self.step == 0:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+        else:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+
+    def update(self, b, x):
+        """
+        Update portfolio weights to satisfy constraint b * x <= eps
+        and minimize distance to previous portfolio.
+        :param b: numpy array: Last portfolio vector
+        :param x: numpy array: Price movement prediction
+        """
+        x_mean = np.mean(x)
+        portvar = np.dot(b, x)
+
+        change = abs((portvar + x[np.argmax(abs(x))]) / 2)
+
+        lam = np.clip(safe_div(change - self.sensitivity, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
+
+        # update portfolio
+        b = b + lam * (x - x_mean)
+
+        # project it onto simplex
+        return self.activation(b)
+
+    def set_params(self, **kwargs):
+        self.sensitivity = kwargs['sensitivity']
+
+
 # Portfolio optimization
 class TCO(APrioriAgent):
     """
@@ -1538,7 +1518,7 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, factor=None, toff=0.1, fiat="USDT", name=""):
+    def __init__(self, factor=None, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1546,6 +1526,11 @@ class TCO(APrioriAgent):
         super().__init__(fiat=fiat, name=name)
         self.toff = toff
         self.factor = factor
+        self.optimize_factor = optimize_factor
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
 
     def predict(self, obs):
         """
@@ -1567,7 +1552,7 @@ class TCO(APrioriAgent):
         :return: numpy array: Portfolio vector
         """
         if self.step:
-            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
             price_prediction = self.predict(obs)
             return self.update(prev_posit, price_prediction)
         else:
@@ -1593,134 +1578,8 @@ class TCO(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
-        self.factor.set_params(**kwargs)
-
-
-class FactorTrader(APrioriAgent):
-    """
-    Compound factor trader
-    """
-    def __repr__(self):
-        return "FactorTrader"
-
-    def __init__(self, factors, std_window=3, std_weight=1., alpha=[1., 1.], activation=array_normalize, fiat="USDT"):
-        super().__init__(fiat)
-        assert isinstance(factors, list), "factors must be a list containing factor model instances"
-        for factor in factors:
-            assert isinstance(factor, APrioriAgent), "Factors must be APrioriAgent instances"
-        self.factors = factors
-        self.std_window = std_window
-        self.std_weight = std_weight
-        self.weights = np.ones(len(self.factors))
-        self.alpha = alpha
-        self.activation = activation
-
-    def predict(self, obs):
-        action = np.zeros(obs.columns.levels[0].shape[0] - 1, dtype=np.float64)
-        for weight, factor in zip(self.weights, self.factors):
-            action += weight * factor.predict(obs)
-        return action
-
-    def rebalance(self, obs):
-        action = self.predict(obs)
-        prev_port= self.get_portfolio_vector(obs)
-        port_vec = np.zeros(prev_port.shape)
-        for i, symbol in enumerate(obs.columns.levels[0]):
-            if symbol is not self.fiat:
-                if action[i] >= 0.:
-                    port_vec[i] = max(0, prev_port[i] + self.alpha[0] * action[i] / \
-                                              (self.std_weight * obs[symbol].open.rolling(self.std_window,
-                                               min_periods=1, center=True).std().iat[-1] / obs.get_value(
-                                               obs.index[-1], (symbol, 'open')) + self.epsilon))
-                else:
-                    port_vec[i] = max(0, prev_port[i] + self.alpha[1] * action[i] / \
-                                              (self.std_weight * obs[symbol].open.rolling(self.std_window,
-                                               min_periods=1, center=True).std().iat[-1] / obs.get_value(
-                                               obs.index[-1], (symbol, 'open')) + self.epsilon))
-
-        port_vec[-1] = max(0, 1 - port_vec.sum())
-
-        return self.activation(port_vec)
-
-    def set_params(self, **kwargs):
-        self.std_window = int(kwargs['std_window'])
-        self.std_weight = kwargs['std_weight']
-        for i, factor in enumerate(self.factors):
-            self.weights[i] = kwargs[str(factor) + '_weight']
-        self.alpha = [kwargs['alpha_up'], kwargs['alpha_down']]
-
-    def fit(self, env, nb_steps, batch_size, search_space, constrains=None, action_repetition=1, callbacks=None, verbose=1,
-            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None, n_workers=1):
-        try:
-            if verbose:
-                print("Optimizing model for %d steps with batch size %d..." % (nb_steps, batch_size))
-
-            i = 0
-            t0 = time()
-            env.training = True
-
-            def find_hp(**kwargs):
-                try:
-                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
-
-                    self.set_params(**kwargs)
-
-                    batch_reward = []
-                    for batch in range(batch_size):
-                        # Reset env
-                        env.reset_status()
-                        env.reset(reset_dfs=True)
-                        # run test on the main process
-                        r = self.test(env,
-                                        nb_episodes=1,
-                                        action_repetition=action_repetition,
-                                        callbacks=callbacks,
-                                        visualize=visualize,
-                                        nb_max_episode_steps=nb_max_episode_steps,
-                                        nb_max_start_steps=nb_max_start_steps,
-                                        start_step_policy=start_step_policy,
-                                        verbose=False)
-
-                        batch_reward.append(r)
-
-                    i += 1
-                    if verbose:
-                        try:
-                            print("Optimization step {0}/{1}, step reward: {2}, ETC: {3} ".format(i,
-                                                                                nb_steps,
-                                                                                sum(batch_reward) / batch_size,
-                                                                                str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
-                                  end="\r")
-                            t0 = time()
-                        except TypeError:
-                            print("\nOptimization aborted by the user.")
-                            raise ot.api.fun.MaximumEvaluationsException(0)
-
-                    return sum(batch_reward) / batch_size
-
-                except KeyboardInterrupt:
-                    print("\nOptimization aborted by the user.")
-                    raise ot.api.fun.MaximumEvaluationsException(0)
-
-            factor_weights = {}
-            for factor in self.factors:
-                factor_weights[str(factor) + "_weight"] = [0.00001, 1]
-
-            opt_params, info, _ = ot.maximize(find_hp,
-                                              num_evals=nb_steps,
-                                              **search_space,
-                                              **factor_weights
-                                              )
-
-            self.set_params(**opt_params)
-            env.training = False
-            return opt_params, info
-
-        except KeyboardInterrupt:
-            env.training = False
-            print("\nOptimization interrupted by user.")
-            return opt_params, info
+        if self.optimize_factor:
+            self.factor.set_params(**kwargs)
 
 
 class Anticor(APrioriAgent):
