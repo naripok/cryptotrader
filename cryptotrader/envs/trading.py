@@ -1520,11 +1520,14 @@ class PaperTradingEnvironment(TradingEnvironment):
             except ValueError:
                 pass
 
+            # Observe environment
+            new_obs = self.get_observation(True).astype(np.float64)
+
             # Get reward for previous action
             reward = self.get_reward(previous_portval)
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
+            return new_obs, np.float64(reward), done, self.status
 
         except Exception as e:
             Logger.error(PaperTradingEnvironment.step, self.parse_error(e))
@@ -1961,11 +1964,14 @@ class LiveTradingEnvironment(TradingEnvironment):
             except ValueError:
                 pass
 
+            # Observe environment
+            new_obs = self.get_observation(True).astype(np.float64)
+
             # Get reward for previous action
             reward = self.get_reward(previous_portval)
 
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
+            return new_obs, np.float64(reward), done, self.status
 
         except Exception as e:
             # Log error for debug
