@@ -214,7 +214,7 @@ class DataFeed(ExchangeConnection):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    retryDelays = [2 ** i for i in range(4)]
+    retryDelays = [2 ** i for i in range(5)]
 
     def __init__(self, period, pairs=[], exchange='', addr='', timeout=30):
         """
@@ -260,7 +260,7 @@ class DataFeed(ExchangeConnection):
                     else:
                         # log exception and wait
                         Logger.debug(DataFeed, problem)
-                        Logger.error(DataFeed, "-- delaying for %ds" % delay)
+                        Logger.error(DataFeed, "No reply... -- delaying for %ds" % delay)
                         sleep(delay)
 
         return retrying

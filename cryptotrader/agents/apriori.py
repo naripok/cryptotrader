@@ -308,35 +308,49 @@ class APrioriAgent(Agent):
         :param save_dir: str: Save directory for logs
         :return:
         """
-
-        print("Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
-                                                                                            env.calc_total_portval()))
-
-        # Fiat symbol
-        self.fiat = env._fiat
-
-        # Reset env and get initial env
-        env.reset_status()
-        obs = env.reset()
-
         try:
             # Init variables
             self.step = start_step
+
+            # Fiat symbol
+            self.fiat = env._fiat
+
+            # Reset env and get initial env
+            env.reset_status()
+            obs = env.reset()
 
             action = np.zeros(len(env.symbols))
             status = env.status
             last_action_time = floor_datetime(env.timestamp, env.period)
             t0 = time()
 
-            can_act = act_now # TODO: FALSE HERE
-            may_report = False
+            can_act = act_now
+            may_report = True
 
             init_portval = env.calc_total_portval()
-            init_time = env.timestamp
+            init_time = loop_time = env.timestamp
             episode_reward = 0
             reward = 0
+
+            print(
+                "Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
+                                                                                                             init_portval))
+
+            Logger.info(APrioriAgent.trade, "Starting trade routine...")
             while True:
                 try:
+                    # Report generation
+                    if verbose or email:
+                        msg = self.make_report(env, obs, reward, episode_reward, t0, loop_time)
+
+                        if verbose and may_report:
+                            print(msg, end="\r", flush=True)
+
+                        if email and may_report:
+                            if hasattr(env, 'email'):
+                                env.send_email("Trading report " + self.name, msg)
+                            may_report = False
+
                     # Log action time
                     loop_time = env.timestamp
                     if loop_time >= last_action_time + timedelta(minutes=env.period):
@@ -348,20 +362,28 @@ class APrioriAgent(Agent):
 
                     # If can act, run strategy and step environment
                     if can_act:
+                        # Log action time
+                        last_action_time = floor_datetime(env.timestamp, env.period)
+
                         action = self.rebalance(env.get_observation(True).astype(np.float64))
                         obs, reward, done, status = env.step(action)
                         episode_reward += reward
 
                         # If action is complete, increment step counter, log action time and allow report
-                        if not done:
+                        if done:
+                            # Increase step counter
+                            self.step += 1
+
+                            # You can act just one time per candle
+                            can_act = False
+
+                            # If you've acted, report yourself to nerds
+                            may_report = True
+
+                        else:
                             self.log["Trade_incomplete"] = "Position change was not fully completed."
 
-                        self.step += 1
-                        last_action_time = floor_datetime(env.timestamp, env.period)
-                        can_act = False
-                        may_report = True
-
-                    # If cant act, just take a observation and return
+                    # If can't act, just take an observation and return
                     else:
                         obs = env.get_observation(True).astype(np.float64)
 
@@ -369,46 +391,40 @@ class APrioriAgent(Agent):
                     if render:
                         env.render()
 
-                    # Report generation
-                    if verbose or email:
-                        msg = self.make_report(env, obs, reward, episode_reward, t0)
-
-                        if verbose:
-                            print(msg, end="\r", flush=True)
-
-                        if email and may_report:
-                            if hasattr(env, 'email'):
-                                env.send_email("Trading report " + self.name, msg)
-                            may_report = False
-
-                    # If environment return an error,save data frames and break
+                    # If environment return an error, save data frames and break
                     if status['Error']:
+                        # Get error
                         e = status['Error']
-
+                        # Save data frames for analysis
                         self.save_dfs(env, save_dir, init_time)
-
+                        # Report error
                         if verbose:
                             print("Env error:",
                                   type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         if email:
-                            env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                            if hasattr(env, 'email'):
+                                env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                        # Panic
                         break
 
-                    # Wait for next bar open
-                    try:
-                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                              - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 30))
-                    except ValueError:
-                        sleep(1 + int(np.random.random(1) * 30))
+                    if not can_act:
+                        # When everything is done, wait for the next candle
+                        try:
+                            sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
+                                  - datetime.timestamp(env.timestamp) + np.random.random(1) * 3)
+                        except ValueError:
+                            sleep(np.random.random(1) * 3)
 
                 # If you've done enough tries, cancel action and wait for the next bar
                 except RetryException as e:
                     if 'retryDelays exhausted' in e.__str__():
+                        # Tell nerds the delay
                         env.send_email("Trading error: %s" % env.name, env.parse_error(e))
 
+                        # Wait for the next candle
                         try:
                             sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                                  - datetime.timestamp(env.timestamp) + int(np.random.random(1) * 30))
+                                  - datetime.timestamp(env.timestamp) + np.random.random(1) * 30)
                         except ValueError:
                             sleep(1 + int(np.random.random(1) * 30))
                     else:
@@ -416,13 +432,14 @@ class APrioriAgent(Agent):
 
                 # Catch exceptions
                 except Exception as e:
-                    print("\nAgent Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                     print(env.timestamp)
                     print(obs)
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
+
+                    print("\nAgent Trade Error:",
+                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
 
                     # Save dataframes for analysis
                     self.save_dfs(env, save_dir, init_time)
@@ -438,12 +455,12 @@ class APrioriAgent(Agent):
             self.save_dfs(env, save_dir, init_time)
 
             print("\nKeyboard Interrupt: Stoping cryptotrader" + \
-                  "\nElapsed steps: {0}\nUptime: {1}\nInitial Portval: {2}\nFinal Portval: {3}\n".format(self.step,
+                  "\nElapsed steps: {0}\nUptime: {1}\nInitial Portval: {2:.08f}\nFinal Portval: {3:.08f}\n".format(self.step,
                                                                str(pd.to_timedelta(time() - t0, unit='s')),
                                                                init_portval,
                                                                env.calc_total_portval()))
 
-    def make_report(self, env, obs, reward, episode_reward, t0):
+    def make_report(self, env, obs, reward, episode_reward, t0, action_time):
         """
         Report generator
         :param env:
@@ -455,8 +472,8 @@ class APrioriAgent(Agent):
         # Portfolio values
         try:
             init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
-            prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-2], 'portval'))
-            last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
+            prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
+            last_portval = float(env.calc_total_portval())
         except IndexError:
             init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0],
                                                                                           'portval'))
@@ -478,15 +495,16 @@ class APrioriAgent(Agent):
             )) + " %\n"
 
         # Time summary
-        msg += "\nAction time: {0}\nTstamp: {1}\nUptime: {2}\n".format(
+        msg += "\nLocal time: {0}\nAction time: {1}\nTstamp: {2}\nUptime: {3}\n".format(
             datetime.now(),
+            action_time,
             str(obs.index[-1]),
             str(pd.to_timedelta(time() - t0, unit='s'))
             )
 
         # Prices summary
         msg += "\nPrices summary:\n"
-        msg += "           Prev open:    Last price:    Pct change:\n"
+        msg += "           Prev open:    Last price:     Pct change:\n"
 
         adm = 0.0
         k = 0
@@ -498,27 +516,48 @@ class APrioriAgent(Agent):
             adm += pc
             k += 1
 
-            msg += "%-9s: %11.4f   %11.4f %11.2f" % (symbol, pp, nep, pc) + " %\n"
+            msg += "%-9s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
 
         msg += "Mean pct change: %5.02f %%\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
+        # Previous action
         try:
             pa = env.action_df.iloc[-3].astype(str).to_dict()
         except IndexError:
             pa = env.action_df.iloc[-1].astype(str).to_dict()
+
+        # Currently Desired action
+        try:
+            da = env.action_df.iloc[-2].astype(str).to_dict()
+        except IndexError:
+            da = env.action_df.iloc[-1].astype(str).to_dict()
+
+        # Last action
         la = env.action_df.iloc[-1].astype(str).to_dict()
-        msg += "        Prev action:  Last Action:  Action diff:\n"
+
+        msg += "        Previous:  Desired:   Executed:  Diff:\n"
         for symbol in pa:
             if symbol is not "online":
                 pac = 100 * float(pa[symbol])
+                dac = 100 * float(da[symbol])
                 nac = 100 * float(la[symbol])
                 ad = nac - pac
 
-                msg += "%-6s:  %5.02f %%       %5.02f %%      %5.02f %%\n" % (symbol, pac, nac, ad)
+                msg += "%-6s:  %5.02f %%    %5.02f %%    %5.02f %%    %5.02f %%\n" % (symbol, pac, dac, nac, ad)
             else:
-                msg += "%s: %s          %s\n" % (symbol, pa[symbol], la[symbol])
+                msg += "%s:  %s                 %s\n" % (symbol, pa[symbol], la[symbol])
+
+        # Turnover
+        try:
+            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values
+        except IndexError:
+            ad = env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values
+
+        tu = max(abs(np.clip(ad, 0.0, np.inf).sum()),
+                 abs(np.clip(ad, -np.inf, 0.0).sum()))
+        msg += "\nPortfolio Turnover: %f %%\n" % tu
 
         # Slippage summary
         msg += "\nSlippage summary:\n"
@@ -892,17 +931,17 @@ class ONS(APrioriAgent):
         return price_relative
 
     def rebalance(self, obs):
-        if not self.step:
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
             self.A = np.mat(np.eye(n_pairs))
             self.b = np.mat(np.zeros(n_pairs)).T
             return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-1)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
 
     def update(self, b, x):
         # calculate gradient
@@ -1480,14 +1519,14 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, toff=0.1, predictor=None, fiat="USDT", name=""):
+    def __init__(self, toff=0.1, factor=None, fiat="USDT", name=""):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
         """
         super().__init__(fiat=fiat, name=name)
         self.toff = toff
-        self.predictor = predictor
+        self.factor = factor
 
     def predict(self, obs):
         """
@@ -1498,7 +1537,8 @@ class TCO(APrioriAgent):
         # for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
-        return self.predictor.predict(obs)
+        prev_posit = self.get_portfolio_vector(obs, index=-1)
+        return self.factor.rebalance(obs) - prev_posit
 
     def rebalance(self, obs):
         """
@@ -1506,15 +1546,15 @@ class TCO(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if self.step == 0:
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_prediction = self.predict(obs)
+            return self.update(prev_posit, price_prediction)
+        else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
             return array_normalize(action)
-        else:
-            prev_posit = self.get_portfolio_vector(obs, index=-1)
-            price_prediction = self.predict(obs)
-            return self.update(prev_posit, price_prediction)
 
     def update(self, b, x):
         """
@@ -1523,7 +1563,7 @@ class TCO(APrioriAgent):
         :param b: numpy array: Last portfolio vector
         :param x: numpy array: Price movement prediction
         """
-        vt = x / (np.dot(b, x) + self.epsilon)
+        vt = safe_div(x, np.dot(b, x))
         vt_mean = np.mean(vt)
         # update portfolio
         b = b + np.sign(vt - vt_mean) * np.clip(abs(vt - vt_mean) - self.toff, 0, np.inf)
@@ -1533,7 +1573,7 @@ class TCO(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.toff = kwargs['toff']
-        self.predictor.set_params(**kwargs)
+        self.factor.set_params(**kwargs)
 
 
 class FactorTrader(APrioriAgent):

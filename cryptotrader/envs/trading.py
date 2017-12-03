@@ -796,7 +796,7 @@ class TradingEnvironment(Env):
             Logger.error(TradingEnvironment.get_last_portval, self.parse_error(e))
             raise e
 
-    def get_reward(self):
+    def get_reward(self, previous_portval):
         """
         Regret loss function
 
@@ -819,19 +819,33 @@ class TradingEnvironment(Env):
         pr = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
         pr = np.append(safe_div(pr[-1], pr[-2]), [dec_one])
         pr_max = pr.max()
+
+        # Divide after dot product
         # pr = safe_div(pr, pr_max)
 
+        # No taxes this way
         # port_log_return = rew_con.log10(np.dot(convert_to.decimal(self.action_df.iloc[-1].values[:-1]), pr))
+
+        # This way you get taxes from the next reward right after the step init
+        # try:
+        #     port_change = safe_div(self.portfolio_df.get_value(self.portfolio_df.index[-1], 'portval'),
+        #                        self.portfolio_df.get_value(self.portfolio_df.index[-2], 'portval'))
+        # except IndexError:
+        #     port_change = dec_one
+
+        # This way you get taxes from the currently action, after wait for the bar to close
         try:
-            port_change = safe_div(self.portfolio_df.get_value(self.portfolio_df.index[-1], 'portval'),
-                               self.portfolio_df.get_value(self.portfolio_df.index[-2], 'portval'))
+            port_change = safe_div(self.calc_total_portval(), previous_portval)
         except IndexError:
             port_change = dec_one
 
+        # Portfolio log returns
         port_log_return = rew_con.ln(safe_div(port_change, pr_max))
 
+        # Benchmarklog returns
         bench_log_return = rew_con.ln(safe_div(np.dot(self.benchmark, pr), pr_max))
 
+        # Return -regret (negative regret)
         return rew_con.subtract(port_log_return, bench_log_return)
 
     def simulate_trade(self, action, timestamp):
@@ -912,6 +926,8 @@ class TradingEnvironment(Env):
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(),
                             'timestamp': self.portfolio_df.index[-1]}
+
+            return True
 
         except Exception as e:
             Logger.error(TradingEnvironment.simulate_trade, self.parse_error(e))
@@ -1416,26 +1432,33 @@ class BacktestEnvironment(TradingEnvironment):
             # Get step timestamp
             timestamp = self.timestamp
 
+            # Save portval for reward calculation
+            previous_portval = self.calc_total_portval()
+
             # Simulate portifolio rebalance
             self.simulate_trade(action, timestamp)
 
             # Calculate new portval
             self.portval = {'portval': self.calc_total_portval(), 'timestamp': self.portfolio_df.index[-1]}
 
+            # Check for end condition
             if self.index >= self.data_length - 2:
                 done = True
                 self.status["OOD"] += 1
             else:
                 done = False
 
-            # Get reward for previous action
-            reward = self.get_reward()
-
-                # Get new index
+            # Get new index
             self.index += 1
 
+            # Get new observation
+            new_obs = self.get_observation(True)
+
+            # Get reward for action took
+            reward = self.get_reward(previous_portval)
+
             # Return new observation, reward, done flag and status for debugging
-            return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
+            return new_obs.astype('f'), np.float64(reward), done, self.status
 
         except KeyboardInterrupt:
             self.status["OOD"] += 1
@@ -1489,13 +1512,18 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Get step timestamp
             timestamp = self.timestamp
 
-            # Simulate portifolio rebalance
-            self.simulate_trade(action, timestamp)
+            # Save portval for reward calculation
+            previous_portval = self.calc_total_portval()
 
-            done = True
+            # Simulate portifolio rebalance
+            done = self.simulate_trade(action, timestamp)
+
+            # Wait for next bar open
+            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+                      datetime.timestamp(self.timestamp))
 
             # Get reward for previous action
-            reward = self.get_reward()
+            reward = self.get_reward(previous_portval)
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype('f'), np.float64(reward), done, self.status
@@ -1922,11 +1950,18 @@ class LiveTradingEnvironment(TradingEnvironment):
             # Get step timestamp
             timestamp = self.timestamp
 
+            # Save portval for reward calculation
+            previous_portval = self.calc_total_portval()
+
             # Simulate portifolio rebalance
             done = self.online_rebalance(action, timestamp)
 
+            # Wait for next bar open
+            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+                  datetime.timestamp(self.timestamp))
+
             # Get reward for previous action
-            reward = self.get_reward()
+            reward = self.get_reward(previous_portval)
 
             # Return new observation, reward, done flag and status for debugging
             return self.get_observation(True).astype(np.float64), np.float64(reward), done, self.status
