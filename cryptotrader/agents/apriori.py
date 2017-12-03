@@ -325,7 +325,7 @@ class APrioriAgent(Agent):
             t0 = time()
 
             can_act = act_now
-            may_report = True
+            may_report = False
 
             init_portval = env.calc_total_portval()
             init_time = loop_time = env.timestamp
@@ -551,11 +551,11 @@ class APrioriAgent(Agent):
 
         # Turnover
         try:
-            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values) * 100
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-3].astype('f').values)
         except IndexError:
-            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values) * 100
+            ad = (env.action_df.iloc[-1].astype('f').values - env.action_df.iloc[-1].astype('f').values)
 
-        tu = max(abs(np.clip(ad, 0.0, np.inf).sum()),
+        tu = min(abs(np.clip(ad, 0.0, np.inf).sum()),
                  abs(np.clip(ad, -np.inf, 0.0).sum()))
         msg += "\nPortfolio Turnover: %f %%\n" % tu
 
