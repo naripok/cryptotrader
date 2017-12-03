@@ -1458,7 +1458,7 @@ class BacktestEnvironment(TradingEnvironment):
             reward = self.get_reward(previous_portval)
 
             # Return new observation, reward, done flag and status for debugging
-            return new_obs.astype('f'), np.float64(reward), done, self.status
+            return new_obs.astype(np.float64), np.float64(reward), done, self.status
 
         except KeyboardInterrupt:
             self.status["OOD"] += 1
@@ -1518,12 +1518,21 @@ class PaperTradingEnvironment(TradingEnvironment):
             # Simulate portifolio rebalance
             done = self.simulate_trade(action, timestamp)
 
+            # Sanity check before full log
+            msg = "\nTstamp: %s\n" % str(timestamp)
+            msg += "\nAction taken:\n"
+            for i, symbol in enumerate(self.symbols):
+                msg += "%s: %.02f %%\n" % (symbol , action[i] * 100)
+
+            Logger.info(PaperTradingEnvironment.step, msg)
+
             # Wait for next bar open
             try:
                 sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
                       datetime.timestamp(self.timestamp))
             except ValueError:
                 pass
+
             # Get reward for previous action
             reward = self.get_reward(previous_portval)
 
@@ -1957,6 +1966,14 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Simulate portifolio rebalance
             done = self.online_rebalance(action, timestamp)
+
+            # Sanity check before full log
+            msg = "\nTstamp: %s\n" % str(timestamp)
+            msg += "\nAction taken:\n"
+            for i, symbol in enumerate(self.symbols):
+                msg += "%s: %.02f %%\n" % (symbol , action[i] * 100)
+
+            Logger.info(LiveTradingEnvironment.step, msg)
 
             # Wait for next bar open
             try:
