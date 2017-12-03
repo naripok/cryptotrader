@@ -321,7 +321,7 @@ class APrioriAgent(Agent):
             status = env.status
 
             # Get initial values
-            init_portval = env.calc_total_portval()
+            prev_portval = init_portval = env.calc_total_portval()
             init_time = env.timestamp
             last_action_time = floor_datetime(env.timestamp, env.period)
             t0 = time() # # TODO: use datetime
@@ -338,7 +338,8 @@ class APrioriAgent(Agent):
             Logger.info(APrioriAgent.trade, "Starting trade routine...")
 
             if verbose:
-                msg = self.make_report(env, obs, reward, episode_reward, t0, init_time, env.calc_portfolio_vector())
+                msg = self.make_report(env, obs, reward, episode_reward, t0, init_time, env.calc_portfolio_vector(),
+                                       prev_portval, init_portval)
                 print(msg, end="\r", flush=True)
 
             # Init step counter
@@ -367,7 +368,8 @@ class APrioriAgent(Agent):
 
                         # Generate report
                         if verbose or email:
-                            msg = self.make_report(env, obs, reward, episode_reward, t0, loop_time, action)
+                            msg = self.make_report(env, obs, reward, episode_reward, t0,
+                                                   loop_time, action, prev_portval, init_portval)
 
                             if verbose:
                                 print(msg, end="\r", flush=True)
@@ -376,6 +378,9 @@ class APrioriAgent(Agent):
                                 if hasattr(env, 'email'):
                                     env.send_email("Trading report " + self.name, msg)
                                 may_report = False
+
+                        # Save portval for report
+                        prev_portval = env.calc_total_portval()
 
                         # Sample environment
                         obs, reward, done, status = env.step(action)
@@ -474,7 +479,7 @@ class APrioriAgent(Agent):
                                                                init_portval,
                                                                env.calc_total_portval()))
 
-    def make_report(self, env, obs, reward, episode_reward, t0, action_time, next_action):
+    def make_report(self, env, obs, reward, episode_reward, t0, action_time, next_action, prev_portval, init_portval):
         """
         Report generator
         :param env:
@@ -484,13 +489,10 @@ class APrioriAgent(Agent):
         """
 
         # Portfolio values
-        try:
-            init_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0], 'portval'))
-            prev_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[-1], 'portval'))
-            last_portval = float(env.calc_total_portval())
-        except IndexError:
-            init_portval = prev_portval = last_portval = float(env.portfolio_df.get_value(env.portfolio_df.index[0],
-                                                                                          'portval'))
+
+        init_portval = float(init_portval)
+        prev_portval = float(prev_portval)
+        last_portval = float(env.calc_total_portval())
 
         # Returns summary
         msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
@@ -523,7 +525,6 @@ class APrioriAgent(Agent):
         adm = 0.0
         k = 0
         for symbol in env.pairs:
-
             pp = obs.get_value(obs.index[-2], (symbol, 'open'))
             nep = obs.get_value(obs.index[-1], (symbol, 'close'))
             pc = 100 * safe_div((nep - pp), pp)
@@ -565,7 +566,7 @@ class APrioriAgent(Agent):
                                                                                        nac,
                                                                                        na)
             else:
-                msg += "%s: %s                 %s\n" % (symbol, pa[symbol], la[symbol])
+                msg += "%s:  %5s                 %5s\n" % (symbol, pa[symbol], la[symbol])
 
         # Turnover
         try:
