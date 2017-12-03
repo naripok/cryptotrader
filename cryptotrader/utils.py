@@ -35,7 +35,7 @@ debug = True
 
 # logger
 class Logger(object):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('Cryptotrader')
 
     @staticmethod
     def __init__(name, output_dir=None):
@@ -59,31 +59,31 @@ class Logger(object):
             Logger.logger.addHandler(flogger)
 
     @staticmethod
-    def info(method, str):
+    def info(method, msg):
         """
         Write info log
         :param method: Method name
         :param str: Log message
         """
-        Logger.logger.info('[%s]\n%s\n' % (method, str))
+        Logger.logger.info('%s - [%s]\n%s\n' % (str(datetime.now()), method, msg))
 
     @staticmethod
-    def error(method, str):
+    def error(method, msg):
         """
         Write error log
         :param method: Method name
         :param str: Log message
         """
-        Logger.logger.error('[%s]\n%s\n' % (method, str))
+        Logger.logger.error('%s - [%s]\n%s\n' % (str(datetime.now()), method, msg))
 
     @staticmethod
-    def debug(method, str):
+    def debug(method, msg):
         """
         Write debug log
         :param method: Method name
         :param str: Log message
         """
-        Logger.logger.debug('[%s]\n%s\n' % (method, str))
+        Logger.logger.debug('%s - [%s]\n%s\n' % (str(datetime.now()), method, msg))
 
 
 # Helper functions and classes
