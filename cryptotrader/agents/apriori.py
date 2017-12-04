@@ -11,7 +11,7 @@ from datetime import timedelta
 from numpy import diag, sqrt, log, trace
 from numpy.linalg import inv
 
-from ..exchange_api.poloniex import ExchangeError, RetryException
+from ..exceptions import *
 
 import scipy
 from scipy.signal import argrelextrema
@@ -441,20 +441,21 @@ class APrioriAgent(Agent):
                         except ValueError:
                             sleep(np.random.random(1) * 3)
 
-                # If you've done enough tries, cancel action and wait for the next bar
-                except RetryException as e:
-                    if 'retryDelays exhausted' in e.__str__():
-                        # Tell nerds the delay
-                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                except MaxRetriesException as e:
+                    # Tell nerds the delay
+                    Logger.error(APrioriAgent.trade, "Retries exhausted. Waiting for connection...")
 
-                        # Wait for the next candle
-                        try:
-                            sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                                  - datetime.timestamp(env.timestamp) + np.random.random(1) * 30)
-                        except ValueError:
-                            sleep(1 + int(np.random.random(1) * 30))
-                    else:
-                        raise e
+                    try:
+                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                    except Exception:
+                        pass
+
+                    # Wait for the next candle
+                    try:
+                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
+                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 30)
+                    except ValueError:
+                        sleep(1 + int(np.random.random(1) * 30))
 
                 # Catch exceptions
                 except Exception as e:
@@ -463,7 +464,7 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
-                    print(env.get_reward())
+                    print(env.get_reward(prev_portval))
 
                     print("\nAgent Trade Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -486,6 +487,12 @@ class APrioriAgent(Agent):
                                                                str(pd.to_timedelta(time() - t0, unit='s')),
                                                                init_portval,
                                                                env.calc_total_portval()))
+
+        # Catch exceptions
+        except Exception as e:
+            print("\nAgent Trade Error:",
+                  type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+            raise e
 
     def make_report(self, env, obs, reward, episode_reward, t0, action_time, next_action, prev_portval, init_portval):
         """
@@ -936,19 +943,21 @@ class ONS(APrioriAgent):
         A.Agarwal, E.Hazan, S.Kale, R.E.Schapire.
         Algorithms for Portfolio Management based on the Newton Method, 2006.
         http://machinelearning.wustl.edu/mlpapers/paper_files/icml2006_AgarwalHKS06.pdf
+        http://rob.schapire.net/papers/newton_portfolios.pdf
     """
 
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.1, eta=0., fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
         super().__init__(fiat=fiat, name=name)
         self.delta = delta
-        self.beta = beta
+        # self.beta = beta
         self.eta = eta
+        self.init = False
 
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
@@ -957,23 +966,30 @@ class ONS(APrioriAgent):
         return price_relative
 
     def rebalance(self, obs):
+        if not self.init:
+            self.n_pairs = obs.columns.levels[0].shape[0]
+            self.A = np.mat(np.eye(self.n_pairs))
+            self.b = np.mat(np.zeros(self.n_pairs)).T
+            self.init = True
+
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
+
         else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
-            self.A = np.mat(np.eye(n_pairs))
-            self.b = np.mat(np.zeros(n_pairs)).T
             return array_normalize(action)
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.mat(safe_div(x, np.dot(b, x))).T
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
         # update A
         self.A += grad * grad.T
+        # update beta
+        self.beta = safe_div(1, 8 * np.power(self.n_pairs, 0.25) * np.sqrt(self.step * np.log(self.n_pairs * self.step)))
         # update b
         self.b += (1 + safe_div(1., self.beta)) * grad
 
@@ -1002,7 +1018,7 @@ class ONS(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.delta = kwargs['delta']
-        self.beta = kwargs['beta']
+        # self.beta = kwargs['beta']
         self.eta = kwargs['eta']
 
 
@@ -1452,17 +1468,20 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.eps = eps
+        self.eta = eta
         self.activation = activation
         if rebalance:
             self.reb = -2
         else:
             self.reb = -1
+
+        self.init = False
 
     def predict(self, obs):
         """
@@ -1479,15 +1498,19 @@ class STMR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=self.reb)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
         else:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
+            return self.crp
 
     def update(self, b, x):
         """
@@ -1507,10 +1530,51 @@ class STMR(APrioriAgent):
         b += lam * (x - x_mean)
 
         # project it onto simplex
-        return self.activation(b)
+        return self.activation(b) * (1 - self.eta) + self.eta * self.crp
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
+        self.eta = kwargs['eta']
+
+
+class KAMAMR(STMR):
+    """
+    Short term mean reversion strategy for portfolio selection.
+
+    Original algo by José Olímpio Mendes
+    27/11/2017
+    """
+
+    def __repr__(self):
+        return "KAMAMR"
+
+    def __init__(self, eps=0.02, window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+        """
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.eps = eps
+        self.window = window
+        self.activation = activation
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        mu = prices.apply(tl.KAMA, timeperiod=self.window, raw=True).iloc[-1].values
+
+        price_relative = np.append(safe_div(mu, prices.iloc[-1].values) - 1, [0.0])
+
+        return price_relative
+
+    def set_params(self, **kwargs):
+        self.eps = kwargs['eps']
+        self.window = int(kwargs['window'])
 
 
 # Portfolio optimization

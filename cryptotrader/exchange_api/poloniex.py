@@ -144,7 +144,7 @@ class Poloniex(object):
                     problems.append(problem)
                     if delay is None:
                         Logger.debug(func, problems)
-                        raise RetryException(
+                        raise MaxRetriesException(
                             'retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait

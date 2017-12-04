@@ -152,7 +152,7 @@ def array_normalize(x, float=True):
     out[-1] += dec_con.create_decimal('1.00000000') - out.sum()
 
     if float:
-        return np.float32(out)
+        return np.float64(out)
     else:
         return out
 

@@ -399,10 +399,6 @@ class TradingEnvironment(Env):
 
             return filtered_balance
 
-        except DataFeedRetryException:
-            Logger.error(TradingEnvironment.get_balance, "Retries exhausted. Waiting for connection...")
-            sleep(1)
-
         except Exception as e:
             try:
                 Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e, balance))
@@ -423,11 +419,6 @@ class TradingEnvironment(Env):
 
             assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
             return dec_con.create_decimal(fees[fee_type])
-
-
-        except DataFeedRetryException:
-            Logger.error(TradingEnvironment.get_fee, "Retries exhausted. Waiting for connection...")
-            sleep(1)
 
         except Exception as e:
             Logger.error(TradingEnvironment.get_fee, self.parse_error(e))
@@ -512,117 +503,115 @@ class TradingEnvironment(Env):
 
     # Low frequency getter
     def get_ohlc(self, symbol, index):
-        while True:
-            try:
-                """
-                Return OHLC data for desired pair
-                :param symbol: str: Pair symbol
-                :param index: datetime.datetime: Time span for data retrieval
-                :return: pandas DataFrame: OHLC symbol data
-                """
-                # Get range
-                start = index[0]
-                end = index[-1]
+        """
+        Return OHLC data for desired pair
+        :param symbol: str: Pair symbol
+        :param index: datetime.datetime: Time span for data retrieval
+        :return: pandas DataFrame: OHLC symbol data
+        """
+        # Get range
+        start = index[0]
+        end = index[-1]
 
-                # Call for data
-                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
-                                                                                period=self.period * 60,
-                                                                                start=datetime.timestamp(start),
-                                                                                end=datetime.timestamp(end)),
-                                                                                nrows=index.shape[0])
-                # TODO 1 FIND A BETTER WAY
-                # TODO: FIX TIMESTAMP
+        # Call for data
+        ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
+                                                                        period=self.period * 60,
+                                                                        start=datetime.timestamp(start),
+                                                                        end=datetime.timestamp(end)),
+                                                                        nrows=index.shape[0])
+        # TODO 1 FIND A BETTER WAY
+        # TODO: FIX TIMESTAMP
 
-                # Set index
-                ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-                                  inplace=True, drop=True)
+        # Set index
+        ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
+                          inplace=True, drop=True)
 
-                # Get right values to fill nans
-                # TODO: FIND A BETTER PERFORMANCE METHOD
-                last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
-                fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
-                fill_dict.update({'volume': '0E-16'})
-                # Reindex with desired time range and fill nans
-                ohlc_df = ohlc_df[['open','high','low','close',
-                                   'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
+        # Get right values to fill nans
+        # TODO: FIND A BETTER PERFORMANCE METHOD
+        last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+        fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
+        fill_dict.update({'volume': '0E-16'})
+        # Reindex with desired time range and fill nans
+        ohlc_df = ohlc_df[['open','high','low','close',
+                           'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
 
-                return ohlc_df.astype(str)#.fillna('0.0')
-
-            except DataFeedRetryException:
-                Logger.error(TradingEnvironment.get_ohlc, "Retries exhausted. Waiting for connection...")
-                sleep(5)
+        return ohlc_df.astype(str)#.fillna('0.0')
 
     # Observation maker
     def get_history(self, start=None, end=None, portfolio_vector=False):
-        try:
-            obs_list = []
-            keys = []
+        while True:
+            try:
+                obs_list = []
+                keys = []
 
-            # Make desired index
-            is_bounded = True
-            if not end:
-                end = self.timestamp
-                is_bounded = False
-            if not start:
-                start = end - timedelta(minutes=self.period * self.obs_steps)
-                index = pd.date_range(start=start,
-                                      end=end,
-                                      freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
-                is_bounded = False
-            else:
-                index = pd.date_range(start=start,
-                                      end=end,
-                                      freq="%dT" % self.period).ceil("%dT" % self.period)
+                # Make desired index
+                is_bounded = True
+                if not end:
+                    end = self.timestamp
+                    is_bounded = False
+                if not start:
+                    start = end - timedelta(minutes=self.period * self.obs_steps)
+                    index = pd.date_range(start=start,
+                                          end=end,
+                                          freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
+                    is_bounded = False
+                else:
+                    index = pd.date_range(start=start,
+                                          end=end,
+                                          freq="%dT" % self.period).ceil("%dT" % self.period)
 
-            if portfolio_vector:
-                # Get portfolio observation
-                port_vec = self.get_sampled_portfolio(index)
-                if port_vec.shape[0] == 0:
-                    port_vec = self.get_sampled_portfolio().iloc[-1:]
-                    port_vec.index = [index[0]]
+                if portfolio_vector:
+                    # Get portfolio observation
+                    port_vec = self.get_sampled_portfolio(index)
+                    if port_vec.shape[0] == 0:
+                        port_vec = self.get_sampled_portfolio().iloc[-1:]
+                        port_vec.index = [index[0]]
 
-                # Get pairs history
-                for pair in self.pairs:
-                    keys.append(pair)
-                    history = self.get_ohlc(pair, index)
+                    # Get pairs history
+                    for pair in self.pairs:
+                        keys.append(pair)
+                        history = self.get_ohlc(pair, index)
 
-                    history = pd.concat([history, port_vec[pair.split('_')[1]]], axis=1)
-                    obs_list.append(history)
+                        history = pd.concat([history, port_vec[pair.split('_')[1]]], axis=1)
+                        obs_list.append(history)
 
-                # Get fiat history
-                keys.append(self._fiat)
-                obs_list.append(port_vec[self._fiat])
+                    # Get fiat history
+                    keys.append(self._fiat)
+                    obs_list.append(port_vec[self._fiat])
 
-                # Concatenate dataframes
-                obs = pd.concat(obs_list, keys=keys, axis=1)
+                    # Concatenate dataframes
+                    obs = pd.concat(obs_list, keys=keys, axis=1)
 
-                # Fill missing portfolio observations
-                cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
-                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
+                    # Fill missing portfolio observations
+                    cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
+                    obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
-                if not is_bounded:
-                    assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+                    if not is_bounded:
+                        assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs.apply(convert_to.decimal, raw=True)
-            else:
-                # Get history
-                for pair in self.pairs:
-                    keys.append(pair)
-                    history = self.get_ohlc(pair, index)
-                    obs_list.append(history)
+                    return obs.apply(convert_to.decimal, raw=True)
+                else:
+                    # Get history
+                    for pair in self.pairs:
+                        keys.append(pair)
+                        history = self.get_ohlc(pair, index)
+                        obs_list.append(history)
 
-                # Concatenate
-                obs = pd.concat(obs_list, keys=keys, axis=1)
+                    # Concatenate
+                    obs = pd.concat(obs_list, keys=keys, axis=1)
 
-                # Check size
-                if not is_bounded:
-                    assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+                    # Check size
+                    if not is_bounded:
+                        assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
 
-                return obs.apply(convert_to.decimal, raw=True)
+                    return obs.apply(convert_to.decimal, raw=True)
 
-        except Exception as e:
-            Logger.error(TradingEnvironment.get_history, self.parse_error(e))
-            raise e
+            except MaxRetriesException:
+                Logger.error(TradingEnvironment.get_history, "Retries exhausted. Waiting for connection...")
+
+            except Exception as e:
+                Logger.error(TradingEnvironment.get_history, self.parse_error(e))
+                raise e
 
     def get_observation(self, portfolio_vector=False):
         """
@@ -1479,7 +1468,6 @@ class PaperTradingEnvironment(TradingEnvironment):
         super().__init__(period, obs_steps, tapi, fiat, name)
 
     def reset(self):
-
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
 
@@ -1503,42 +1491,33 @@ class PaperTradingEnvironment(TradingEnvironment):
         return obs.astype(np.float64)
 
     def step(self, action):
+        # Get step timestamp
+        timestamp = self.timestamp
+
+        # Log desired action
+        self.log_action_vector(timestamp, action, False)
+
+        # Save portval for reward calculation
+        previous_portval = self.calc_total_portval(timestamp)
+
+        # Simulate portifolio rebalance
+        done = self.simulate_trade(action, timestamp)
+
+        # Wait for next bar open
         try:
-            # Get step timestamp
-            timestamp = self.timestamp
+            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+                  datetime.timestamp(self.timestamp))
+        except ValueError:
+            pass
 
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
+        # Observe environment
+        new_obs = self.get_observation(True).astype(np.float64)
 
-            # Save portval for reward calculation
-            previous_portval = self.calc_total_portval(timestamp)
+        # Get reward for previous action
+        reward = self.get_reward(previous_portval)
 
-            # Simulate portifolio rebalance
-            done = self.simulate_trade(action, timestamp)
-
-            # Wait for next bar open
-            try:
-                sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
-                      datetime.timestamp(self.timestamp))
-            except ValueError:
-                pass
-
-            # Observe environment
-            new_obs = self.get_observation(True).astype(np.float64)
-
-            # Get reward for previous action
-            reward = self.get_reward(previous_portval)
-
-            # Return new observation, reward, done flag and status for debugging
-            return new_obs, np.float64(reward), done, self.status
-
-        except Exception as e:
-            Logger.error(PaperTradingEnvironment.step, self.parse_error(e))
-            if hasattr(self, 'email'):
-                self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
-            raise e
+        # Return new observation, reward, done flag and status for debugging
+        return new_obs, np.float64(reward), done, self.status
 
 
 class LiveTradingEnvironment(TradingEnvironment):
@@ -1597,7 +1576,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
         return convert_to.decimal(portfolio)
 
-    def get_desired_balance_array(self, action, ticker=None):
+    def calc_desired_balance_array(self, action, ticker=None):
         """
         Return asset amounts given action array
         :param action: numpy ndarray: action array with norm summing one
@@ -1678,9 +1657,14 @@ class LiveTradingEnvironment(TradingEnvironment):
                     else:
                         raise error
 
-                except DataFeedRetryException as error:
+                except MaxRetriesException as error:
                     Logger.error(LiveTradingEnvironment.immediate_sell, self.parse_error(error))
-                    return False
+                    if hasattr(self, 'email'):
+                        self.send_email("Failed to sell %s at %s" % (symbol,
+                                                                        datetime.strftime(self.timestamp,
+                                                                                          "%Y-%m-%d %H:%M:%S")),
+                                        self.parse_error(error))
+                    raise error
 
         except Exception as e:
             try:
@@ -1689,11 +1673,13 @@ class LiveTradingEnvironment(TradingEnvironment):
             except Exception:
                 Logger.error(LiveTradingEnvironment.immediate_sell,
                              self.parse_error(error))
+
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
-                                                                            datetime.strftime(self.timestamp,
-                                                                                              "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
+                                                                        datetime.strftime(self.timestamp,
+                                                                                          "%Y-%m-%d %H:%M:%S")),
+                            self.parse_error(e))
+
             raise e
 
     def immediate_buy(self, symbol, amount):
@@ -1776,9 +1762,14 @@ class LiveTradingEnvironment(TradingEnvironment):
                     else:
                         raise error
 
-                except DataFeedRetryException as error:
+                except MaxRetriesException as error:
                     Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error))
-                    return False
+                    if hasattr(self, 'email'):
+                        self.send_email("Failed to buy %s at %s" % (symbol,
+                                                                        datetime.strftime(self.timestamp,
+                                                                                          "%Y-%m-%d %H:%M:%S")),
+                                        self.parse_error(error))
+                    raise error
 
         except Exception as e:
             try:
@@ -1788,9 +1779,10 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             if hasattr(self, 'email'):
                 self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
-                                                                            datetime.strftime(self.timestamp,
-                                                                                              "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
+                                                                        datetime.strftime(self.timestamp,
+                                                                                          "%Y-%m-%d %H:%M:%S")),
+                            self.parse_error(e))
+
             raise e
 
     # Online Trading methods
@@ -1872,7 +1864,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Calculate position change given last portftolio and action vector
             ticker = self.tapi.returnTicker()
-            balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
+            balance_change = dec_vec_sub(self.calc_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
 
             # Sell assets first
             resp_1 = self.rebalance_sell(balance_change)
@@ -1901,10 +1893,6 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             return done
 
-        except DataFeedRetryException:
-            Logger.error(LiveTradingEnvironment.online_rebalance, "Retries exhausted. Stopping actions.")
-            return False
-
         except Exception as e:
             # Log error for debug
             try:
@@ -1916,7 +1904,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Wake up nerds for the rescue
             if hasattr(self, 'email'):
-                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                self.send_email("Online Rebalance Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
                                 self.parse_error(e))
             raise e
@@ -1947,42 +1935,30 @@ class LiveTradingEnvironment(TradingEnvironment):
         return obs.astype(np.float64)
 
     def step(self, action):
+        # Get step timestamp
+        timestamp = self.timestamp
+
+        # Log desired action
+        self.log_action_vector(timestamp, action, False)
+
+        # Save portval for reward calculation
+        previous_portval = self.calc_total_portval()
+
+        # Simulate portifolio rebalance
+        done = self.online_rebalance(action, timestamp)
+
+        # Wait for next bar open
         try:
-            # Get step timestamp
-            timestamp = self.timestamp
+            sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
+                  datetime.timestamp(self.timestamp))
+        except ValueError:
+            pass
 
-            # Log desired action
-            self.log_action_vector(timestamp, action, False)
+        # Observe environment
+        new_obs = self.get_observation(True).astype(np.float64)
 
-            # Save portval for reward calculation
-            previous_portval = self.calc_total_portval()
+        # Get reward for previous action
+        reward = self.get_reward(previous_portval)
 
-            # Simulate portifolio rebalance
-            done = self.online_rebalance(action, timestamp)
-
-            # Wait for next bar open
-            try:
-                sleep(datetime.timestamp(floor_datetime(timestamp, self.period) + timedelta(minutes=self.period)) -
-                      datetime.timestamp(self.timestamp))
-            except ValueError:
-                pass
-
-            # Observe environment
-            new_obs = self.get_observation(True).astype(np.float64)
-
-            # Get reward for previous action
-            reward = self.get_reward(previous_portval)
-
-            # Return new observation, reward, done flag and status for debugging
-            return new_obs, np.float64(reward), done, self.status
-
-        except Exception as e:
-            # Log error for debug
-            Logger.error(LiveTradingEnvironment.step, self.parse_error(e))
-
-            # Wake up nerds for the rescue
-            if hasattr(self, 'email'):
-                self.send_email("TradingEnvironment Error: %s at %s" % (e,
-                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
-                                self.parse_error(e))
-            raise e
+        # Return new observation, reward, done flag and status for debugging
+        return new_obs, np.float64(reward), done, self.status
