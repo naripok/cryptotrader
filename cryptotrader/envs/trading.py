@@ -1576,7 +1576,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
         return convert_to.decimal(portfolio)
 
-    def get_desired_balance_array(self, action, ticker=None):
+    def calc_desired_balance_array(self, action, ticker=None):
         """
         Return asset amounts given action array
         :param action: numpy ndarray: action array with norm summing one
@@ -1864,7 +1864,7 @@ class LiveTradingEnvironment(TradingEnvironment):
 
             # Calculate position change given last portftolio and action vector
             ticker = self.tapi.returnTicker()
-            balance_change = dec_vec_sub(self.get_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
+            balance_change = dec_vec_sub(self.calc_desired_balance_array(action, ticker), self.get_balance_array())[:-1]
 
             # Sell assets first
             resp_1 = self.rebalance_sell(balance_change)
