@@ -11,7 +11,7 @@ from datetime import timedelta
 from numpy import diag, sqrt, log, trace
 from numpy.linalg import inv
 
-from ..exchange_api.poloniex import ExchangeError, RetryException
+from ..exceptions import *
 
 import scipy
 from scipy.signal import argrelextrema
@@ -441,20 +441,21 @@ class APrioriAgent(Agent):
                         except ValueError:
                             sleep(np.random.random(1) * 3)
 
-                # If you've done enough tries, cancel action and wait for the next bar
-                except RetryException as e:
-                    if 'retryDelays exhausted' in e.__str__():
-                        # Tell nerds the delay
-                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                except MaxRetriesException as e:
+                    # Tell nerds the delay
+                    Logger.error(APrioriAgent.trade, "Retries exhausted. Waiting for connection...")
 
-                        # Wait for the next candle
-                        try:
-                            sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
-                                  - datetime.timestamp(env.timestamp) + np.random.random(1) * 30)
-                        except ValueError:
-                            sleep(1 + int(np.random.random(1) * 30))
-                    else:
-                        raise e
+                    try:
+                        env.send_email("Trading error: %s" % env.name, env.parse_error(e))
+                    except Exception:
+                        pass
+
+                    # Wait for the next candle
+                    try:
+                        sleep(datetime.timestamp(last_action_time + timedelta(minutes=env.period))
+                              - datetime.timestamp(env.timestamp) + np.random.random(1) * 30)
+                    except ValueError:
+                        sleep(1 + int(np.random.random(1) * 30))
 
                 # Catch exceptions
                 except Exception as e:
@@ -463,7 +464,7 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
-                    print(env.get_reward())
+                    print(env.get_reward(prev_portval))
 
                     print("\nAgent Trade Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -486,6 +487,12 @@ class APrioriAgent(Agent):
                                                                str(pd.to_timedelta(time() - t0, unit='s')),
                                                                init_portval,
                                                                env.calc_total_portval()))
+
+        # Catch exceptions
+        except Exception as e:
+            print("\nAgent Trade Error:",
+                  type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+            raise e
 
     def make_report(self, env, obs, reward, episode_reward, t0, action_time, next_action, prev_portval, init_portval):
         """
@@ -936,6 +943,7 @@ class ONS(APrioriAgent):
         A.Agarwal, E.Hazan, S.Kale, R.E.Schapire.
         Algorithms for Portfolio Management based on the Newton Method, 2006.
         http://machinelearning.wustl.edu/mlpapers/paper_files/icml2006_AgarwalHKS06.pdf
+        http://rob.schapire.net/papers/newton_portfolios.pdf
     """
 
     def __repr__(self):

@@ -56,7 +56,6 @@ class ExchangeConnection(object):
                                                                             )
         return df.rename(columns={'quoteVolume': 'volume', 'volume': 'quoteVolume'})
 
-
 ## Feed daemon
 # Server
 class FeedDaemon(Process):
@@ -169,6 +168,11 @@ class FeedDaemon(Process):
                         rep = self.api[call[0]].__call__(*call[1:])
                     except ExchangeError as e:
                         rep = e.__str__()
+                        Logger.error(FeedDaemon.worker, req)
+
+                    except DataFeedException as e:
+                        rep = e.__str__()
+                        Logger.error(FeedDaemon.worker, req)
 
                     if debug:
                         Logger.debug(FeedDaemon.worker, rep)
@@ -259,7 +263,7 @@ class DataFeed(ExchangeConnection):
                     problems.append(problem)
                     if delay is None:
                         Logger.debug(DataFeed, problems)
-                        raise DataFeedRetryException('retryDelays exhausted ' + str(problem))
+                        raise MaxRetriesException('retryDelays exhausted ' + str(problem))
                     else:
                         # log exception and wait
                         Logger.debug(DataFeed, problem)
@@ -289,7 +293,7 @@ class DataFeed(ExchangeConnection):
                 self.sock.connect(self.addr)
                 self.poll.register(self.sock, zmq.POLLIN)
 
-                raise DataFeedException
+                raise DataFeedException("Socket error. Restarting connection...")
 
         # Get response
         socks = dict(self.poll.poll(self.timeout))
@@ -310,7 +314,7 @@ class DataFeed(ExchangeConnection):
             self.sock.connect(self.addr)
             self.poll.register(self.sock, zmq.POLLIN)
 
-            raise DataFeedException
+            raise RequestTimeoutException("%s request timedout" % req)
 
     @retry
     def returnTicker(self):
@@ -320,7 +324,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnTicker")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnTicker")
 
     @retry
     def returnBalances(self):
@@ -334,7 +338,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnBalances")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnBalances")
 
     @retry
     def returnFeeInfo(self):
@@ -348,7 +352,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnFeeInfo")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnFeeInfo")
 
     @retry
     def returnCurrencies(self):
@@ -362,7 +366,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnCurrencies")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnCurrencies")
 
     @retry
     def returnChartData(self, currencyPair, period, start=None, end=None):
@@ -404,7 +408,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnChartData")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnChartData")
 
     @retry
     def returnTradeHistory(self, currencyPair='all', start=None, end=None):
@@ -418,7 +422,7 @@ class DataFeed(ExchangeConnection):
             assert isinstance(rep, dict)
             return rep
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.returnTradeHistory")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnTradeHistory")
 
     @retry
     def sell(self, currencyPair, rate, amount, orderType=False):
@@ -448,7 +452,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.sell")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.sell")
 
     @retry
     def buy(self, currencyPair, rate, amount, orderType=False):
@@ -478,7 +482,7 @@ class DataFeed(ExchangeConnection):
             return rep
 
         except AssertionError:
-            raise DataFeedException("Unexpected response from DataFeed.buy")
+            raise UnexpectedResponseException("Unexpected response from DataFeed.buy")
 
 
 # Test datafeeds
