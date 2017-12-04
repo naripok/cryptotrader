@@ -949,14 +949,15 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.1, beta=2., eta=0., fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.1, eta=0., fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
         super().__init__(fiat=fiat, name=name)
         self.delta = delta
-        self.beta = beta
+        # self.beta = beta
         self.eta = eta
+        self.init = False
 
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
@@ -965,23 +966,30 @@ class ONS(APrioriAgent):
         return price_relative
 
     def rebalance(self, obs):
+        if not self.init:
+            self.n_pairs = obs.columns.levels[0].shape[0]
+            self.A = np.mat(np.eye(self.n_pairs))
+            self.b = np.mat(np.zeros(self.n_pairs)).T
+            self.init = True
+
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
+
         else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
-            self.A = np.mat(np.eye(n_pairs))
-            self.b = np.mat(np.zeros(n_pairs)).T
             return array_normalize(action)
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.mat(safe_div(x, np.dot(b, x))).T
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
         # update A
         self.A += grad * grad.T
+        # update beta
+        self.beta = safe_div(1, 8 * np.power(self.n_pairs, 0.25) * np.sqrt(self.step * np.log(self.n_pairs * self.step)))
         # update b
         self.b += (1 + safe_div(1., self.beta)) * grad
 
@@ -1010,7 +1018,7 @@ class ONS(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.delta = kwargs['delta']
-        self.beta = kwargs['beta']
+        # self.beta = kwargs['beta']
         self.eta = kwargs['eta']
 
 
@@ -1460,17 +1468,20 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.eps = eps
+        self.eta = eta
         self.activation = activation
         if rebalance:
             self.reb = -2
         else:
             self.reb = -1
+
+        self.init = False
 
     def predict(self, obs):
         """
@@ -1487,15 +1498,19 @@ class STMR(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=self.reb)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
         else:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
+            return self.crp
 
     def update(self, b, x):
         """
@@ -1515,10 +1530,11 @@ class STMR(APrioriAgent):
         b += lam * (x - x_mean)
 
         # project it onto simplex
-        return self.activation(b)
+        return self.activation(b) * (1 - self.eta) + self.eta * self.crp
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
+        self.eta = kwargs['eta']
 
 
 class KAMAMR(STMR):
@@ -1552,7 +1568,7 @@ class KAMAMR(STMR):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
         mu = prices.apply(tl.KAMA, timeperiod=self.window, raw=True).iloc[-1].values
 
-        price_relative = np.append(safe_div(prices.iloc[-1].values, mu) - 1, [0.0])
+        price_relative = np.append(safe_div(mu, prices.iloc[-1].values) - 1, [0.0])
 
         return price_relative
 
