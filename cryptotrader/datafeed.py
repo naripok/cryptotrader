@@ -397,7 +397,10 @@ class DataFeed(ExchangeConnection):
                 except Exception as e:
                     raise e
 
-            assert isinstance(rep, list)
+            assert isinstance(rep, list), "returnChartData reply is not list"
+            assert int(rep[-1]['date']), "Bad returnChartData reply data"
+            assert float(rep[-1]['open']), "Bad returnChartData reply data"
+            assert float(rep[-1]['close']), "Bad returnChartData reply data"
             return rep
 
         except AssertionError:

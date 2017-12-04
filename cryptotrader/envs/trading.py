@@ -399,6 +399,10 @@ class TradingEnvironment(Env):
 
             return filtered_balance
 
+        except DataFeedRetryException:
+            Logger.error(TradingEnvironment.get_balance, "Retries exhausted. Waiting for connection...")
+            sleep(1)
+
         except Exception as e:
             try:
                 Logger.error(LiveTradingEnvironment.get_balance, self.parse_error(e, balance))
@@ -419,6 +423,11 @@ class TradingEnvironment(Env):
 
             assert fee_type in ['takerFee', 'makerFee'], "fee_type must be whether 'takerFee' or 'makerFee'."
             return dec_con.create_decimal(fees[fee_type])
+
+
+        except DataFeedRetryException:
+            Logger.error(TradingEnvironment.get_fee, "Retries exhausted. Waiting for connection...")
+            sleep(1)
 
         except Exception as e:
             Logger.error(TradingEnvironment.get_fee, self.parse_error(e))
@@ -1568,14 +1577,14 @@ class LiveTradingEnvironment(TradingEnvironment):
                                                       portval)
         portval = dec_con.add(portval, balance[self._fiat])
 
-        return convert_to.decimal(portval)
+        return dec_con.create_decimal(portval)
 
     def calc_portfolio_vector(self, ticker=None):
         """
         Calculate portfolio position vector
         :return:
         """
-        portfolio = np.empty(len(self.symbols), dtype=Decimal)
+        portfolio = np.empty(len(self.symbols), dtype=np.dtype(Decimal))
         portval = self.calc_total_portval(ticker)
         if not ticker:
             ticker = self.tapi.returnTicker()
@@ -1594,7 +1603,7 @@ class LiveTradingEnvironment(TradingEnvironment):
         :param action: numpy ndarray: action array with norm summing one
         :return: numpy ndarray: asset amount array given action
         """
-        desired_balance = np.empty(len(self.symbols), dtype=Decimal)
+        desired_balance = np.empty(len(self.symbols), dtype=np.dtype(Decimal))
         portval = fiat = self.calc_total_portval(ticker)
         if not ticker:
             ticker = self.tapi.returnTicker()

@@ -463,6 +463,7 @@ class APrioriAgent(Agent):
                     print(env.portfolio_df.iloc[-5:])
                     print(env.action_df.iloc[-5:])
                     print("Action taken:", action)
+                    print(env.get_reward())
 
                     print("\nAgent Trade Error:",
                           type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
@@ -867,14 +868,14 @@ class Momentum(APrioriAgent):
 
                 p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])
 
-                d = (df['%d_ma' % self.ma_span[0]].iloc[-4:] - df['%d_ma' % self.ma_span[1]].iloc[-4:]).diff()
+                d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
 
                 factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1]) / \
                               (df.open.iloc[-self.std_span:].std() + self.epsilon)
                               # (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
 
 
-            return array_normalize(factor) + 1
+            return array_normalize(factor)
 
         except TypeError as e:
             print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
@@ -890,7 +891,7 @@ class Momentum(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = (abs(portvar - 1) + max(abs(x - 1))) / 2
+        change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
 
         lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
 
@@ -1503,7 +1504,7 @@ class STMR(APrioriAgent):
         lam = np.clip(safe_div(change - self.eps, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
 
         # update portfolio
-        b = b + lam * (x - x_mean)
+        b += lam * (x - x_mean)
 
         # project it onto simplex
         return self.activation(b)
