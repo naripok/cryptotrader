@@ -1544,7 +1544,7 @@ class KAMAMR(STMR):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
         mu = prices.apply(tl.KAMA, timeperiod=self.window, raw=True).iloc[-1].values
 
-        price_relative = np.append(safe_div(mu, prices.iloc[-1].values) - 1, [0.0])
+        price_relative = np.append(safe_div(prices.iloc[-1].values, mu) - 1, [0.0])
 
         return price_relative
 
