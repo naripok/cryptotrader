@@ -1513,6 +1513,46 @@ class STMR(APrioriAgent):
         self.eps = kwargs['eps']
 
 
+class KAMAMR(STMR):
+    """
+    Short term mean reversion strategy for portfolio selection.
+
+    Original algo by José Olímpio Mendes
+    27/11/2017
+    """
+
+    def __repr__(self):
+        return "KAMAMR"
+
+    def __init__(self, eps=0.02, window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+        """
+        :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.eps = eps
+        self.window = window
+        self.activation = activation
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        mu = prices.apply(tl.KAMA, timeperiod=self.window, raw=True).iloc[-1].values
+
+        price_relative = np.append(safe_div(mu, prices.iloc[-1].values) - 1, [0.0])
+
+        return price_relative
+
+    def set_params(self, **kwargs):
+        self.eps = kwargs['eps']
+        self.window = int(kwargs['window'])
+
+
 # Portfolio optimization
 class TCO(APrioriAgent):
     """
