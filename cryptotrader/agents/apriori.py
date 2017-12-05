@@ -94,7 +94,7 @@ class APrioriAgent(Agent):
 
             # Reset observations
             env.reset_status()
-            obs = env.reset(reset_dfs=True)
+            obs = env.reset()
 
             # Run start steps
             # Run start steps
@@ -120,7 +120,7 @@ class APrioriAgent(Agent):
                     # Accumulate reward
                     # Sharpe
                     if reward_type == 'sharpe':
-                        episode_reward += safe_div(reward, env.portfolio_df.portval.astype('f').std())
+                        episode_reward += safe_div(reward, env.portfolio_df.portval.astype(np.float64).std())
                     # Payoff
                     elif reward_type == 'payoff':
                         episode_reward += reward
@@ -169,7 +169,7 @@ class APrioriAgent(Agent):
             return 0.0
 
     def fit(self, env, nb_steps, batch_size, search_space, constraints=None, action_repetition=1, callbacks=None, verbose=1,
-            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
+            visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000, start_step=0,
             nb_max_episode_steps=None):
         """
         Fit the model on parameters on the environment
@@ -236,6 +236,7 @@ class APrioriAgent(Agent):
                                         nb_max_episode_steps=nb_max_episode_steps,
                                         nb_max_start_steps=nb_max_start_steps,
                                         start_step_policy=start_step_policy,
+                                        start_step=start_step,
                                         verbose=False)
 
                         # Accumulate reward
@@ -949,13 +950,13 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.1, eta=0., fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.1, beta=1, eta=0., fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
         super().__init__(fiat=fiat, name=name)
         self.delta = delta
-        # self.beta = beta
+        self.beta = beta
         self.eta = eta
         self.init = False
 
@@ -985,11 +986,11 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1, 1)
         # update A
         self.A += grad * grad.T
         # update beta
-        self.beta = safe_div(1, 8 * np.power(self.n_pairs, 0.25) * np.sqrt(self.step * np.log(self.n_pairs * self.step)))
+        # self.beta = safe_div(1, 8 * np.power(self.n_pairs, 0.25) * np.sqrt(self.step + 1 * np.log(self.n_pairs * self.step + 1)))
         # update b
         self.b += (1 + safe_div(1., self.beta)) * grad
 
@@ -1018,7 +1019,7 @@ class ONS(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.delta = kwargs['delta']
-        # self.beta = kwargs['beta']
+        self.beta = kwargs['beta']
         self.eta = kwargs['eta']
 
 

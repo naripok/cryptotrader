@@ -112,7 +112,7 @@ class TradingEnvironment(Env):
             for pair in self.pairs:
                 symbols.append(pair.split('_')[1])
             symbols.append(self._fiat)
-            self._symbols = symbols
+            self._symbols = tuple(symbols)
             return self._symbols
 
     @property
@@ -528,9 +528,19 @@ class TradingEnvironment(Env):
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
-        last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+        # last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+
+        # Get last close value
+        i = -1
+        last_close = ohlc_df.get_value(self.portfolio_df.index[i], 'close')
+        while not dec_con.create_decimal(last_close).is_finite():
+            i -= 1
+            last_close = ohlc_df.get_value(self.portfolio_df.index[i], 'close')
+
+        # Replace missing values with last close
         fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
         fill_dict.update({'volume': '0E-16'})
+
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
                            'volume']].reindex(index).asfreq("%dT" % self.period).fillna(fill_dict)
@@ -1323,10 +1333,11 @@ class BacktestEnvironment(TradingEnvironment):
     """
     def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
-        self.index = obs_steps
         super().__init__(period, obs_steps, tapi, fiat, name)
+        self.index = obs_steps
         self.data_length = None
         self.training = False
+        self.initialized = False
 
     @property
     def timestamp(self):
@@ -1362,50 +1373,62 @@ class BacktestEnvironment(TradingEnvironment):
 
         return ohlc_df.astype(str)
 
-    def reset(self, reset_dfs=True):
+    def setup(self):
+        # Reset index
+        self.data_length = self.tapi.data_length
+
+        # Set spaces
+        self.set_observation_space()
+        self.set_action_space()
+
+        # Get fee values
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        # Start balance
+        self.init_balance = self.get_balance()
+
+        # Set flag
+        self.initialized = True
+
+    def reset(self):
         """
         Setup env with initial values
         :param reset_dfs: bool: Reset log dfs
         :return: pandas DataFrame: Initial observation
         """
         try:
-            # Reset index
-            self.data_length = self.tapi.data_length
+            # If need setup, do it
+            if not self.initialized:
+                self.setup()
 
+            # Get start point
             if self.training:
                 self.index = np.random.random_integers(self.obs_steps, self.data_length - 3)
             else:
                 self.index = self.obs_steps
 
             # Reset log dfs
-            if reset_dfs:
-                self.obs_df = pd.DataFrame()
-                self.portfolio_df = pd.DataFrame()
-
-            # Set spaces
-            self.set_observation_space()
-            self.set_action_space()
+            self.obs_df = pd.DataFrame()
+            self.portfolio_df = pd.DataFrame(columns=list(self.symbols) + ['portval'])
 
             # Reset balance
-            self.balance = self.init_balance = self.get_balance()
-
-            # Get fee values
-            for symbol in self.symbols:
-                self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+            self.balance = self.init_balance
 
             # Get new index
             self.index += 1
 
+            # Get fisrt observation
             obs = self.get_observation(True)
-
-            if reset_dfs:
-                self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
-                                              columns=list(self.symbols) + ['online'],
-                                              index=[self.portfolio_df.index[0]])
 
             # Reset portfolio value
             self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
                             'timestamp': self.portfolio_df.index[-1]}
+
+            # Clean actions
+            self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+                                          columns=list(self.symbols) + ['online'],
+                                          index=[self.portfolio_df.index[-1]])
 
             # Return first observation
             return obs.astype(np.float64)
@@ -1413,6 +1436,119 @@ class BacktestEnvironment(TradingEnvironment):
         except IndexError:
             print("Insufficient tapi data. You must choose a bigger time span or a lower period.")
             raise IndexError
+
+    def step(self, action):
+        try:
+            # Get step timestamp
+            timestamp = self.timestamp
+
+            # Save portval for reward calculation
+            previous_portval = self.calc_total_portval()
+
+            # Simulate portifolio rebalance
+            self.simulate_trade(action, timestamp)
+
+            # Check for end condition
+            if self.index >= self.data_length - 2:
+                done = True
+                self.status["OOD"] += 1
+            else:
+                done = False
+
+            # Get new index
+            self.index += 1
+
+            # Get new observation
+            new_obs = self.get_observation(True)
+
+            # Get reward for action took
+            reward = self.get_reward(previous_portval)
+
+            # Return new observation, reward, done flag and status for debugging
+            return new_obs.astype(np.float64), np.float64(reward), done, self.status
+
+        except KeyboardInterrupt:
+            self.status["OOD"] += 1
+            # return self.get_observation(True).astype(np.float64), np.float64(0), False, self.status
+            raise KeyboardInterrupt
+
+        except Exception as e:
+            Logger.error(BacktestEnvironment.step, self.parse_error(e))
+            if hasattr(self, 'email'):
+                self.send_email("TradingEnvironment Error: %s at %s" % (e,
+                                datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),
+                                self.parse_error(e))
+            print("step action:", action)
+            raise e
+
+
+class TrainingEnvironment(BacktestEnvironment):
+    def __init__(self, period, obs_steps, tapi, fiat, name):
+        super(TrainingEnvironment, self).__init__(period, obs_steps, tapi, fiat, name)
+
+    @property
+    def timestamp(self):
+        return datetime.fromtimestamp(self.data.index[self.index]).astimezone(timezone.utc)
+
+    def setup(self):
+        # Reset index
+        self.data_length = self.tapi.data_length
+
+        # Get data set
+        obs_steps = self.obs_steps
+        self.obs_steps = self.data_length
+        self.data = self.get_observation().astype('f')
+        self.obs_steps = obs_steps
+
+        # Set spaces
+        self.set_observation_space()
+        self.set_action_space()
+
+        # Get fee values
+        for symbol in self.symbols:
+            self.tax[symbol] =float(self.get_fee(symbol))
+
+        # Start balance
+        self.init_balance = self.get_balance()
+
+        # Set flag
+        self.initialized = True
+
+    def reset(self):
+        # If need setup, do it
+        if not self.initialized:
+            self.setup()
+
+        # choose new start point
+        self.index = np.random.random_integers(self.obs_steps, self.data_length - 3)
+
+        # Clean data frames
+        self.obs_df = pd.DataFrame()
+        self.portfolio_df = pd.DataFrame()
+
+        # Reset balance
+        self.balance = self.init_balance = self.get_balance()
+
+        # Get new index
+        self.index += 1
+
+        # Observe environment
+        obs = self.get_observation(True)
+
+        # Reset portfolio value
+        self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
+                        'timestamp': self.portfolio_df.index[-1]}
+
+        # Init state
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
+                                      columns=self.symbols + ['online'],
+                                      index=[self.portfolio_df.index[0]])
+
+        # Return first observation
+        return obs.astype('f')
+
+    def simulate_trade(self, action, timestamp):
+        pass
 
     def step(self, action):
         try:
