@@ -513,6 +513,32 @@ class TradingEnvironment(Env):
         start = index[0]
         end = index[-1]
 
+        for retry in range(1):
+            try:
+                if retry:
+                    ohlc_df = self.tapi.pair_reciprocal(
+                        pd.DataFrame.from_records(
+                            self.tapi.returnChartData(
+                                pair,
+                                period=self.period * 60,
+                                start=start,
+                                end=end
+                                )
+                            )
+                        )
+                else:
+                    ohlc_df = pd.DataFrame.from_records(
+                        self.tapi.returnChartData(
+                            pair,
+                            period=self.period * 60,
+                            start=start,
+                            end=end
+                            )
+                        )
+            except ExchangeError as e:
+                if retry:
+                    raise ExchangeError(e.__str__())
+
         # Call for data
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
@@ -1548,7 +1574,7 @@ class TrainingEnvironment(BacktestEnvironment):
         return obs.astype('f')
 
     def simulate_trade(self, action, timestamp):
-        pass
+        raise NotImplementedError('HERE NOW')
 
     def step(self, action):
         try:

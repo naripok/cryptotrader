@@ -950,7 +950,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.1, beta=1, eta=0., fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.125, beta=1, eta=0., fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -989,8 +989,6 @@ class ONS(APrioriAgent):
         grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1, 1)
         # update A
         self.A += grad * grad.T
-        # update beta
-        # self.beta = safe_div(1, 8 * np.power(self.n_pairs, 0.25) * np.sqrt(self.step + 1 * np.log(self.n_pairs * self.step + 1)))
         # update b
         self.b += (1 + safe_div(1., self.beta)) * grad
 
