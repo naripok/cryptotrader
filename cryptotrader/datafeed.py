@@ -1,7 +1,7 @@
 from functools import wraps as _wraps
 from itertools import chain as _chain
 import json
-from .utils import convert_to, Logger
+from .utils import convert_to, Logger, dec_con
 from decimal import Decimal
 import pandas as pd
 from time import sleep
@@ -536,22 +536,26 @@ class BacktestDataFeed(ExchangeConnection):
         self.ohlc_data = {}
         self.data_length = None
         for pair in self.pairs:
-            try:
-                ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(pair, period=self.period * 60,
-                                                                   start=start, end=end
-                                                                  ))
+            ohlc_df = pd.DataFrame.from_records(
+                            self.tapi.returnChartData(
+                            pair,
+                            period=self.period * 60,
+                            start=start,
+                            end=end
+                        )
+                    )
 
-                self.ohlc_data[pair] = ohlc_df
+            i = -1
+            last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
+            while not dec_con.create_decimal(last_close).is_finite():
+                i -= 1
+                last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
 
-            except ExchangeError:
-                try:
-                    symbols = pair.split('_')
-                    self.ohlc_data[pair] = self.pair_reciprocal(pd.DataFrame.from_records(
-                        self.tapi.returnChartData(symbols[1] + '_' + symbols[0], period=self.period * 60,
-                                                   start=start, end=end
-                                                  )))
-                except ExchangeError as e:
-                    raise e
+            # Replace missing values with last close
+            fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
+            fill_dict.update({'volume': '0E-16'})
+
+            self.ohlc_data[pair] = ohlc_df.fillna(fill_dict)
 
         for key in self.ohlc_data:
             if not self.data_length or self.ohlc_data[key].shape[0] < self.data_length:
