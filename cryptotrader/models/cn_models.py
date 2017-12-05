@@ -116,7 +116,7 @@ class CashBias(chainer.Link):
 
     def __call__(self, x):
         xp = chainer.cuda.get_array_module(x)
-        fiat = xp.ones([x.shape[0], x.shape[1], 1, 1], dtype='f') - F.sum(x, axis=2, keepdims=True)
+        fiat = xp.zeros([x.shape[0], x.shape[1], 1, 1], dtype='f') - F.sum(x, axis=2, keepdims=True)
         return F.concat([x, fiat], axis=-2)
 
 

@@ -121,5 +121,4 @@ cryptotrader/models/__pycache__/
 docs/
 tests/.hypothesis/
 tests/__pycache__/
-/dev/livetrading_remote_test.py
-/dev/livetrading_main.py
+

@@ -81,6 +81,7 @@ class TradingEnvironment(Env):
         self.fiat = fiat
 
         self.reset_benchmark()
+        self.setup()
 
     ## Env properties
     @property
@@ -278,8 +279,8 @@ class TradingEnvironment(Env):
         obs_steps = self.obs_steps
 
         # Change it so you can recover all the data
-        self.obs_steps = self.tapi.data_length
-
+        self.obs_steps = self.data_length
+        self.index = obs_steps
         # Pull the entire data set
         hindsight = self.get_observation().xs('open', level=1,
                                              axis=1).rolling(2, min_periods=2).apply(
@@ -513,32 +514,6 @@ class TradingEnvironment(Env):
         start = index[0]
         end = index[-1]
 
-        for retry in range(1):
-            try:
-                if retry:
-                    ohlc_df = self.tapi.pair_reciprocal(
-                        pd.DataFrame.from_records(
-                            self.tapi.returnChartData(
-                                pair,
-                                period=self.period * 60,
-                                start=start,
-                                end=end
-                                )
-                            )
-                        )
-                else:
-                    ohlc_df = pd.DataFrame.from_records(
-                        self.tapi.returnChartData(
-                            pair,
-                            period=self.period * 60,
-                            start=start,
-                            end=end
-                            )
-                        )
-            except ExchangeError as e:
-                if retry:
-                    raise ExchangeError(e.__str__())
-
         # Call for data
         ohlc_df = pd.DataFrame.from_records(self.tapi.returnChartData(symbol,
                                                                         period=self.period * 60,
@@ -558,10 +533,10 @@ class TradingEnvironment(Env):
 
         # Get last close value
         i = -1
-        last_close = ohlc_df.get_value(self.portfolio_df.index[i], 'close')
+        last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
         while not dec_con.create_decimal(last_close).is_finite():
             i -= 1
-            last_close = ohlc_df.get_value(self.portfolio_df.index[i], 'close')
+            last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
 
         # Replace missing values with last close
         fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
@@ -991,6 +966,24 @@ class TradingEnvironment(Env):
         self.status = {'OOD': False, 'Error': False, 'ValueError': False, 'ActionError': False,
                        'NotEnoughFiat': False}
 
+    def setup(self):
+        # Reset index
+        self.data_length = self.tapi.data_length
+
+        # Set spaces
+        self.set_observation_space()
+        self.set_action_space()
+
+        # Get fee values
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        # Start balance
+        self.init_balance = self.get_balance()
+
+        # Set flag
+        self.initialized = True
+
     def reset(self):
         """
         Setup env with initial values
@@ -1398,24 +1391,6 @@ class BacktestEnvironment(TradingEnvironment):
                            'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
 
         return ohlc_df.astype(str)
-
-    def setup(self):
-        # Reset index
-        self.data_length = self.tapi.data_length
-
-        # Set spaces
-        self.set_observation_space()
-        self.set_action_space()
-
-        # Get fee values
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
-
-        # Start balance
-        self.init_balance = self.get_balance()
-
-        # Set flag
-        self.initialized = True
 
     def reset(self):
         """
@@ -2072,6 +2047,21 @@ class LiveTradingEnvironment(TradingEnvironment):
             raise e
 
     # Env methods
+    def setup(self):
+        # Set spaces
+        self.set_observation_space()
+        self.set_action_space()
+
+        # Get fee values
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        # Start balance
+        self.init_balance = self.get_balance()
+
+        # Set flag
+        self.initialized = True
+
     def reset(self):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
