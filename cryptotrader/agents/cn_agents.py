@@ -102,7 +102,7 @@ class PrintProgress(object):
     def __init__(self, t0):
         self.t0 = t0
         # self.rewards = Buffer(200)
-        self.grads = Buffer(200)
+        self.grads = Buffer(50)
 
     def __call__(self, env, agent, step):
         """Call the hook.
@@ -131,36 +131,6 @@ class PrintProgress(object):
                        end='\r', flush=True)
 
 
-# class ProcessObs(chainer.Link):
-#     """
-#     Observations preprocessing / feature extraction layer
-#     """
-#     def __init__(self, input_shape):
-#         super().__init__()
-#         self.n_cols = int(input_shape[-1])
-#         self.n_pairs = int((self.n_cols - 1) / 6)
-#         self.out_channels = 3
-#
-#         with self.init_scope():
-#             self.bn = L.BatchNormalization(self.out_channels)
-#
-#     def __call__(self, x):
-#         xp = chainer.cuda.get_array_module(x)
-#         obs = []
-#
-#         indexes = [i for i in range(self.n_cols - 1) if i % 6 == 0]
-#         for j in range(self.n_pairs):
-#             i = indexes[j]
-#             pair = []
-#             pair.append(xp.expand_dims(x[:,:,:, i + 1] / (x[:,:,:, i] + 1e-8) - 1., -2))
-#             pair.append(xp.expand_dims(x[:,:,:, i + 2] / (x[:,:,:, i] + 1e-8) - 1., -2))
-#             pair.append(xp.expand_dims(x[:,:,:, i + 3] / (x[:,:,:, i] + 1e-8) - 1., -2))
-#             obs.append(xp.concatenate(pair, axis=1))
-#
-#         # shape[batch_size, features, n_pairs, timesteps]
-#         return self.bn(xp.concatenate(obs, axis=-2))
-
-
 class ProcessObs(chainer.Link):
     """
     Observations preprocessing / feature extraction layer
@@ -184,22 +154,6 @@ class ProcessObs(chainer.Link):
         # shape[batch_size, features, n_pairs, timesteps]
         # return self.bn(xp.concatenate(obs, axis=-2))
         return xp.concatenate(obs, axis=-2)
-
-
-# class PortifolioVector(chainer.Link):
-#     def __init__(self, input_shape):
-#         super().__init__()
-#         self.n_cols = int(input_shape[-1])
-#         self.n_pairs = int((self.n_cols - 1) / 6)
-#
-#     def __call__(self, x):
-#         xp = chainer.cuda.get_array_module(x)
-#         out = []
-#         for i in [i - 1 for i in range(1, self.n_cols) if (i % 6) == 0]:
-#             out.append(xp.expand_dims(x[:,:,-1, i], -1))
-# #         out.append(x[:,-1])
-#
-#         return chainer.Variable(xp.reshape(xp.concatenate(out, axis=-1), [-1,1,self.n_pairs,1]))
 
 
 class PortfolioVector(chainer.Link):
@@ -240,7 +194,7 @@ class ConvBlock(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.conv = L.Convolution2D(in_channels, out_channels, ksize, pad=pad,
-                                        nobias=True, initialW=LeCunNormal())
+                                        nobias=False, initialW=LeCunNormal())
             self.bn = L.BatchNormalization(out_channels)
 
     def __call__(self, x):
@@ -278,7 +232,7 @@ class EIIE(chainer.Chain):
         with self.init_scope():
             self.vision = VisionModel(timesteps, vn_number, pn_number)
             self.portvec = PortfolioVector()
-            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=True, initialW=LeCunNormal())
+            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
             self.cashbias = CashBias()
 
     def __call__(self, x):
@@ -286,7 +240,7 @@ class EIIE(chainer.Chain):
         h = F.concat([h, self.portvec(x)], axis=1)
         h = self.conv(h)
         h = self.cashbias(h)
-        return h
+        return F.softmax(h)
 
 
 class SoftmaxGaussianDistribution(distribution.Distribution):
@@ -361,9 +315,9 @@ class SoftmaxGaussianPolicyWithDiagonalCovariance(chainer.Chain, policies.Policy
             # self.bn_mean = L.BatchNormalization(n_input_channels)
             # self.bn_var = L.BatchNormalization(n_input_channels)
             # self.mean_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
-            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=True)
+            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
             # self.var_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
-            self.var_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=True)
+            self.var_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
 
     def compute_mean_and_var(self, x):
         # mean = F.relu(self.mean_layer_1(x))
@@ -391,7 +345,7 @@ class A3CEIIE(chainer.Chain, a3c.A3CModel):
             self.pi = SoftmaxGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.pi = LinearGaussianPolicyWithDiagonalCovariance(pn_number * action_size, action_size)
             # self.v_1 = L.Linear(pn_number * action_size, pn_number * action_size, initialW=LeCunNormal(), nobias=False)
-            self.v_2 = L.Linear(pn_number * action_size, 1, initialW=LeCunNormal(), nobias=True)
+            self.v_2 = L.Linear(pn_number * action_size, 1, initialW=LeCunNormal(), nobias=False)
             # self.bn = L.BatchNormalization(pn_number * action_size)
 
     def pi_and_v(self, obs):
