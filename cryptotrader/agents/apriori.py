@@ -511,7 +511,7 @@ class APrioriAgent(Agent):
         last_portval = float(env.calc_total_portval())
 
         # Returns summary
-        msg = "\n>> Step {0}\nPortval: {1:.3f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.8f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
             self.step,
             last_portval,
             reward,
@@ -547,9 +547,9 @@ class APrioriAgent(Agent):
             adm += pc
             k += 1
 
-            msg += "%-9s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
+            msg += "%-11s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
 
-        msg += "Mean change:                              %5.02f %%\n" % (adm / k)
+        msg += "Mean change:                                %5.02f %%\n" % (adm / k)
 
         # Action summary
         msg += "\nAction Summary:\n"
@@ -576,13 +576,13 @@ class APrioriAgent(Agent):
                 nac = 100 * float(la[symbol])
                 na = 100 * float(next_action[i])
 
-                msg += "%-6s:  %5.02f %%    %5.02f %%    %5.02f %%    %5.02f %%\n" % (symbol,
+                msg += "%-8s:  %5.02f %%    %5.02f %%    %5.02f %%    %5.02f %%\n" % (symbol,
                                                                                        pac,
                                                                                        dac,
                                                                                        nac,
                                                                                        na)
             else:
-                msg += "%s:  %5s                 %5s\n" % (symbol, pa[symbol], la[symbol])
+                msg += "%-8s:  %5s                 %5s\n" % (symbol, pa[symbol], la[symbol])
 
         # Turnover
         try:
