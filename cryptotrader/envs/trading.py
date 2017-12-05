@@ -536,7 +536,7 @@ class TradingEnvironment(Env):
         last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
         while not dec_con.create_decimal(last_close).is_finite():
             i -= 1
-            last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
+            last_close = dec_con.create_decimal(ohlc_df.get_value(ohlc_df.index[i], 'close'))
 
         # Replace missing values with last close
         fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
@@ -1070,7 +1070,7 @@ class TradingEnvironment(Env):
 
         return self.results
 
-    def plot_results(self, window = 7, benchmark='crp'):
+    def plot_results(self, window=7, benchmark='crp', subset=None):
         def config_fig(fig):
             fig.background_fill_color = "black"
             fig.background_fill_alpha = 0.1
@@ -1084,7 +1084,10 @@ class TradingEnvironment(Env):
             fig.grid.grid_line_alpha = 0.1
             fig.grid.grid_line_dash = [6, 4]
 
-        df = self.get_results(window=window, benchmark=benchmark).astype(np.float64)
+        if subset:
+            df = self.get_results(window=window, benchmark=benchmark).astype(np.float64).iloc[subset[0]:subset[1]]
+        else:
+            df = self.get_results(window=window, benchmark=benchmark).astype(np.float64)
 
         # Results figures
         results = {}
@@ -1691,6 +1694,7 @@ class LiveTradingEnvironment(TradingEnvironment):
         for pair in self.pairs:
             portval = balance[pair.split('_')[1]].fma(convert_to.decimal(ticker[pair]['last']),
                                                       portval)
+
         portval = dec_con.add(portval, balance[self._fiat])
 
         return dec_con.create_decimal(portval)
