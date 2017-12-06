@@ -18,6 +18,7 @@ dec_con = getcontext()
 # Decimal constants
 dec_zero = dec_con.create_decimal('0E-16')
 dec_one = dec_con.create_decimal('1.0000000000000000')
+dec_two = dec_con.create_decimal('2.0000000000000000')
 dec_eps = dec_con.create_decimal('1E-16')
 dec_qua = dec_con.create_decimal('1E-8')
 
