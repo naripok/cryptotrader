@@ -316,8 +316,7 @@ class TradingEnvironment(Env):
                 b_crp_returns = np.dot(hindsight, b_crp)
 
                 # Calculate sharpe regret
-                reward = safe_div(np.log(b_crp_returns).sum(), b_crp_returns.std()) - \
-                         safe_div(np.log(ed_crp_returns).sum(), ed_crp_returns.std())
+                reward = np.log(b_crp_returns).sum() - np.log(ed_crp_returns).sum()
 
                 # Increment counter
                 i += 1
