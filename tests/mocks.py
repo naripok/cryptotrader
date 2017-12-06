@@ -9483,6 +9483,9 @@ tapi.configure_mock(**{'returnCurrencies.return_value': {'1CR': {'delisted': 1,
                        'returnFeeInfo.return_value': {'makerFee': '0.00150000',
                                                      'nextTier': '600.00000000',
                                                      'takerFee': '0.00250000',
-                                                     'thirtyDayVolume': '0.00000000'}
+                                                     'thirtyDayVolume': '0.00000000'},
                        })
+
 tapi.pairs = ["USDT_BTC", "USDT_ETH"]
+
+tapi.data_length = len(chart_data)
