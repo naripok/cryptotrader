@@ -280,7 +280,7 @@ class TradingEnvironment(Env):
 
         # Change it so you can recover all the data
         self.obs_steps = self.data_length
-        self.index = obs_steps
+        self.index = self.obs_steps - 1
         # Pull the entire data set
         hindsight = self.get_observation().xs('open', level=1,
                                              axis=1).rolling(2, min_periods=2).apply(
@@ -291,6 +291,7 @@ class TradingEnvironment(Env):
 
         # Change env obs_steps back
         self.obs_steps = obs_steps
+        self.index = self.obs_steps
 
         # Calculate benchmark return
         # Benchmark: Equally distributed constant rebalanced portfolio
