@@ -32,7 +32,7 @@ class TradingEnvironment(Env):
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, period, obs_steps, tapi, slippage='0.001', fiat="USDT", name="TradingEnvironment"):
+    def __init__(self, period, obs_steps, tapi, slippage=0.0, fiat="USDT", name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -1684,7 +1684,7 @@ class LiveTradingEnvironment(TradingEnvironment):
     """
     def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, ExchangeConnection), "tapi must be an ExchangeConnection instance."
-        super().__init__(period, obs_steps, tapi, fiat, name)
+        super().__init__(period, obs_steps, tapi, slippage=0.0, fiat=fiat, name=name)
 
     # Data feed methods
     def get_balance_array(self):
