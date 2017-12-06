@@ -511,13 +511,13 @@ class APrioriAgent(Agent):
         last_portval = float(env.calc_total_portval())
 
         # Returns summary
-        msg = "\n>> Step {0}\nPortval: {1:.8f}\nStep Reward: {2:.6f}({3:.02f})\nCumulative Reward: {4:.6f}({5:.02f})\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.8f}\nStep Reward: {2:.6f}  [{3:.04f} %]\nCumulative Reward: {4:.6f}  [{5:.04f} %]\n".format(
             self.step,
             last_portval,
             reward,
-            np.exp(reward),
+            np.exp(reward) - 1,
             episode_reward,
-            np.exp(episode_reward)
+            np.exp(episode_reward) - 1
             )
 
         msg += "\nStep portfolio change: %f" % (float(
@@ -725,6 +725,33 @@ class TestAgent(APrioriAgent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
+
+
+class TestLookAhead(APrioriAgent):
+    """
+    Test for look ahead bias
+    """
+    def __repr__(self):
+        return "TestLookAhead"
+
+    def __init__(self, mr=False, fiat="USDT"):
+        super().__init__(fiat=fiat)
+        self.mr = mr
+
+    def predict(self, obs):
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        if self.mr:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+        else:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+
+        return price_relative
+
+    def rebalance(self, obs):
+        factor = self.predict(obs)
+        position = np.zeros_like(factor)
+        position[np.argmax(factor)] = 1
+        return position
 
 
 class RandomWalk(APrioriAgent):
@@ -952,7 +979,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.125, beta=1, eta=0., fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.125, beta=1, eta=0., mr=False, fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -960,11 +987,15 @@ class ONS(APrioriAgent):
         self.delta = delta
         self.beta = beta
         self.eta = eta
+        self.mr = mr
         self.init = False
 
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+        if self.mr:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+        else:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
 
         return price_relative
 
@@ -1021,6 +1052,7 @@ class ONS(APrioriAgent):
         self.delta = kwargs['delta']
         self.beta = kwargs['beta']
         self.eta = kwargs['eta']
+        self.mr = bool(kwargs['mr'])
 
 
 # Pattern trading
