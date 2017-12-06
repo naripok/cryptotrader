@@ -32,7 +32,7 @@ class TradingEnvironment(Env):
     Trading environment base class
     """
     ## Setup methods
-    def __init__(self, period, obs_steps, tapi, slippage='0.001', fiat="USDT", name="TradingEnvironment"):
+    def __init__(self, period, obs_steps, tapi, fiat="USDT", name="TradingEnvironment"):
         assert isinstance(name, str), "Name must be a string"
         self.name = name
 
@@ -47,7 +47,6 @@ class TradingEnvironment(Env):
         self._crypto = []
         self._fiat = None
         self.tax = {}
-        self.slippage = dec_con.create_decimal(slippage)
 
         # Dataframes
         self.obs_df = pd.DataFrame()
@@ -92,7 +91,7 @@ class TradingEnvironment(Env):
     @obs_steps.setter
     def obs_steps(self, value):
         assert isinstance(value, int), "Obs steps must be a integer."
-        assert value >= 4, "Obs steps must be >= 4. Value: %s" % str(value)
+        assert value >= 3, "Obs steps must be >= 3. Value: %s" % str(value)
         self._obs_steps = value
 
     @property
@@ -690,18 +689,16 @@ class TradingEnvironment(Env):
         return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
 
     ## Trading methods
-    def get_open_price(self, symbol):
+    def get_open_price(self, symbol, timestamp=None):
         """
         Get symbol open price
         :param symbol: str: Pair name
         :param timestamp:
         :return: Decimal: Symbol open price
         """
-        # if not timestamp:
-        #     timestamp = self.obs_df.index[-1]
-        # return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'open'))
-        return np.mean(self.obs_df[("%s_%s" % (self._fiat, symbol), 'open')].iloc[-3:].values)
-
+        if not timestamp:
+            timestamp = self.obs_df.index[-1]
+        return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'open'))
 
     def calc_total_portval(self, timestamp=None):
         """
@@ -712,7 +709,7 @@ class TradingEnvironment(Env):
         portval = dec_zero
 
         for symbol in self._crypto:
-            portval = self.get_crypto(symbol).fma(self.get_open_price(symbol), portval)
+            portval = self.get_crypto(symbol).fma(self.get_open_price(symbol, timestamp), portval)
         portval = dec_con.add(self.fiat, portval)
 
         return portval
@@ -831,8 +828,8 @@ class TradingEnvironment(Env):
         # TODO TEST
 
         # Price change
-        pr = self.obs_df.xs('open', level=1, axis=1).iloc[-4:].values
-        pr = np.append(safe_div(pr[-1] + pr[-2] + pr[-3], pr[-2] + pr[-3] + pr[-4]), [dec_one])
+        pr = self.obs_df.xs('open', level=1, axis=1).iloc[-2:].values
+        pr = np.append(safe_div(pr[-1], pr[-2]), [dec_one])
         pr_max = pr.max()
 
         # Divide after dot product
@@ -892,8 +889,7 @@ class TradingEnvironment(Env):
                     with localcontext() as ctx:
                         ctx.rounding = ROUND_UP
 
-                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), dec_con.add(self.tax[symbol],
-                                                                                                     self.slippage))
+                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), self.tax[symbol])
 
                     self.fiat = {self._fiat: dec_con.add(self.fiat, portval.fma(change.copy_abs(), -fee)), 'timestamp': timestamp}
 
@@ -919,8 +915,7 @@ class TradingEnvironment(Env):
                     with localcontext() as ctx:
                         ctx.rounding = ROUND_UP
 
-                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), dec_con.add(self.tax[symbol],
-                                                                                                     self.slippage))
+                        fee = ctx.multiply(dec_con.multiply(portval, change.copy_abs()), self.tax[symbol])
 
                     crypto_pool = safe_div(portval.fma(action[i], -fee), self.get_open_price(symbol))
 
@@ -1049,13 +1044,9 @@ class TradingEnvironment(Env):
 
 
         # Best Constant Rebalance Portfolio without taxes
-        fill = obs.xs('open', level=1, axis=1).iloc[:5].rolling(2,
+        hindsight = obs.xs('open', level=1, axis=1).rolling(2,
                         min_periods=2).apply(lambda x: (safe_div(x[-1],
-                                                    x[-2]))).fillna(dec_one)
-
-        hindsight = obs.xs('open', level=1, axis=1).rolling(4,
-                        min_periods=4).apply(lambda x: (safe_div(x[-3:].mean(),
-                                                    x[-4:-1].mean()))).fillna(fill).applymap(dec_con.create_decimal)
+                                                    x[-2]))).fillna(dec_one).applymap(dec_con.create_decimal)
         hindsight[self._fiat] = dec_one
 
         # hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
@@ -1370,9 +1361,9 @@ class BacktestEnvironment(TradingEnvironment):
     """
     Backtest environment for financial strategies history testing
     """
-    def __init__(self, period, obs_steps, tapi, slippage, fiat, name):
+    def __init__(self, period, obs_steps, tapi, fiat, name):
         assert isinstance(tapi, BacktestDataFeed), "Backtest tapi must be a instance of BacktestDataFeed."
-        super().__init__(period, obs_steps, tapi, slippage, fiat, name)
+        super().__init__(period, obs_steps, tapi, fiat, name)
         self.index = obs_steps
         self.data_length = None
         self.training = False
@@ -1443,7 +1434,7 @@ class BacktestEnvironment(TradingEnvironment):
             obs = self.get_observation(True)
 
             # Reset portfolio value
-            self.portval = {'portval': self.calc_total_portval(),
+            self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
                             'timestamp': self.portfolio_df.index[-1]}
 
             # Clean actions
@@ -1504,8 +1495,8 @@ class BacktestEnvironment(TradingEnvironment):
 
 
 class TrainingEnvironment(BacktestEnvironment):
-    def __init__(self, period, obs_steps, tapi,  slippage, fiat, name):
-        super(TrainingEnvironment, self).__init__(period, obs_steps, tapi, slippage, fiat, name)
+    def __init__(self, period, obs_steps, tapi, fiat, name):
+        super(TrainingEnvironment, self).__init__(period, obs_steps, tapi, fiat, name)
 
     @property
     def timestamp(self):
@@ -1557,7 +1548,7 @@ class TrainingEnvironment(BacktestEnvironment):
         obs = self.get_observation(True)
 
         # Reset portfolio value
-        self.portval = {'portval': self.calc_total_portval(),
+        self.portval = {'portval': self.calc_total_portval(self.obs_df.index[-1]),
                         'timestamp': self.portfolio_df.index[-1]}
 
         # Init state
@@ -1655,7 +1646,7 @@ class PaperTradingEnvironment(TradingEnvironment):
         self.log_action_vector(timestamp, action, False)
 
         # Save portval for reward calculation
-        previous_portval = self.calc_total_portval()
+        previous_portval = self.calc_total_portval(timestamp)
 
         # Simulate portifolio rebalance
         done = self.simulate_trade(action, timestamp)
