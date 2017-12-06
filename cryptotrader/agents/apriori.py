@@ -515,9 +515,9 @@ class APrioriAgent(Agent):
             self.step,
             last_portval,
             reward,
-            np.exp(reward) - 1,
+            (np.exp(reward) - 1) * 100,
             episode_reward,
-            np.exp(episode_reward) - 1
+            (np.exp(episode_reward) - 1) * 100
             )
 
         msg += "\nStep portfolio change: %f" % (float(
