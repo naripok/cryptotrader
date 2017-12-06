@@ -1052,7 +1052,8 @@ class ONS(APrioriAgent):
         self.delta = kwargs['delta']
         self.beta = kwargs['beta']
         self.eta = kwargs['eta']
-        self.mr = bool(kwargs['mr'])
+        if 'mr' in kwargs:
+            self.mr = bool(kwargs['mr'])
 
 
 # Pattern trading
