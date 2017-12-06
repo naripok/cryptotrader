@@ -83,7 +83,7 @@ class APrioriAgent(Agent):
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
-    def test(self, env, nb_episodes=1, reward_type='sharpe', action_repetition=1, callbacks=None, visualize=False, start_step=0,
+    def test(self, env, nb_episodes=1, reward_type='return', action_repetition=1, callbacks=None, visualize=False, start_step=0,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
         """
         Test agent on environment
@@ -122,7 +122,7 @@ class APrioriAgent(Agent):
                     if reward_type == 'sharpe':
                         episode_reward += safe_div(reward, env.portfolio_df.portval.astype(np.float64).std())
                     # Payoff
-                    elif reward_type == 'payoff':
+                    elif reward_type == 'return':
                         episode_reward += reward
                     else:
                         raise TypeError("Bad reward argument.")
