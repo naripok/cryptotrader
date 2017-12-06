@@ -1603,7 +1603,7 @@ class PaperTradingEnvironment(TradingEnvironment):
     Paper trading environment for financial strategies forward testing
     """
     def __init__(self, period, obs_steps, tapi, fiat, name):
-        assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, DataFeed), "Paper trade tapi must be a instance of PaperTradingDataFeed."
+        # assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, DataFeed), "Paper trade tapi must be a instance of PaperTradingDataFeed."
         super().__init__(period, obs_steps, tapi, fiat, name)
 
     def reset(self):

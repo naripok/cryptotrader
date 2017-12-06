@@ -536,7 +536,7 @@ class APrioriAgent(Agent):
 
         # Prices summary
         msg += "\nPrices summary:\n"
-        msg += "Pair:      Prev open:    Last price:     Pct change:\n"
+        msg += "Pair       : Prev open:    Last price:     Pct change:\n"
 
         adm = 0.0
         k = 0
@@ -547,7 +547,7 @@ class APrioriAgent(Agent):
             adm += pc
             k += 1
 
-            msg += "%-11s: %11.4f   %11.4f%11.2f" % (symbol, pp, nep, pc) + " %\n"
+            msg += "%-11s: %11.8f   %11.8f%11.2f" % (symbol, pp, nep, pc) + " %\n"
 
         msg += "Mean change:                                %5.02f %%\n" % (adm / k)
 
@@ -671,7 +671,7 @@ class TestAgent(APrioriAgent):
 
             # Reset observations
             env.reset_status()
-            env.reset(reset_dfs=True)
+            env.reset()
 
             # Get max episode length
             if nb_max_episode_steps is None:
