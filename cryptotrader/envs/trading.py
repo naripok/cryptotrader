@@ -355,7 +355,7 @@ class TradingEnvironment(Env):
             print("\nOptimum benchmark reward: %f" % info.optimum)
             print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
         else:
-            print("Initial benchmark was already optimum.")
+            print("Initial benchmark was already optimum. Reward: %s" % str(initial_reward))
             print("Benchmark portfolio: %s" % str(np.float32(self.benchmark)))
 
         return self.benchmark
