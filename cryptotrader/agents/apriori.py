@@ -511,11 +511,13 @@ class APrioriAgent(Agent):
         last_portval = float(env.calc_total_portval())
 
         # Returns summary
-        msg = "\n>> Step {0}\nPortval: {1:.8f}\nStep Reward: {2:.6f}\nCumulative Reward: {3:.6f}\n".format(
+        msg = "\n>> Step {0}\nPortval: {1:.8f}\nStep Reward: {2:.6f}({3:.02f})\nCumulative Reward: {4:.6f}({5:.02f})\n".format(
             self.step,
             last_portval,
             reward,
+            np.exp(reward),
             episode_reward,
+            np.exp(episode_reward)
             )
 
         msg += "\nStep portfolio change: %f" % (float(
