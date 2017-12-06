@@ -1582,11 +1582,12 @@ class KAMAMR(STMR):
     def __repr__(self):
         return "KAMAMR"
 
-    def __init__(self, eps=0.02, eta=0.0, window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
-        super().__init__(eps=eps, eta=eta, fiat=fiat, name=name)
+        super().__init__(fiat=fiat, name=name)
+        self.eps = eps
         self.window = window
         self.activation = activation
         if rebalance:
