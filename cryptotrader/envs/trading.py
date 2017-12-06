@@ -298,6 +298,10 @@ class TradingEnvironment(Env):
         ed_crp = array_normalize(np.append(np.ones(len(self.symbols) - 1), [0.0]))
         ed_crp_returns = np.dot(hindsight, ed_crp)
 
+        initial_benchmark_returns = np.dot(hindsight, np.float64(self.benchmark))
+
+        initial_reward = np.log(initial_benchmark_returns).sum() - np.log(ed_crp_returns).sum()
+
         ## Define params
         # Constraints declaration
         # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
@@ -325,7 +329,7 @@ class TradingEnvironment(Env):
                 # Update progress
                 if verbose and i % 10 == 0:
                     print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
-                                                                                         nb_steps,
+                                                                                         int(nb_steps),
                                                                                          float(reward)),
                           end="\r")
 
@@ -346,9 +350,13 @@ class TradingEnvironment(Env):
             search_space=bench_search_space
             )
 
-        self.benchmark = convert_to.decimal(array_normalize(np.array([BCR[key] for key in BCR])))
-        print("\nOptimum benchmark reward: %f" % info.optimum)
-        print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
+        if float(info.optimum) > float(initial_reward):
+            self.benchmark = convert_to.decimal(array_normalize(np.array([BCR[key] for key in BCR])))
+            print("\nOptimum benchmark reward: %f" % info.optimum)
+            print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
+        else:
+            print("Initial benchmark was already optimum.")
+            print("Benchmark portfolio: %s" % str(np.float32(self.benchmark)))
 
         return self.benchmark
 
