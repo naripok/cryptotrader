@@ -1012,7 +1012,7 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = -np.mat(safe_div(x, np.dot(b, x))).T
+        grad = np.clip(safe_div(x, np.dot(b, x)).T, -1e6, 1e6)
         # update A
         self.A += grad * grad.T
         # update b
@@ -1070,9 +1070,9 @@ class OGS(APrioriAgent):
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
         if self.mr:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
         else:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2]) - 1).values, [0.0])
 
         return price_relative
 
@@ -1089,7 +1089,7 @@ class OGS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = safe_div(x, np.dot(b, x))
+        grad = np.clip(safe_div(x, np.dot(b, x)).T, -1e6, 1e6)
 
         # update b, we are using relative log return benchmark, so we want to maximize here
         b += self.lr * grad
@@ -1862,7 +1862,7 @@ class LinearMixture(APrioriAgent):
         sup = np.array([self.weights[i] * factor.rebalance(obs)
                                       for i, factor in enumerate(self.factors)], dtype='f').astype('f')
 
-        return simplex_proj(safe_div(sup.sum(axis=0), np.linalg.norm(sup) ** 2 * self.weights.sum()))
+        return simplex_proj(sup.mean(axis=0))
 
     def set_params(self, **kwargs):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
