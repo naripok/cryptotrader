@@ -1378,6 +1378,82 @@ class BacktestEnvironment(TradingEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
 
+    def get_history(self, start=None, end=None, portfolio_vector=False):
+        while True:
+            try:
+                obs_list = []
+                keys = []
+
+                # Make desired index
+                is_bounded = True
+                if not end:
+                    end = self.timestamp
+                    is_bounded = False
+                if not start:
+                    start = end - timedelta(minutes=self.period * self.obs_steps)
+                    index = pd.date_range(start=start,
+                                          end=end,
+                                          freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
+                    is_bounded = False
+                else:
+                    index = pd.date_range(start=start,
+                                          end=end,
+                                          freq="%dT" % self.period).ceil("%dT" % self.period)
+
+                if portfolio_vector:
+                    # Get portfolio observation
+                    port_vec = self.get_sampled_portfolio(index)
+
+                    if port_vec.shape[0] == 0:
+                        port_vec = self.get_sampled_portfolio().iloc[-1:]
+                        port_vec.index = [index[0]]
+
+                    # Get pairs history
+                    for pair in self.pairs:
+                        keys.append(pair)
+                        history = self.get_ohlc(pair, index)
+
+                        history = pd.concat([history, port_vec[pair.split('_')[1]]], axis=1)
+                        obs_list.append(history)
+
+                    # Get fiat history
+                    keys.append(self._fiat)
+                    obs_list.append(port_vec[self._fiat])
+
+                    # Concatenate dataframes
+                    obs = pd.concat(obs_list, keys=keys, axis=1)
+
+                    # Fill missing portfolio observations
+                    cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
+                    obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
+
+                    if not is_bounded:
+                        assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+
+                    return obs.apply(convert_to.decimal, raw=True)
+                else:
+                    # Get history
+                    for pair in self.pairs:
+                        keys.append(pair)
+                        history = self.get_ohlc(pair, index)
+                        obs_list.append(history)
+
+                    # Concatenate
+                    obs = pd.concat(obs_list, keys=keys, axis=1)
+
+                    # Check size
+                    if not is_bounded:
+                        assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+
+                    return obs.apply(convert_to.decimal, raw=True)
+
+            except MaxRetriesException:
+                Logger.error(TradingEnvironment.get_history, "Retries exhausted. Waiting for connection...")
+
+            except Exception as e:
+                Logger.error(TradingEnvironment.get_history, self.parse_error(e))
+                raise e
+
     def get_ohlc(self, symbol, index):
         # Get range
         start = index[0]

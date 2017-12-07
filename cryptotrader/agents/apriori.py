@@ -570,7 +570,7 @@ class APrioriAgent(Agent):
         # Last action
         la = env.action_df.iloc[-1].astype(str).to_dict()
 
-        msg += "Symbol: Previous:  Desired:   Executed:  Next:\n"
+        msg += "Symbol   : Previous:  Desired:   Executed:  Next:\n"
         for i, symbol in enumerate(pa):
             if symbol is not "online":
                 pac = 100 * float(pa[symbol])
@@ -1012,7 +1012,7 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1, 1)
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
         # update A
         self.A += grad * grad.T
         # update b
@@ -1070,9 +1070,9 @@ class OGS(APrioriAgent):
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
         if self.mr:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
         else:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2]) - 1).values, [0.0])
 
         return price_relative
 
@@ -1081,7 +1081,6 @@ class OGS(APrioriAgent):
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
-
         else:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
@@ -1090,10 +1089,10 @@ class OGS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = safe_div(x, np.dot(b, x))
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6)
 
-        # update b
-        b -= self.lr * grad
+        # update b, we are using relative log return benchmark, so we want to maximize here
+        b += self.lr * grad
 
         # projection of p
         pp = simplex_proj(b)
@@ -1853,7 +1852,7 @@ class LinearMixture(APrioriAgent):
     def predict(self, obs):
         for factor in self.factors:
             factor.step = self.step
-        return np.array([self.weights[i] * self.factors.rebalance(obs) for i in enumerate(self.factors)]).sum(axis=1) -\
+        return np.array([self.weights[i] * factor.rebalance(obs) for i, factor in enumerate(self.factors)]).mean(axis=0) -\
                self.get_portfolio_vector(obs, index=self.reb)
 
     def rebalance(self, obs):
@@ -1863,7 +1862,7 @@ class LinearMixture(APrioriAgent):
         sup = np.array([self.weights[i] * factor.rebalance(obs)
                                       for i, factor in enumerate(self.factors)], dtype='f').astype('f')
 
-        return simplex_proj(safe_div(sup.mean(axis=0), np.linalg.norm(sup, ord=2)))
+        return simplex_proj(sup.mean(axis=0))
 
     def set_params(self, **kwargs):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
