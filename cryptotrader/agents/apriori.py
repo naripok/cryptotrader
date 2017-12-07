@@ -1852,7 +1852,7 @@ class LinearMixture(APrioriAgent):
     def predict(self, obs):
         for factor in self.factors:
             factor.step = self.step
-        return np.array([self.weights[i] * factor.rebalance(obs) for i, factor in enumerate(self.factors)]).sum(axis=0) -\
+        return np.array([self.weights[i] * factor.rebalance(obs) for i, factor in enumerate(self.factors)]).mean(axis=0) -\
                self.get_portfolio_vector(obs, index=self.reb)
 
     def rebalance(self, obs):
@@ -1862,7 +1862,7 @@ class LinearMixture(APrioriAgent):
         sup = np.array([self.weights[i] * factor.rebalance(obs)
                                       for i, factor in enumerate(self.factors)], dtype='f').astype('f')
 
-        return simplex_proj(safe_div(sup.sum(axis=0), np.linalg.norm(sup)))
+        return simplex_proj(safe_div(sup.sum(axis=0), np.linalg.norm(sup) ** 2 * self.weights.sum()))
 
     def set_params(self, **kwargs):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
