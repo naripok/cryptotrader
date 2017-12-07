@@ -860,7 +860,7 @@ class Momentum(APrioriAgent):
     def __repr__(self):
         return "Momentum"
 
-    def __init__(self, ma_span=[2, 3], std_span=3, weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
+    def __init__(self, ma_span=[2, 3], weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
                  activation=simplex_proj, fiat="USDT"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
@@ -868,7 +868,6 @@ class Momentum(APrioriAgent):
         super().__init__(fiat=fiat)
         self.mean_type = mean_type
         self.ma_span = ma_span
-        self.std_span = std_span
         self.weights = weights
         self.sensitivity = sensitivity
         self.activation = activation
@@ -905,11 +904,9 @@ class Momentum(APrioriAgent):
 
                 p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])
 
-                d = (df['%d_ma' % self.ma_span[0]].iloc[-3:] - df['%d_ma' % self.ma_span[1]].iloc[-3:]).diff()
+                d = (df['%d_ma' % self.ma_span[0]].iloc[-2:] - df['%d_ma' % self.ma_span[1]].iloc[-2:]).diff()
 
-                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1]) / \
-                              (df.open.iloc[-self.std_span:].std() + self.epsilon)
-                              # (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon)
+                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1])
 
 
             return array_normalize(factor)
@@ -930,14 +927,10 @@ class Momentum(APrioriAgent):
 
         change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
 
-        lam = np.clip((change - self.sensitivity) / (np.linalg.norm(x - x_mean) ** 2 + self.epsilon), 0.0, 1e6)
+        lam = np.clip(safe_div((change - self.sensitivity), np.linalg.norm(x - x_mean)) ** 2, 0.0, 1e6)
 
         # update portfolio
         b = b + lam * (x - x_mean)
-
-        # Log values
-        self.log['mean_pct_change_prediction'] = ((1 / x_mean) - 1) * 100
-        self.log['portfolio_pct_change_prediction'] = ((1 / portvar) - 1) * 100
 
         # project it onto simplex
         return self.activation(b)
@@ -1051,6 +1044,64 @@ class ONS(APrioriAgent):
     def set_params(self, **kwargs):
         self.delta = kwargs['delta']
         self.beta = kwargs['beta']
+        self.eta = kwargs['eta']
+        if 'mr' in kwargs:
+            self.mr = bool(kwargs['mr'])
+
+
+class OGS(APrioriAgent):
+    """
+    Online gradient step
+    """
+
+    def __repr__(self):
+        return "OGS"
+
+    def __init__(self, lr=1, eta=0., mr=False, fiat="USDT", name="ONS"):
+        """
+        :param delta, beta, eta: Model parameters. See paper.
+        """
+        super().__init__(fiat=fiat, name=name)
+
+        self.lr = lr
+        self.eta = eta
+        self.mr = mr
+
+    def predict(self, obs):
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        if self.mr:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+        else:
+            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+
+        return price_relative
+
+    def rebalance(self, obs):
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+
+        else:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            return array_normalize(action)
+
+    def update(self, b, x):
+        # calculate gradient
+        grad = safe_div(x, np.dot(b, x))
+
+        # update b
+        b -= self.lr * grad
+
+        # projection of p
+        pp = simplex_proj(b)
+
+        return pp * (1 - self.eta) + np.ones(len(x)) / float(len(x)) * self.eta
+
+    def set_params(self, **kwargs):
+        self.lr = kwargs['lr']
         self.eta = kwargs['eta']
         if 'mr' in kwargs:
             self.mr = bool(kwargs['mr'])
@@ -1800,12 +1851,19 @@ class LinearMixture(APrioriAgent):
             self.reb = -1
 
     def predict(self, obs):
-        return np.array([self.weights[i] * self.factors.rebalance(obs) for i in enumerate(self.factors)]).sum(axis=1) - \
+        for factor in self.factors:
+            factor.step = self.step
+        return np.array([self.weights[i] * self.factors.rebalance(obs) for i in enumerate(self.factors)]).sum(axis=1) -\
                self.get_portfolio_vector(obs, index=self.reb)
 
     def rebalance(self, obs):
-        return simplex_proj(np.array([self.weights[i] * factor.rebalance(obs)
-                                      for i, factor in enumerate(self.factors)]).sum(axis=0))
+        for factor in self.factors:
+            factor.step = self.step
+
+        sup = np.array([self.weights[i] * factor.rebalance(obs)
+                                      for i, factor in enumerate(self.factors)], dtype='f').astype('f')
+
+        return simplex_proj(safe_div(sup.mean(axis=0), np.linalg.norm(sup, ord=2)))
 
     def set_params(self, **kwargs):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
