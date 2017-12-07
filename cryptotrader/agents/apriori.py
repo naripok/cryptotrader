@@ -1771,3 +1771,43 @@ class Anticor(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.window = int(kwargs['window'])
+
+
+class LinearMixture(APrioriAgent):
+    """
+    Factors Weighted Superposition
+    """
+    def __repr__(self):
+       return "LinearMixture"
+
+    def __init__(self, factors, weights=None, rebalance=True, fiat="USDT", name="LinearMixture"):
+        """
+        :factors: list: Agent instances
+        :param weights: numpy array: weight array
+        :param fiat: str:
+        :param name: str:
+        """
+        super(LinearMixture, self).__init__(fiat=fiat, name=name)
+        self.factors = factors
+        if not weights:
+            self.weights = np.ones(len(factors), dtype='f')
+        else:
+            assert isinstance(weights, np.ndarray)
+            self.weights = weights
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+    def predict(self, obs):
+        return np.array([self.weights[i] * self.factors.rebalance(obs) for i in enumerate(self.factors)]).sum(axis=1) - \
+               self.get_portfolio_vector(obs, index=self.reb)
+
+    def rebalance(self, obs):
+        return simplex_proj(np.array([self.weights[i] * factor.rebalance(obs)
+                                      for i, factor in enumerate(self.factors)]).sum(axis=0))
+
+    def set_params(self, **kwargs):
+        self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
+        for i in range(len(self.factors)):
+            self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
