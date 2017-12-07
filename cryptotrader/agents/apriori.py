@@ -1012,7 +1012,7 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)).T, -1e6, 1e6)
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
         # update A
         self.A += grad * grad.T
         # update b
@@ -1089,7 +1089,7 @@ class OGS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)).T, -1e6, 1e6)
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6)
 
         # update b, we are using relative log return benchmark, so we want to maximize here
         b += self.lr * grad
