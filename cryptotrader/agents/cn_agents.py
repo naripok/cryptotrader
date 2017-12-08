@@ -102,7 +102,7 @@ class PrintProgress(object):
     def __init__(self, t0):
         self.t0 = t0
         # self.rewards = Buffer(200)
-        self.grads = Buffer(50)
+        self.grads = Buffer(200)
 
     def __call__(self, env, agent, step):
         """Call the hook.
@@ -138,7 +138,7 @@ class ProcessObs(chainer.Link):
     def __init__(self):
         super().__init__()
         # with self.init_scope():
-        #     self.bn = L.BatchNormalization(self.out_channels)
+        #     self.bn = L.BatchNormalization()
 
     def __call__(self, x):
         xp = chainer.cuda.get_array_module(x)

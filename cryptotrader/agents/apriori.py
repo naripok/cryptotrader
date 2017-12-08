@@ -972,7 +972,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.125, beta=1, eta=0., mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.125, beta=1, eta=0., clip_grads=1e6, mr=False, fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -980,6 +980,7 @@ class ONS(APrioriAgent):
         self.delta = delta
         self.beta = beta
         self.eta = eta
+        self.clip = clip_grads
         self.mr = mr
         self.init = False
 
@@ -1012,7 +1013,7 @@ class ONS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -1e6, 1e6)
+        grad = np.clip(np.mat(safe_div(x, np.dot(b, x))).T, -self.clip, self.clip)
         # update A
         self.A += grad * grad.T
         # update b
@@ -1057,7 +1058,7 @@ class OGS(APrioriAgent):
     def __repr__(self):
         return "OGS"
 
-    def __init__(self, lr=1, eta=0., mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, lr=1, eta=0., clip_grads=1e6, mr=False, fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -1065,6 +1066,7 @@ class OGS(APrioriAgent):
 
         self.lr = lr
         self.eta = eta
+        self.clip = clip_grads
         self.mr = mr
 
     def predict(self, obs):
@@ -1089,10 +1091,10 @@ class OGS(APrioriAgent):
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6)
+        grad = np.clip(safe_div(x, np.dot(b, x)), -self.clip, self.clip)
 
         # update b, we are using relative log return benchmark, so we want to maximize here
-        b += self.lr * grad
+        b -= self.lr * grad
 
         # projection of p
         pp = simplex_proj(b)
