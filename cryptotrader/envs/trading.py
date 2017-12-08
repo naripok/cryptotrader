@@ -1428,7 +1428,7 @@ class BacktestEnvironment(TradingEnvironment):
                     obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
 
                     if not is_bounded:
-                        assert obs.shape[0] >= self.obs_steps, "Dataframe is to small. Shape: %s" % str(obs.shape)
+                        assert obs.shape[0] >= self.obs_steps, "Dataframe is too small. Shape: %s" % str(obs.shape)
 
                     return obs.apply(convert_to.decimal, raw=True)
                 else:
@@ -1480,9 +1480,9 @@ class BacktestEnvironment(TradingEnvironment):
         # fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
-                           'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
+                           'volume']].reindex(index)#.asfreq("%dT" % self.period)#.fillna(fill_dict)
 
-        return ohlc_df.astype(str)
+        return ohlc_df#.astype(str)
 
     def reset(self):
         """
@@ -1583,6 +1583,65 @@ class TrainingEnvironment(BacktestEnvironment):
     def timestamp(self):
         return datetime.fromtimestamp(self.data.index[self.index]).astimezone(timezone.utc)
 
+    def get_history(self, start=None, end=None, portfolio_vector=False):
+        while True:
+            try:
+                obs_list = []
+                keys = []
+
+                # Make desired index
+                end = self.timestamp
+                start = end - timedelta(minutes=self.period * self.obs_steps)
+                index = pd.date_range(start=start,
+                                      end=end,
+                                      freq="%dT" % self.period).ceil("%dT" % self.period)[-self.obs_steps:]
+
+                # Get portfolio observation
+                port_vec = self.get_sampled_portfolio(index)
+
+                if port_vec.shape[0] == 0:
+                    port_vec = self.get_sampled_portfolio().iloc[-1:]
+                    port_vec.index = [index[0]]
+
+                # Get pairs history
+                for pair in self.pairs:
+                    keys.append(pair)
+                    history = self.get_ohlc(pair, index)
+
+                    history = pd.concat([history, port_vec[pair.split('_')[1]]], axis=1)
+                    obs_list.append(history)
+
+                # Get fiat history
+                keys.append(self._fiat)
+                obs_list.append(port_vec[self._fiat])
+
+                # Concatenate dataframes
+                obs = pd.concat(obs_list, keys=keys, axis=1)
+
+                # Fill missing portfolio observations
+                cols_to_bfill = [col for col in zip(self.pairs, self.symbols)] + [(self._fiat, self._fiat)]
+                obs = obs.fillna(obs[cols_to_bfill].ffill().bfill())
+
+                return obs.apply(convert_to.decimal, raw=True)
+
+            except Exception as e:
+                Logger.error(TrainingEnvironment.get_history, self.parse_error(e))
+                raise e
+
+    def get_observation(self, portfolio_vector=False):
+        """
+        Return observation df with prices and asset amounts
+        :param portfolio_vector: bool: whether to include or not asset amounts
+        :return: pandas DataFrame:
+        """
+        try:
+            self.obs_df = self.get_history(portfolio_vector=portfolio_vector)
+            return self.obs_df
+
+        except Exception as e:
+            Logger.error(TrainingEnvironment.get_observation, self.parse_error(e))
+            raise e
+
     def setup(self):
         # Reset index
         self.data_length = self.tapi.data_length
@@ -1590,8 +1649,10 @@ class TrainingEnvironment(BacktestEnvironment):
         # Get data set
         obs_steps = self.obs_steps
         self.obs_steps = self.data_length
-        self.data = self.get_observation().astype('f')
+        self.index = self.obs_steps - 1
+        self.data = super().get_observation().astype('f')
         self.obs_steps = obs_steps
+        self.index = self.obs_steps
 
         # Set spaces
         self.set_observation_space()
@@ -1679,7 +1740,7 @@ class TrainingEnvironment(BacktestEnvironment):
             raise KeyboardInterrupt
 
         except Exception as e:
-            Logger.error(BacktestEnvironment.step, self.parse_error(e))
+            Logger.error(TrainingEnvironment.step, self.parse_error(e))
             if hasattr(self, 'email'):
                 self.send_email("TradingEnvironment Error: %s at %s" % (e,
                                 datetime.strftime(self.timestamp, "%Y-%m-%d %H:%M:%S")),

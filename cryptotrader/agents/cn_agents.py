@@ -102,7 +102,7 @@ class PrintProgress(object):
     def __init__(self, t0):
         self.t0 = t0
         # self.rewards = Buffer(200)
-        self.grads = Buffer(50)
+        self.grads = Buffer(200)
 
     def __call__(self, env, agent, step):
         """Call the hook.
@@ -194,7 +194,7 @@ class ConvBlock(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.conv = L.Convolution2D(in_channels, out_channels, ksize, pad=pad,
-                                        nobias=False, initialW=LeCunNormal())
+                                        nobias=True, initialW=LeCunNormal())
             self.bn = L.BatchNormalization(out_channels)
 
     def __call__(self, x):
@@ -232,7 +232,7 @@ class EIIE(chainer.Chain):
         with self.init_scope():
             self.vision = VisionModel(timesteps, vn_number, pn_number)
             self.portvec = PortfolioVector()
-            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=False, initialW=LeCunNormal())
+            self.conv = L.Convolution2D(pn_number + 1, pn_number, 1, 1, nobias=True, initialW=LeCunNormal())
             self.cashbias = CashBias()
 
     def __call__(self, x):
@@ -315,7 +315,7 @@ class SoftmaxGaussianPolicyWithDiagonalCovariance(chainer.Chain, policies.Policy
             # self.bn_mean = L.BatchNormalization(n_input_channels)
             # self.bn_var = L.BatchNormalization(n_input_channels)
             # self.mean_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
-            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
+            self.mean_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=True)
             # self.var_layer_1 = L.Linear(n_input_channels, n_input_channels, initialW=LeCunNormal(), nobias=False)
             self.var_layer_2 = L.Linear(n_input_channels, action_size, initialW=LeCunNormal(), nobias=False)
 
