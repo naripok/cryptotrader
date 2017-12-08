@@ -1,9 +1,12 @@
 # Cryptotrader - Cryptocurrency Trader Agent and Agent Development Environment
 
 THIS REPOSITORY IS IN DEVELOPMENT STAGE, SO THE PREREQUISITES, DOCUMENTATION AND NOTEBOOKS ARE OFTEN OUTDATED!
+IF YOU MISS SOME PRE REQUISITE, IT IS PROBABLY MISSING, SO JUST INSTALL IT BY HAND.
 CONTRIBUTIONS ARE VERY WELCOME!
 
-This repository contains infra-structure for agent backtesting and cryptocoin trading. 
+This repository contains infra-structure for agent backtesting and cryptocoin trading.
+Currently it supports backtesting and papertrading using poloniex's historical dada and also live trading at poloniex.
+We are, however not associated of affiliated anyhow with poloniex or any services that it provides.
 It is under active development and is provided "AS-IS", without any warrants whatsoever.
 ## Getting Started
 ### Prerequisites
@@ -18,11 +21,12 @@ In order to get started, you will need python and some dependencies:
 - chainer
 - optunity
 - ta-lib
+- cvxopt
 - empyrical
 - jupyter
 ```
 
-You also will need ta-lib binaries.
+You also will need ta-lib binaries installed on your system.
 
 ### Installing
 
