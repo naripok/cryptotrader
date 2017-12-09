@@ -13,8 +13,9 @@ from numpy.linalg import inv
 
 from ..exceptions import *
 
-import scipy
 from scipy.signal import argrelextrema
+from scipy.optimize import minimize
+from functools import partial
 import cvxopt as opt
 opt.solvers.options['show_progress'] = False
 
@@ -1870,3 +1871,88 @@ class LinearMixture(APrioriAgent):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
         for i in range(len(self.factors)):
             self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
+
+
+class ERI(APrioriAgent):
+
+    def __repr__(self):
+        return "Extreme Risk Index"
+
+    def __init__(self, window=300, k=10, rebalance=False, fiat="USDT", name=''):
+        """
+        :param window: Window parameter.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.k = k
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        """
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
+
+        return price_relative
+
+    def polar_returns(self, obs):
+
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
+        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+
+        radius = np.linalg.norm(price_relative, ord=1, axis=1)
+        angle = np.divide(price_relative, np.mat(radius).T)
+
+        index = np.argpartition(radius, -(int(self.window/self.k) + 1))[-(int(self.window/self.k) + 1):]
+        index = index[np.argsort(radius[index])]
+
+        return radius[index][::-1], angle[index][::-1]
+
+    def estimate_alpha(self, radius):
+         return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+
+    def estimate_gamma(self, alpha, Z, w):
+        return (1 / self.k) * np.clip(w * Z[:-1].T, 0, np.inf).sum() ** alpha
+
+    def update(self, b, x, obs):
+        R, Z = self.polar_returns(obs)
+        alpha = self.estimate_alpha(R)
+
+        minimize_gamma = partial(self.estimate_gamma, alpha, Z)
+
+        cons = [
+            {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            {'type': 'ineq', 'fun': lambda w: np.dot(b, x) - np.dot(w, x)} # No fiat
+            ]
+
+        w_star = minimize(minimize_gamma, b, constraints=cons)['x']
+
+        return np.clip(w_star, 0, 1)
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            x = self.predict(obs)
+            return self.update(prev_posit, x, obs)
+        else:
+            return self.crp
