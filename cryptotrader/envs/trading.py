@@ -120,10 +120,10 @@ class TradingEnvironment(Env):
     def fiat(self):
         try:
             i = -1
-            fiat = self.portfolio_df.get_value(self.portfolio_df.index[i], self._fiat)
+            fiat = self.portfolio_df.at[self.portfolio_df.index[i], self._fiat]
             while not convert_to.decimal(fiat.is_finite()):
                 i -= 1
-                fiat = self.portfolio_df.get_value(self.portfolio_df.index[-i], self._fiat)
+                fiat = self.portfolio_df.at[self.portfolio_df.index[-i], self._fiat]
             return fiat
         except IndexError:
             Logger.error(TradingEnvironment.crypto, "No valid value on portfolio dataframe.")
@@ -182,10 +182,10 @@ class TradingEnvironment(Env):
     def get_crypto(self, symbol):
         try:
             i = -1
-            value = self.portfolio_df.get_value(self.portfolio_df.index[i], symbol)
+            value = self.portfolio_df.at[self.portfolio_df.index[i], symbol]
             while not convert_to.decimal(value).is_finite():
                 i -= 1
-                value = self.portfolio_df.get_value(self.portfolio_df.index[i], symbol)
+                value = self.portfolio_df.at[self.portfolio_df.index[i], symbol]
             return value
 
         except IndexError:
@@ -447,14 +447,14 @@ class TradingEnvironment(Env):
 
         # Get right values to fill nans
         # TODO: FIND A BETTER PERFORMANCE METHOD
-        # last_close = ohlc_df.get_value(ohlc_df.close.last_valid_index(), 'close')
+        # last_close = ohlc_df.at[ohlc_df.close.last_valid_index(), 'close']
 
         # Get last close value
         i = -1
-        last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
+        last_close = ohlc_df.at[ohlc_df.index[i], 'close']
         while not dec_con.create_decimal(last_close).is_finite():
             i -= 1
-            last_close = dec_con.create_decimal(ohlc_df.get_value(ohlc_df.index[i], 'close'))
+            last_close = dec_con.create_decimal(ohlc_df.at[ohlc_df.index[i], 'close'])
 
         # Replace missing values with last close
         fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
@@ -613,7 +613,7 @@ class TradingEnvironment(Env):
         """
         if not timestamp:
             timestamp = self.obs_df.index[-1]
-        return self.obs_df.get_value(timestamp, ("%s_%s" % (self._fiat, symbol), 'open'))
+        return self.obs_df.at[timestamp, ("%s_%s" % (self._fiat, symbol), 'open')]
 
     def calc_total_portval(self, timestamp=None):
         """
@@ -718,10 +718,10 @@ class TradingEnvironment(Env):
         """
         try:
             i = -1
-            portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
+            portval = self.portfolio_df.at[self.portfolio_df.index[i], 'portval']
             while not dec_con.create_decimal(portval).is_finite():
                 i -= 1
-                portval = self.portfolio_df.get_value(self.portfolio_df.index[i], 'portval')
+                portval = self.portfolio_df.at[self.portfolio_df.index[i], 'portval']
 
             return portval
         except Exception as e:
@@ -944,7 +944,7 @@ class TradingEnvironment(Env):
         init_time = self.results.index[0]
         for symbol in self._crypto:
             init_portval += convert_to.decimal(self.init_balance[symbol]) * \
-                           obs.get_value(init_time, (self._fiat + '_' + symbol, 'open'))
+                           obs.at[init_time, (self._fiat + '_' + symbol, 'open')]
         init_portval += convert_to.decimal(self.init_balance[self._fiat])
 
         # # Buy and Hold initial equally distributed assets
@@ -952,8 +952,8 @@ class TradingEnvironment(Env):
             ctx.rounding = ROUND_UP
             for i, symbol in enumerate(self.pairs):
                 self.results[symbol+'_benchmark'] = (dec_one - self.tax[symbol.split('_')[1]]) * \
-                                            obs[symbol, 'open'] * init_portval / (obs.get_value(init_time,
-                                            (symbol, 'open')) * Decimal(self.action_space.low.shape[0] - 1))
+                                            obs[symbol, 'open'] * init_portval / (obs.at[init_time,
+                                            (symbol, 'open')] * Decimal(self.action_space.low.shape[0] - 1))
                 if benchmark == 'bah':
                     self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
@@ -2020,17 +2020,12 @@ class LiveTradingEnvironment(TradingEnvironment):
                         return True
 
                     elif 'Not enough %s.' % self._fiat == response:
-                        if not self.status['NotEnoughFiat']:
-                            self.status['NotEnoughFiat'] += 1
+                        self.status['NotEnoughFiat'] += 1
 
-                            price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
-                            fiat_units = self.get_balance()[self._fiat]
+                        price = convert_to.decimal(self.tapi.returnTicker()[pair]['lowestAsk'])
+                        fiat_units = self.get_balance()[self._fiat]
 
-                            amount = str(safe_div(fiat_units, price).quantize(dec_eps))
-
-                        else:
-                            self.status['NotEnoughFiat'] += 1
-                            return True
+                        amount = str(safe_div(fiat_units, price).quantize(dec_eps))
 
                     elif 'Order execution timed out.' == response:
                         amount = self.get_balance()[symbol]

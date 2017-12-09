@@ -63,8 +63,8 @@ class APrioriAgent(Agent):
         coin_val = {}
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[index], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[index], (symbol, 'open'))
+                coin_val[symbol.split("_")[1]] = obs.at[obs.index[index], (symbol, symbol.split("_")[1])] * \
+                                                 obs.at[obs.index[index], (symbol, 'open')]
 
         portval = 0
         for symbol in coin_val:
@@ -134,7 +134,7 @@ class APrioriAgent(Agent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3:.08f}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 2,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
@@ -543,8 +543,8 @@ class APrioriAgent(Agent):
         adm = 0.0
         k = 0
         for symbol in env.pairs:
-            pp = obs.get_value(obs.index[-2], (symbol, 'open'))
-            nep = obs.get_value(obs.index[-1], (symbol, 'close'))
+            pp = obs.at[obs.index[-2], (symbol, 'open')]
+            nep = obs.at[obs.index[-1], (symbol, 'close')]
             pc = 100 * safe_div((nep - pp), pp)
             adm += pc
             k += 1
