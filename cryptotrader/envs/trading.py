@@ -270,96 +270,6 @@ class TradingEnvironment(Env):
         self.benchmark = np.append(dec_vec_div(convert_to.decimal(np.ones(n_pairs, dtype=np.dtype(Decimal))),
                                      dec_con.create_decimal(n_pairs)), [dec_zero])
 
-    def optimize_benchmark(self, nb_steps, verbose=False):
-        # Init var
-        i = 0
-
-        ## Acquire hindsight
-        # Save env obs_steps
-        obs_steps = self.obs_steps
-
-        # Change it so you can recover all the data
-        self.obs_steps = self.data_length
-        self.index = self.obs_steps - 1
-        # Pull the entire data set
-        hindsight = self.get_observation().xs('open', level=1,
-                                             axis=1).rolling(2, min_periods=2).apply(
-            lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
-        hindsight[self._fiat] = 1.0
-
-        hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
-
-        # Change env obs_steps back
-        self.obs_steps = obs_steps
-        self.index = self.obs_steps
-
-        # Calculate benchmark return
-        # Benchmark: Equally distributed constant rebalanced portfolio
-        ed_crp = array_normalize(np.append(np.ones(len(self.symbols) - 1), [0.0]))
-        ed_crp_returns = np.dot(hindsight, ed_crp)
-
-        initial_benchmark_returns = np.dot(hindsight, np.float64(self.benchmark))
-
-        initial_reward = np.log(initial_benchmark_returns).sum() - np.log(ed_crp_returns).sum()
-
-        ## Define params
-        # Constraints declaration
-        # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
-
-        ## Define benchmark optimization routine
-        # @ot.constraints.constrained(bench_constrains)
-        # @ot.constraints.violations_defaulted(-10)
-        def find_bench(**kwargs):
-            try:
-                # Init variables
-                nonlocal i, nb_steps, hindsight, ed_crp_returns
-
-                # Best constant rebalance portfolio
-                b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
-
-                # Best constant rebalance portfolio returns
-                b_crp_returns = np.dot(hindsight, b_crp)
-
-                # Calculate sharpe regret
-                reward = np.log(b_crp_returns).sum() - np.log(ed_crp_returns).sum()
-
-                # Increment counter
-                i += 1
-
-                # Update progress
-                if verbose and i % 10 == 0:
-                    print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
-                                                                                         int(nb_steps),
-                                                                                         float(reward)),
-                          end="\r")
-
-                return reward
-
-            except KeyboardInterrupt:
-                raise ot.api.fun.MaximumEvaluationsException(0)
-
-        # Search space declaration
-        n_assets = len(self.symbols)
-        bench_search_space = {str(i): j for i, j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
-        print("Optimizing benchmark...")
-
-        # Call optimizer to benchmark
-        BCR, info, _ = ot.maximize_structured(
-            find_bench,
-            num_evals=int(nb_steps),
-            search_space=bench_search_space
-            )
-
-        if float(info.optimum) > float(initial_reward):
-            self.benchmark = convert_to.decimal(array_normalize(np.array([BCR[key] for key in BCR])))
-            print("\nOptimum benchmark reward: %f" % info.optimum)
-            print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
-        else:
-            print("Initial benchmark was already optimum. Reward: %s" % str(initial_reward))
-            print("Benchmark portfolio: %s" % str(np.float32(self.benchmark)))
-
-        return self.benchmark
-
     def add_pairs(self, *args):
         """
         Add pairs for tradeable symbol universe
@@ -1377,6 +1287,107 @@ class BacktestEnvironment(TradingEnvironment):
     @property
     def timestamp(self):
         return datetime.fromtimestamp(self.tapi.ohlc_data[self.tapi.pairs[0]].index[self.index]).astimezone(timezone.utc)
+
+    def get_hindsight(self):
+        """
+        Stay away from look ahead bias!
+        :return: pandas dataframe: Full history dataframe
+        """
+        # Save env obs_steps
+        obs_steps = self.obs_steps
+
+        # Change it so you can recover all the data
+        self.obs_steps = self.data_length
+        self.index = self.obs_steps - 1
+
+        # Pull the entire data set
+        hindsight = self.get_observation()
+
+        # Change env obs_steps back
+        self.obs_steps = obs_steps
+        self.index = self.obs_steps
+
+        return hindsight
+
+    def optimize_benchmark(self, nb_steps, verbose=False):
+        # Init var
+        i = 0
+
+        ## Acquire open price hindsight
+        hindsight = self.get_hindsight().xs('open', level=1,
+                                             axis=1).rolling(2, min_periods=2).apply(
+            lambda x: (safe_div(x[-1], x[-2]))).dropna().astype('f')
+        hindsight[self._fiat] = 1.0
+
+        # Scale it
+        hindsight = hindsight.apply(lambda x: safe_div(x, x.max()), axis=1)
+
+        # Calculate benchmark return
+        # Benchmark: Equally distributed constant rebalanced portfolio
+        ed_crp = array_normalize(np.append(np.ones(len(self.symbols) - 1), [0.0]))
+        ed_crp_returns = np.dot(hindsight, ed_crp)
+
+        initial_benchmark_returns = np.dot(hindsight, np.float64(self.benchmark))
+
+        initial_reward = np.log(initial_benchmark_returns).sum() - np.log(ed_crp_returns).sum()
+
+        ## Define params
+        # Constraints declaration
+        # bench_constraints = [lambda **kwargs: sum([kwargs[key] for key in kwargs]) <= 1]
+
+        ## Define benchmark optimization routine
+        # @ot.constraints.constrained(bench_constrains)
+        # @ot.constraints.violations_defaulted(-10)
+        def find_bench(**kwargs):
+            try:
+                # Init variables
+                nonlocal i, nb_steps, hindsight, ed_crp_returns
+
+                # Best constant rebalance portfolio
+                b_crp = array_normalize(np.array([kwargs[key] for key in kwargs]))
+
+                # Best constant rebalance portfolio returns
+                b_crp_returns = np.dot(hindsight, b_crp)
+
+                # Calculate sharpe regret
+                reward = np.log(b_crp_returns).sum() - np.log(ed_crp_returns).sum()
+
+                # Increment counter
+                i += 1
+
+                # Update progress
+                if verbose and i % 10 == 0:
+                    print("Benchmark optimization step {0}/{1}, step reward: {2}".format(i,
+                                                                                         int(nb_steps),
+                                                                                         float(reward)),
+                          end="\r")
+
+                return reward
+
+            except KeyboardInterrupt:
+                raise ot.api.fun.MaximumEvaluationsException(0)
+
+        # Search space declaration
+        n_assets = len(self.symbols)
+        bench_search_space = {str(i): j for i, j in zip(np.arange(n_assets), [[0, 1] for _ in range(n_assets)])}
+        print("Optimizing benchmark...")
+
+        # Call optimizer to benchmark
+        BCR, info, _ = ot.maximize_structured(
+            find_bench,
+            num_evals=int(nb_steps),
+            search_space=bench_search_space
+            )
+
+        if float(info.optimum) > float(initial_reward):
+            self.benchmark = convert_to.decimal(array_normalize(np.array([BCR[key] for key in BCR])))
+            print("\nOptimum benchmark reward: %f" % info.optimum)
+            print("Best Constant Rebalance portfolio found in %d optimization rounds:\n" % i, self.benchmark.astype(float))
+        else:
+            print("Initial benchmark was already optimum. Reward: %s" % str(initial_reward))
+            print("Benchmark portfolio: %s" % str(np.float32(self.benchmark)))
+
+        return self.benchmark
 
     def get_history(self, start=None, end=None, portfolio_vector=False):
         while True:
