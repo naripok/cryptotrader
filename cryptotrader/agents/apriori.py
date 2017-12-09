@@ -1878,7 +1878,7 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, window=300, k=10, rebalance=False, fiat="USDT", name=''):
+    def __init__(self, window=300, k=0.1, rebalance=False, fiat="USDT", name=''):
         """
         :param window: Window parameter.
         """
@@ -1910,7 +1910,7 @@ class ERI(APrioriAgent):
         radius = np.linalg.norm(price_relative, ord=1, axis=1)
         angle = np.divide(price_relative, np.mat(radius).T)
 
-        index = np.argpartition(radius, -(int(self.window/self.k) + 1))[-(int(self.window/self.k) + 1):]
+        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
         index = index[np.argsort(radius[index])]
 
         return radius[index][::-1], angle[index][::-1]
@@ -1919,24 +1919,24 @@ class ERI(APrioriAgent):
          return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
 
     def estimate_gamma(self, alpha, Z, w):
-        return (1 / self.k) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
 
-    def loss(self, alpha, Z, b, w):
+    def loss(self, alpha, Z, b, x, w):
         # minimize gamma, portfolio turnover and regret
-        return self.estimate_gamma(alpha, Z, w) + w[-1] + np.abs(w - b).sum()
+        return self.estimate_gamma(alpha, Z, w) * w[-1]
 
     def update(self, b, x, obs):
         R, Z = self.polar_returns(obs)
         alpha = self.estimate_alpha(R)
 
-        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs))
+        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs, index=-2), x)
 
         cons = [
             # simplex constraints
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
             # fiat constraints
-            {'type': 'ineq', 'fun': lambda w: np.dot(w, x) - np.dot(b, x)} # positive returns
+            # {'type': 'eq', 'fun': lambda w: np.dot(w, x) - 0.0025} # positive returns
         ]
 
         w_star = minimize(minimize_loss, b, constraints=cons)['x']
