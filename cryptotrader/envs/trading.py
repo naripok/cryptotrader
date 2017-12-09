@@ -1491,9 +1491,9 @@ class BacktestEnvironment(TradingEnvironment):
         # fill_dict.update({'volume': '0E-8'})
         # Reindex with desired time range and fill nans
         ohlc_df = ohlc_df[['open','high','low','close',
-                           'volume']].reindex(index)#.asfreq("%dT" % self.period)#.fillna(fill_dict)
+                           'volume']].reindex(index).asfreq("%dT" % self.period)#.fillna(fill_dict)
 
-        return ohlc_df#.astype(str)
+        return ohlc_df.astype(str)
 
     def reset(self):
         """
