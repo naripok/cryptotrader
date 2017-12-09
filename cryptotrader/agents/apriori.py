@@ -1919,21 +1919,27 @@ class ERI(APrioriAgent):
          return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
 
     def estimate_gamma(self, alpha, Z, w):
-        return (1 / self.k) * np.clip(w * Z[:-1].T, 0, np.inf).sum() ** alpha
+        return (1 / self.k) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
+
+    def loss(self, alpha, Z, b, w):
+        # minimize gamma, portfolio turnover and regret
+        return self.estimate_gamma(alpha, Z, w) + w[-1] + np.abs(w - b).sum()
 
     def update(self, b, x, obs):
         R, Z = self.polar_returns(obs)
         alpha = self.estimate_alpha(R)
 
-        minimize_gamma = partial(self.estimate_gamma, alpha, Z)
+        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs))
 
         cons = [
+            # simplex constraints
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
-            {'type': 'ineq', 'fun': lambda w: np.dot(b, x) - np.dot(w, x)} # No fiat
-            ]
+            # fiat constraints
+            {'type': 'ineq', 'fun': lambda w: np.dot(w, x) - np.dot(b, x)} # positive returns
+        ]
 
-        w_star = minimize(minimize_gamma, b, constraints=cons)['x']
+        w_star = minimize(minimize_loss, b, constraints=cons)['x']
 
         return np.clip(w_star, 0, 1)
 
