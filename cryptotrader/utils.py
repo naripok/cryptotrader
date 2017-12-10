@@ -4,6 +4,9 @@ from decimal import Decimal, InvalidOperation, DivisionByZero, getcontext, Conte
 from functools import partialmethod
 import zmq
 import msgpack
+from socket import gaierror
+from time import time, sleep
+import smtplib
 
 import numpy as np
 # from bson import Decimal128
@@ -311,3 +314,43 @@ def recv_array(socket, flags=0, copy=False, track=False, block=True):
             return A.reshape(md['shape'])
         except zmq.Again:
             return False
+
+
+def send_email(email, subject, body):
+    try:
+        assert isinstance(email, dict) and \
+               isinstance(subject, str) and isinstance(body, str)
+        for key in email:
+            if key == 'email':
+                gmail_user = email[key]
+            elif key == 'psw':
+                gmail_pwd = email[key]
+            elif key == 'to':
+                TO = email[key] if type(email[key]) is list else [email[key]]
+
+        FROM = email
+        SUBJECT = subject
+        TEXT = body
+
+        # Prepare actual message
+        message = """From: %s\nTo: %s\nSubject: %s\n\n%s
+                """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.ehlo()
+        server.starttls()
+        server.login(gmail_user, gmail_pwd)
+        server.sendmail(FROM, TO, message)
+        server.close()
+
+    # If we have no internet, wait five seconds and retry
+    except gaierror:
+        try:
+            sleep(5)
+            send_email(email, subject, body)
+        except gaierror as e:
+            # If there is no internet yet, log error and move on
+            Logger.error(send_email, e)
+
+    except Exception as e:
+        Logger.error(send_email, e)

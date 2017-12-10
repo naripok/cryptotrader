@@ -10,6 +10,7 @@ import zmq
 import threading
 from multiprocessing import Process
 from .exceptions import *
+from cryptotrader.utils import send_email
 
 debug = True
 
@@ -62,7 +63,7 @@ class FeedDaemon(Process):
     """
     Data Feed server
     """
-    def __init__(self, api={}, addr='ipc:///tmp/feed.ipc', n_workers=8):
+    def __init__(self, api={}, addr='ipc:///tmp/feed.ipc', n_workers=8, email={}):
         """
 
         :param api: dict: exchange name: api instance
@@ -71,6 +72,7 @@ class FeedDaemon(Process):
         """
         super(FeedDaemon, self).__init__()
         self.api = api
+        self.email = email
         self.context = zmq.Context()
         self.n_workers = n_workers
         self.addr = addr
@@ -183,6 +185,7 @@ class FeedDaemon(Process):
                     raise TypeError("Bad call format.")
 
             except Exception as e:
+                send_email(self.email, "DataFeed Error", e)
                 sock.close()
                 raise e
 
