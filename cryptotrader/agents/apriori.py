@@ -3,6 +3,8 @@ from time import time, sleep
 from ..core import Agent
 from ..utils import *
 
+from cryptotrader.models import apriori as models
+
 import optunity as ot
 import pandas as pd
 import talib as tl
@@ -1676,7 +1678,7 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, factor=None, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
+    def __init__(self, factor=models.price_relative, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1700,7 +1702,7 @@ class TCO(APrioriAgent):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         prev_posit = self.get_portfolio_vector(obs, index=-1) + 1
-        factor_posit = self.factor.rebalance(obs) + 1
+        factor_posit = self.factor(obs) + 1
         return safe_div(factor_posit, prev_posit)
 
     def rebalance(self, obs):
@@ -1878,13 +1880,17 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, window=300, k=0.1, rebalance=False, fiat="USDT", name=''):
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, reg=0.0, desired_return=0.0025,
+                 rebalance=False, fiat="USDT", name=''):
         """
         :param window: Window parameter.
         """
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
+        self.factor = factor
+        self.reg = reg
+        self.desired_return = desired_return
         if rebalance:
             self.reb = -2
         else:
@@ -1895,11 +1901,9 @@ class ERI(APrioriAgent):
     def predict(self, obs):
         """
         Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
         """
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
-
-        return price_relative
+        return self.factor(obs)
 
     def polar_returns(self, obs):
 
@@ -1923,20 +1927,20 @@ class ERI(APrioriAgent):
 
     def loss(self, alpha, Z, b, x, w):
         # minimize gamma, portfolio turnover and regret
-        return self.estimate_gamma(alpha, Z, w) * w[-1]
+        return self.estimate_gamma(alpha, Z, w) + w[-1] + np.linalg.norm((w - b), ord=2) ** 2 * self.reg
 
     def update(self, b, x, obs):
         R, Z = self.polar_returns(obs)
         alpha = self.estimate_alpha(R)
 
-        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs, index=-2), x)
+        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs, index=-1), x)
 
         cons = [
             # simplex constraints
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
             # fiat constraints
-            # {'type': 'eq', 'fun': lambda w: np.dot(w, x) - 0.0025} # positive returns
+            {'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.desired_return} # positive returns
         ]
 
         w_star = minimize(minimize_loss, b, constraints=cons)['x']
@@ -1962,3 +1966,9 @@ class ERI(APrioriAgent):
             return self.update(prev_posit, x, obs)
         else:
             return self.crp
+
+    def set_params(self, **kwargs):
+        self.window = int(kwargs['window'])
+        self.k = kwargs['k']
+        self.reg = kwargs['reg']
+        self.desired_return = kwargs['desired_return']
