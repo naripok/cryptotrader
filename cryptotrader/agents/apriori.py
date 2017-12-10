@@ -3,6 +3,8 @@ from time import time, sleep
 from ..core import Agent
 from ..utils import *
 
+from cryptotrader.models import apriori as models
+
 import optunity as ot
 import pandas as pd
 import talib as tl
@@ -13,8 +15,9 @@ from numpy.linalg import inv
 
 from ..exceptions import *
 
-import scipy
 from scipy.signal import argrelextrema
+from scipy.optimize import minimize
+from functools import partial
 import cvxopt as opt
 opt.solvers.options['show_progress'] = False
 
@@ -63,8 +66,8 @@ class APrioriAgent(Agent):
         coin_val = {}
         for symbol in obs.columns.levels[0]:
             if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.get_value(obs.index[index], (symbol, symbol.split("_")[1])) * \
-                                                 obs.get_value(obs.index[index], (symbol, 'open'))
+                coin_val[symbol.split("_")[1]] = obs.at[obs.index[index], (symbol, symbol.split("_")[1])] * \
+                                                 obs.at[obs.index[index], (symbol, 'open')]
 
         portval = 0
         for symbol in coin_val:
@@ -134,7 +137,7 @@ class APrioriAgent(Agent):
                         env.render()
 
                     if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
+                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3:.08f}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
                             self.step,
                             nb_max_episode_steps - env.obs_steps - 2,
                             int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
@@ -543,8 +546,8 @@ class APrioriAgent(Agent):
         adm = 0.0
         k = 0
         for symbol in env.pairs:
-            pp = obs.get_value(obs.index[-2], (symbol, 'open'))
-            nep = obs.get_value(obs.index[-1], (symbol, 'close'))
+            pp = obs.at[obs.index[-2], (symbol, 'open')]
+            nep = obs.at[obs.index[-1], (symbol, 'close')]
             pc = 100 * safe_div((nep - pp), pp)
             adm += pc
             k += 1
@@ -1675,7 +1678,7 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, factor=None, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
+    def __init__(self, factor=models.price_relative, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1699,7 +1702,7 @@ class TCO(APrioriAgent):
         #     price_predict[key] = np.float64(obs[symbol].open.iloc[-self.window:].mean() /
         #                                     (obs.get_value(obs.index[-1], (symbol, 'open')) + self.epsilon))
         prev_posit = self.get_portfolio_vector(obs, index=-1) + 1
-        factor_posit = self.factor.rebalance(obs) + 1
+        factor_posit = self.factor(obs) + 1
         return safe_div(factor_posit, prev_posit)
 
     def rebalance(self, obs):
@@ -1870,3 +1873,102 @@ class LinearMixture(APrioriAgent):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
         for i in range(len(self.factors)):
             self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
+
+
+class ERI(APrioriAgent):
+
+    def __repr__(self):
+        return "Extreme Risk Index"
+
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, reg=0.0, desired_return=0.0025,
+                 rebalance=False, fiat="USDT", name=''):
+        """
+        :param window: Window parameter.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.k = k
+        self.factor = factor
+        self.reg = reg
+        self.desired_return = desired_return
+        if rebalance:
+            self.reb = -2
+        else:
+            self.reb = -1
+
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        return self.factor(obs)
+
+    def polar_returns(self, obs):
+
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
+        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+
+        radius = np.linalg.norm(price_relative, ord=1, axis=1)
+        angle = np.divide(price_relative, np.mat(radius).T)
+
+        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
+        index = index[np.argsort(radius[index])]
+
+        return radius[index][::-1], angle[index][::-1]
+
+    def estimate_alpha(self, radius):
+         return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+
+    def estimate_gamma(self, alpha, Z, w):
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
+
+    def loss(self, alpha, Z, b, x, w):
+        # minimize gamma, portfolio turnover and regret
+        return self.estimate_gamma(alpha, Z, w) + w[-1] + np.linalg.norm((w - b), ord=2) ** 2 * self.reg
+
+    def update(self, b, x, obs):
+        R, Z = self.polar_returns(obs)
+        alpha = self.estimate_alpha(R)
+
+        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs, index=-1), x)
+
+        cons = [
+            # simplex constraints
+            {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            # fiat constraints
+            {'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.desired_return} # positive returns
+        ]
+
+        w_star = minimize(minimize_loss, b, constraints=cons)['x']
+
+        return np.clip(w_star, 0, 1)
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            x = self.predict(obs)
+            return self.update(prev_posit, x, obs)
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        self.window = int(kwargs['window'])
+        self.k = kwargs['k']
+        self.reg = kwargs['reg']
+        self.desired_return = kwargs['desired_return']

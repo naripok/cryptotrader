@@ -5,7 +5,7 @@ from .utils import convert_to, Logger, dec_con
 from decimal import Decimal
 import pandas as pd
 from time import sleep
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import zmq
 import threading
 from multiprocessing import Process
@@ -535,6 +535,11 @@ class BacktestDataFeed(ExchangeConnection):
         # TODO WRITE TEST
         self.ohlc_data = {}
         self.data_length = None
+
+        index = pd.date_range(start=start,
+                              end=end,
+                              freq="%dT" % self.period).ceil("%dT" % self.period)
+
         for pair in self.pairs:
             ohlc_df = pd.DataFrame.from_records(
                             self.tapi.returnChartData(
@@ -542,9 +547,13 @@ class BacktestDataFeed(ExchangeConnection):
                             period=self.period * 60,
                             start=start,
                             end=end
-                        )
-                    )
+                ),
+                nrows=index.shape[0]
+            )
 
+            # ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
+            #                   inplace=True, drop=True)
+            #
             i = -1
             last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
             while not dec_con.create_decimal(last_close).is_finite():
