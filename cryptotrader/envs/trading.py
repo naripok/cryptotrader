@@ -492,14 +492,14 @@ class TradingEnvironment(Env):
                 if portfolio_vector:
                     # Get portfolio observation
                     port_vec = self.get_sampled_portfolio(index)
-                    # Update last observation so it can see possible inter step changes
-                    last_balance = self.get_balance()
-                    port_vec.at[port_vec.index[-1], list(last_balance.keys())] = list(last_balance.values())
 
                     if port_vec.shape[0] == 0:
                         port_vec = self.get_sampled_portfolio().iloc[-1:]
                         port_vec.index = [index[0]]
-                        port_vec.at[port_vec.index[0], list(last_balance.keys())] = list(last_balance.values())
+
+                    # Update last observation so it can see possible inter step changes
+                    last_balance = self.get_balance()
+                    port_vec.at[port_vec.index[-1], list(last_balance.keys())] = list(last_balance.values())
 
                     # Get pairs history
                     for pair in self.pairs:
