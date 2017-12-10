@@ -19,7 +19,10 @@ from scipy.signal import argrelextrema
 from scipy.optimize import minimize
 from functools import partial
 import cvxopt as opt
-opt.solvers.options['show_progress'] = False
+import cvxopt.solvers as optsolvers
+import warnings
+import talib as ta
+optsolvers.options['show_progress'] = False
 
 # TODO LIST
 # HEADING
@@ -1880,7 +1883,7 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, reg=0.0, desired_return=0.0025,
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, turnover_reg=0.0, target_return=0.0025,
                  rebalance=False, fiat="USDT", name=''):
         """
         :param window: Window parameter.
@@ -1889,8 +1892,8 @@ class ERI(APrioriAgent):
         self.window = window - 1
         self.k = k
         self.factor = factor
-        self.reg = reg
-        self.desired_return = desired_return
+        self.reg = turnover_reg
+        self.target_return = target_return
         if rebalance:
             self.reb = -2
         else:
@@ -1903,7 +1906,7 @@ class ERI(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        return self.factor(obs)
+        return np.append(self.factor(obs).iloc[-1].values, [0.0])
 
     def polar_returns(self, obs):
 
@@ -1925,25 +1928,26 @@ class ERI(APrioriAgent):
     def estimate_gamma(self, alpha, Z, w):
         return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
 
-    def loss(self, alpha, Z, b, x, w):
+    def loss(self, w, alpha, Z, b, x):
         # minimize gamma, portfolio turnover and regret
-        return self.estimate_gamma(alpha, Z, w) + w[-1] + np.linalg.norm((w - b), ord=2) ** 2 * self.reg
+        return self.estimate_gamma(alpha, Z, w) + np.linalg.norm((w - b), ord=2) * self.reg + np.linalg.norm(w) * 1e-1
 
     def update(self, b, x, obs):
         R, Z = self.polar_returns(obs)
         alpha = self.estimate_alpha(R)
 
-        minimize_loss = partial(self.loss, alpha, Z, self.get_portfolio_vector(obs, index=-1), x)
+        # minimize_loss = partial
 
         cons = [
             # simplex constraints
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
             # fiat constraints
-            {'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.desired_return} # positive returns
+            {'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.target_return} # positive returns
         ]
 
-        w_star = minimize(minimize_loss, b, constraints=cons)['x']
+        w_star = minimize(self.loss, b, args=(alpha, Z, self.get_portfolio_vector(obs, index=-1), x),
+                          constraints=cons)['x']
 
         return np.clip(w_star, 0, 1)
 
@@ -1971,4 +1975,79 @@ class ERI(APrioriAgent):
         self.window = int(kwargs['window'])
         self.k = kwargs['k']
         self.reg = kwargs['reg']
-        self.desired_return = kwargs['desired_return']
+        self.target_return = kwargs['target_return']
+
+
+class Markowitz(APrioriAgent):
+
+    def __repr__(self):
+        return "Markowitz"
+
+    def __init__(self, factor=models.price_relative, target_return=0.0025, fiat="USDT", name=''):
+        """
+        :param window: Window parameter.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.factor = factor
+        self.target_return = target_return
+
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        return self.factor(obs).iloc[-1].values
+
+    def update(self, cov_mat, exp_rets, target_ret):
+        n = len(cov_mat)
+
+        P = opt.matrix(cov_mat.values)
+        q = opt.matrix(0.0, (n, 1))
+
+        # Constraints Gx <= h
+        # exp_rets*x >= target_ret and x >= 0
+        G = opt.matrix(np.vstack((-exp_rets,
+                                  -np.identity(n))))
+        h = opt.matrix(np.vstack((-self.target_return,
+                                  +np.zeros((n, 1)))))
+
+        # Constraints Ax = b
+        # sum(x) = 1
+        A = opt.matrix(1.0, (1, n))
+
+        b = opt.matrix(1.0)
+
+        # Solve
+        optsolvers.options['show_progress'] = False
+        sol = optsolvers.qp(P, q, G, h, A, b)
+
+        if sol['status'] != 'optimal':
+            warnings.warn("Convergence problem")
+
+        return np.append(np.squeeze(sol['x']), [0.0])
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
+        if self.step:
+            x = self.predict(obs)
+            cov = obs.xs('open', level=1, axis=1).apply(lambda x: ta.ROCR(x, timeperiod=1) - 1,
+                                                        raw=True).fillna(0.0).cov()
+            return self.update(cov, x, self.target_return)
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        self.target_return = kwargs['target_return']
