@@ -17,6 +17,7 @@ from ..exceptions import *
 
 from scipy.signal import argrelextrema
 from scipy.optimize import minimize
+from scipy import stats
 from functools import partial
 import cvxopt as opt
 import cvxopt.solvers as optsolvers
@@ -1428,7 +1429,7 @@ class CWMR(APrioriAgent):
         else:
             self.reb = -1
         self.eps = eps
-        self.theta = scipy.stats.norm.ppf(confidence)
+        self.theta = stats.norm.ppf(confidence)
         self.var = var
 
     def predict(self, obs):
@@ -1546,7 +1547,7 @@ class CWMR(APrioriAgent):
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
-        self.theta = scipy.stats.norm.ppf(kwargs['confidence'])
+        self.theta = stats.norm.ppf(kwargs['confidence'])
 
 
 class STMR(APrioriAgent):
