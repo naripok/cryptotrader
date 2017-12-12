@@ -1904,7 +1904,7 @@ class ERI(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        return np.append(self.factor(obs).iloc[-1].values, [0.0])
+        return np.append(self.factor(obs).iloc[-1].values, [1.0])
 
     def polar_returns(self, obs):
 
@@ -1926,17 +1926,14 @@ class ERI(APrioriAgent):
     def estimate_gamma(self, alpha, Z, w):
         return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
 
-    def loss(self, w, alpha, Z, b, x):
+    def loss(self, w, alpha, Z, b):
         # minimize gamma, portfolio turnover and regret
         loss = self.estimate_gamma(alpha, Z, w) + np.linalg.norm(w - b, ord=2) * self.reg
-        if not self.target_return:
+        if not self.factor:
             loss += w[-1] / 2
         return loss
 
-    def update(self, b, x, obs):
-        R, Z = self.polar_returns(obs)
-        alpha = self.estimate_alpha(R)
-
+    def update(self, b, x, alpha, Z):
         # simplex constraints
         cons = [
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
@@ -1945,11 +1942,12 @@ class ERI(APrioriAgent):
 
         # Target return constraint
         if self.target_return:
-            cons.append({'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.target_return}) # positive returns
+            cons.append({'type': 'eq', 'fun': lambda w: np.dot(w, x) - (self.target_return + 1)}) # positive returns
 
-        w_star = minimize(self.loss, self.crp, args=(alpha, Z, self.get_portfolio_vector(obs, index=-1), x),
-                          constraints=cons)['x']
+        # Minimize loss
+        w_star = minimize(self.loss, b, args=(alpha, Z, b), constraints=cons)['x']
 
+        # Return best portfolio
         return np.clip(w_star, 0, 1) # Truncate small errors
 
     def rebalance(self, obs):
@@ -1968,7 +1966,11 @@ class ERI(APrioriAgent):
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=self.reb)
             x = self.predict(obs)
-            return self.update(prev_posit, x, obs)
+            R, Z = self.polar_returns(obs)
+            alpha = self.estimate_alpha(R)
+
+            return self.update(prev_posit, x, alpha, Z)
+
         else:
             return self.crp
 
