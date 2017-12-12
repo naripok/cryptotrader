@@ -18,15 +18,12 @@ from ..exceptions import *
 from scipy.signal import argrelextrema
 from scipy.optimize import minimize
 from scipy import stats
-from functools import partial
 import cvxopt as opt
 import cvxopt.solvers as optsolvers
 import warnings
 import talib as ta
 optsolvers.options['show_progress'] = False
 
-# TODO LIST
-# HEADING
 
 # Base class
 class APrioriAgent(Agent):
@@ -1408,7 +1405,6 @@ class CWMR(APrioriAgent):
         Confidence weighted mean reversion strategy for online portfolio selection, 2013.
         http://jmlr.org/proceedings/papers/v15/li11b/li11b.pdf
     """
-
     def __repr__(self):
         return "CWMR"
 
@@ -1437,7 +1433,8 @@ class CWMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+        price_relative = prices.apply(lambda x: safe_div(x[-1], x[-2])).values
+        price_relative = np.append(price_relative, [1.0])
 
         return price_relative
 
@@ -1884,8 +1881,8 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, turnover_reg=0.0, target_return=0.0025,
-                 rebalance=False, fiat="USDT", name=''):
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, turnover_reg=0.0, target_return=0.0,
+                 rebalance=False, fiat="USDT", name='Extreme Risk Index'):
         """
         :param window: Window parameter.
         """
@@ -1931,26 +1928,29 @@ class ERI(APrioriAgent):
 
     def loss(self, w, alpha, Z, b, x):
         # minimize gamma, portfolio turnover and regret
-        return self.estimate_gamma(alpha, Z, w) + np.linalg.norm((w - b), ord=2) * self.reg + np.linalg.norm(w) * 1e-1
+        loss = self.estimate_gamma(alpha, Z, w) + np.linalg.norm(w - b, ord=2) * self.reg
+        if not self.target_return:
+            loss += w[-1] / 2
+        return loss
 
     def update(self, b, x, obs):
         R, Z = self.polar_returns(obs)
         alpha = self.estimate_alpha(R)
 
-        # minimize_loss = partial
-
+        # simplex constraints
         cons = [
-            # simplex constraints
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
-            # fiat constraints
-            {'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.target_return} # positive returns
+            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        w_star = minimize(self.loss, b, args=(alpha, Z, self.get_portfolio_vector(obs, index=-1), x),
+        # Target return constraint
+        if self.target_return:
+            cons.append({'type': 'eq', 'fun': lambda w: np.dot(w, x) - self.target_return}) # positive returns
+
+        w_star = minimize(self.loss, self.crp, args=(alpha, Z, self.get_portfolio_vector(obs, index=-1), x),
                           constraints=cons)['x']
 
-        return np.clip(w_star, 0, 1)
+        return np.clip(w_star, 0, 1) # Truncate small errors
 
     def rebalance(self, obs):
         """
@@ -1979,19 +1979,19 @@ class ERI(APrioriAgent):
         self.target_return = kwargs['target_return']
 
 
-class Markowitz(APrioriAgent):
+# Modern Portfolio Theory
+class MeanVariance(APrioriAgent):
 
     def __repr__(self):
-        return "Markowitz"
+        return "Modern Portfolio Theory"
 
-    def __init__(self, factor=models.price_relative, target_return=0.0025, fiat="USDT", name=''):
+    def __init__(self, factor=models.price_relative, fiat="USDT", name='TangentPortfolio'):
         """
         :param window: Window parameter.
         """
         super().__init__(fiat=fiat, name=name)
         self.factor = factor
-        self.target_return = target_return
-
+        self.fiat = fiat
         self.init = False
 
     def predict(self, obs):
@@ -1999,35 +1999,25 @@ class Markowitz(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        return self.factor(obs).iloc[-1].values
+        return self.factor(obs).iloc[-1]
 
-    def update(self, cov_mat, exp_rets, target_ret):
-        n = len(cov_mat)
+    def update(self, cov_mat, exp_rets):
+        raise NotImplementedError("You should overwrite this method in the child class.")
 
-        P = opt.matrix(cov_mat.values)
-        q = opt.matrix(0.0, (n, 1))
+    def rebalance(self, obs):
+        raise NotImplementedError("You should overwrite this method in the child class.")
 
-        # Constraints Gx <= h
-        # exp_rets*x >= target_ret and x >= 0
-        G = opt.matrix(np.vstack((-exp_rets,
-                                  -np.identity(n))))
-        h = opt.matrix(np.vstack((-self.target_return,
-                                  +np.zeros((n, 1)))))
+    def set_params(self, **kwargs):
+        self.target_return = kwargs['target_return']
 
-        # Constraints Ax = b
-        # sum(x) = 1
-        A = opt.matrix(1.0, (1, n))
 
-        b = opt.matrix(1.0)
+class TangencyPortfolio(MeanVariance):
+    """
+    Computes a tangency portfolio, i.e. a maximum Sharpe ratio portfolio.
+    """
 
-        # Solve
-        optsolvers.options['show_progress'] = False
-        sol = optsolvers.qp(P, q, G, h, A, b)
-
-        if sol['status'] != 'optimal':
-            warnings.warn("Convergence problem")
-
-        return np.append(np.squeeze(sol['x']), [0.0])
+    def __repr__(self):
+        return "Tangency Portfolio"
 
     def rebalance(self, obs):
         """
@@ -2044,11 +2034,174 @@ class Markowitz(APrioriAgent):
 
         if self.step:
             x = self.predict(obs)
-            cov = obs.xs('open', level=1, axis=1).apply(lambda x: ta.ROCR(x, timeperiod=1) - 1,
-                                                        raw=True).fillna(0.0).cov()
-            return self.update(cov, x, self.target_return)
+            price_relative = obs.xs('open', level=1, axis=1).apply(lambda x: ta.ROCR(x, timeperiod=1),
+                                                                   raw=True).fillna(1.0)
+            cov_mat = price_relative.cov()
+            return self.update(cov_mat, x)
         else:
             return self.crp
 
-    def set_params(self, **kwargs):
-        self.target_return = kwargs['target_return']
+    def update(self, cov_mat, exp_rets):
+        """
+         Note: As the Sharpe ratio is not invariant with respect
+         to leverage, it is not possible to construct non-trivial
+         market neutral tangency portfolios. This is because for
+         a positive initial Sharpe ratio the sharpe grows unbound
+         with increasing leverage.
+
+         Parameters
+         ----------
+         cov_mat: pandas.DataFrame
+             Covariance matrix of asset returns.
+         exp_rets: pandas.Series
+             Expected asset returns (often historical returns).
+         allow_short: bool, optional
+             If 'False' construct a long-only portfolio.
+             If 'True' allow shorting, i.e. negative weights.
+
+         Returns
+         -------
+         weights: pandas.Series
+             Optimal asset weights.
+         """
+        if not isinstance(cov_mat, pd.DataFrame):
+            raise ValueError("Covariance matrix is not a DataFrame")
+
+        if not isinstance(exp_rets, pd.Series):
+            raise ValueError("Expected returns is not a Series")
+
+        if not cov_mat.index.equals(exp_rets.index):
+            raise ValueError("Indices do not match")
+
+        n = len(cov_mat)
+
+        P = opt.matrix(cov_mat.values)
+        q = opt.matrix(0.0, (n, 1))
+
+        # Constraints Gx <= h
+        # exp_rets*x >= 1 and x >= 0
+        G = opt.matrix(np.vstack((-exp_rets.values,
+                                  -np.identity(n))))
+        h = opt.matrix(np.vstack((-1.0,
+                                  np.zeros((n, 1)))))
+
+        # Solve
+        optsolvers.options['show_progress'] = False
+        sol = optsolvers.qp(P, q, G, h)
+
+        if sol['status'] != 'optimal':
+            warnings.warn("Convergence problem")
+
+        weights = np.append(np.squeeze(sol['x']), [0.0])
+
+        # Rescale weights, so that sum(weights) = 1
+        weights /= weights.sum()
+        return weights
+
+
+class Markowitz(MeanVariance):
+    """
+    Markowitz portfolio optimization
+    """
+    def __repr__(self):
+        return "Markowitz Portfolio"
+
+    def __init__(self, factor=models.price_relative, target_return=0.0025, fiat="USDT", name='Markowitz'):
+        """
+        :param window: Window parameter.
+        """
+        super().__init__(fiat=fiat, name=name)
+        self.target_return = target_return
+        self.factor = factor
+        self.fiat = fiat
+        self.init = False
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
+        if self.step:
+            x = self.predict(obs)
+            # x[self.fiat] = 1 * (1 - x.std())
+            price_relative = obs.xs('open', level=1, axis=1).apply(lambda x: ta.ROCR(x, timeperiod=1),
+                                                                   raw=True).fillna(1.0)
+            # price_relative[self.fiat] = 1 * (1 - price_relative.std(axis=1))
+            cov_mat = price_relative.cov()
+            return self.update(cov_mat, x, self.target_return)
+        else:
+            return self.crp
+
+    def update(self, cov_mat, exp_rets, target_ret):
+        """
+        Computes a Markowitz portfolio.
+
+        Parameters
+        ----------
+        cov_mat: pandas.DataFrame
+            Covariance matrix of asset returns.
+        exp_rets: pandas.Series
+            Expected asset returns (often historical returns).
+        target_ret: float
+            Target return of portfolio.
+        allow_short: bool, optional
+            If 'False' construct a long-only portfolio.
+            If 'True' allow shorting, i.e. negative weights.
+        market_neutral: bool, optional
+            If 'False' sum of weights equals one.
+            If 'True' sum of weights equal zero, i.e. create a
+                market neutral portfolio (implies allow_short=True).
+
+        Returns
+        -------
+        weights: pandas.Series
+            Optimal asset weights.
+        """
+        if not isinstance(cov_mat, pd.DataFrame):
+            raise ValueError("Covariance matrix is not a DataFrame")
+
+        if not isinstance(exp_rets, pd.Series):
+            raise ValueError("Expected returns is not a Series")
+
+        if not isinstance(target_ret, float):
+            raise ValueError("Target return is not a float")
+
+        if not cov_mat.index.equals(exp_rets.index):
+            raise ValueError("Indices do not match")
+
+        n = len(cov_mat)
+
+        P = opt.matrix(cov_mat.values)
+        q = opt.matrix(0.0, (n, 1))
+
+        # Constraints Gx <= h
+        # exp_rets*x >= target_ret and x >= 0
+        G = opt.matrix(np.vstack((-exp_rets.values,
+                                  -np.identity(n))))
+        h = opt.matrix(np.vstack((-target_ret,
+                                  +np.zeros((n, 1)))))
+
+        # Constraints Ax = b
+        # sum(x) = 1
+        A = opt.matrix(1.0, (1, n))
+
+        b = opt.matrix(1.0)
+
+        # Solve
+        optsolvers.options['show_progress'] = False
+        sol = optsolvers.qp(P, q, G, h, A, b)
+
+        if sol['status'] != 'optimal':
+            warnings.warn("Convergence problem")
+
+        # Put weights into a labeled series
+        weights = np.append(np.squeeze(sol['x']), [0.0])
+        return weights
