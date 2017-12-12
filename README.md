@@ -6,7 +6,7 @@ CONTRIBUTIONS ARE VERY WELCOME!
 
 This repository contains infra-structure for agent backtesting and cryptocoin trading.
 Currently it supports backtesting and papertrading using poloniex's historical dada and also live trading at poloniex.
-We are, however not associated of affiliated anyhow with poloniex or any services that it provides.
+We are, however not associated or affiliated anyhow with poloniex or any services that it provides.
 It is under active development and is provided "AS-IS", without any warrants whatsoever.
 ## Getting Started
 ### Prerequisites

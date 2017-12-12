@@ -12,7 +12,7 @@ def price_relative(obs, period=1):
 def momentum(obs, period=3):
     prices = obs.xs('open', level=1, axis=1).astype(np.float64)
     mom = prices.apply(ta.MOM, timeperiod=period, raw=True).fillna(0.0)
-    return mom + 1
+    return mom * 100 + 1
 
 def tsf(obs, period=14):
     prices = obs.xs('open', level=1, axis=1).astype(np.float64).apply(ta.ROCR, timeperiod=1, raw=True).fillna(1)
