@@ -1261,6 +1261,14 @@ class TradingEnvironment(Env):
                 # If there is no internet yet, log error and move on
                 Logger.error(TradingEnvironment.send_email, self.parse_error(e))
 
+        except smtplib.SMTPServerDisconnected as e:
+            # If there is no internet yet, log error and move on
+            Logger.error(TradingEnvironment.send_email, self.parse_error(e))
+
+        except smtplib.SMTPSenderRefused as e:
+            # If there is no internet yet, log error and move on
+            Logger.error(TradingEnvironment.send_email, self.parse_error(e))
+
         except Exception as e:
             try:
                 Logger.error(TradingEnvironment.send_email, self.parse_error(e))

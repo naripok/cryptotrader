@@ -352,5 +352,13 @@ def send_email(email, subject, body):
             # If there is no internet yet, log error and move on
             Logger.error(send_email, e)
 
+    except smtplib.SMTPServerDisconnected as e:
+        # If there is no internet yet, log error and move on
+        Logger.error(send_email, e)
+
+    except smtplib.SMTPSenderRefused as e:
+        # If there is no internet yet, log error and move on
+        Logger.error(send_email, e)
+
     except Exception as e:
         Logger.error(send_email, e)
