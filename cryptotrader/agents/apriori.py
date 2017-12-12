@@ -880,7 +880,6 @@ class Momentum(APrioriAgent):
         else:
             self.reb = -1
 
-
     def get_ma(self, df):
         if self.mean_type == 'exp':
             for window in self.ma_span:
@@ -904,7 +903,7 @@ class Momentum(APrioriAgent):
             factor = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
             for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
                 df = obs.loc[:, symbol].copy()
-                df = self.get_ma(df)
+                df = self.get_ma(df.iloc[-(self.ma_span[1] + 1):])
 
                 p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])
 
@@ -1876,13 +1875,12 @@ class LinearMixture(APrioriAgent):
             self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
 
 
-class ERI(APrioriAgent):
+class ORAGS(APrioriAgent):
 
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, turnover_reg=0.0, target_return=0.0,
-                 rebalance=False, fiat="USDT", name='Extreme Risk Index'):
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-2, fiat="USDT", name='ORAGS'):
         """
         :param window: Window parameter.
         """
@@ -1890,12 +1888,7 @@ class ERI(APrioriAgent):
         self.window = window - 1
         self.k = k
         self.factor = factor
-        self.reg = turnover_reg
-        self.target_return = target_return
-        if rebalance:
-            self.reb = -2
-        else:
-            self.reb = -1
+        self.lr = lr
 
         self.init = False
 
@@ -1926,26 +1919,24 @@ class ERI(APrioriAgent):
     def estimate_gamma(self, alpha, Z, w):
         return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
 
-    def loss(self, w, alpha, Z, b):
+    def loss(self, w, alpha, Z, x):
         # minimize gamma, portfolio turnover and regret
-        loss = self.estimate_gamma(alpha, Z, w) + np.linalg.norm(w - b, ord=2) * self.reg
-        if not self.factor:
-            loss += w[-1] / 2
+        loss = self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
+
         return loss
 
     def update(self, b, x, alpha, Z):
+        # Gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e3, 1e3)
+
         # simplex constraints
         cons = [
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        # Target return constraint
-        if self.target_return:
-            cons.append({'type': 'eq', 'fun': lambda w: np.dot(w, x) - (self.target_return + 1)}) # positive returns
-
         # Minimize loss
-        w_star = minimize(self.loss, b, args=(alpha, Z, b), constraints=cons)['x']
+        w_star = minimize(self.loss, b + grad * self.lr, args=(alpha, Z, x), constraints=cons)['x']
 
         # Return best portfolio
         return np.clip(w_star, 0, 1) # Truncate small errors
@@ -1964,12 +1955,12 @@ class ERI(APrioriAgent):
             self.init = True
 
         if self.step:
-            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            b = self.get_portfolio_vector(obs)
             x = self.predict(obs)
             R, Z = self.polar_returns(obs)
             alpha = self.estimate_alpha(R)
 
-            return self.update(prev_posit, x, alpha, Z)
+            return self.update(b, x, alpha, Z)
 
         else:
             return self.crp
@@ -1977,8 +1968,8 @@ class ERI(APrioriAgent):
     def set_params(self, **kwargs):
         self.window = int(kwargs['window'])
         self.k = kwargs['k']
-        self.reg = kwargs['reg']
-        self.target_return = kwargs['target_return']
+        self.lr = kwargs['lr']
+
 
 
 # Modern Portfolio Theory
