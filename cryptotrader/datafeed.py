@@ -554,9 +554,6 @@ class BacktestDataFeed(ExchangeConnection):
                 nrows=index.shape[0]
             )
 
-            # ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
-            #                   inplace=True, drop=True)
-            #
             i = -1
             last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
             while not dec_con.create_decimal(last_close).is_finite():
@@ -567,7 +564,7 @@ class BacktestDataFeed(ExchangeConnection):
             fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
             fill_dict.update({'volume': '0E-16'})
 
-            self.ohlc_data[pair] = ohlc_df.fillna(fill_dict)
+            self.ohlc_data[pair] = ohlc_df.fillna(fill_dict).ffill()
 
         for key in self.ohlc_data:
             if not self.data_length or self.ohlc_data[key].shape[0] < self.data_length:
@@ -575,13 +572,16 @@ class BacktestDataFeed(ExchangeConnection):
 
         for key in self.ohlc_data:
             if self.ohlc_data[key].shape[0] != self.data_length:
-                self.ohlc_data[key] = pd.DataFrame.from_records(self.tapi.returnChartData(key, period=self.period * 60,
-                                                               start=self.ohlc_data[key].date.iloc[-self.data_length],
-                                                               end=end
-                                                               ))
+                # self.ohlc_data[key] = pd.DataFrame.from_records(
+                #     self.tapi.returnChartData(key, period=self.period * 60,
+                #     start=self.ohlc_data[key].date.iloc[-self.data_length],
+                #     end=end
+                #     ),
+                # nrows=index.shape[0]
+                # )
+                self.ohlc_data[key] = self.ohlc_data[key].iloc[:self.data_length]
 
             self.ohlc_data[key].set_index('date', inplace=True, drop=False)
-
 
         print("%d intervals, or %d days of data at %d minutes period downloaded." % (self.data_length, (self.data_length * self.period) /\
                                                                 (24 * 60), self.period))

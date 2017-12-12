@@ -1968,7 +1968,7 @@ class LiveTradingEnvironment(TradingEnvironment):
                                         self.parse_error(error))
                     raise error
 
-        except Exception as e:
+        except Exception as error:
             try:
                 Logger.error(LiveTradingEnvironment.immediate_sell,
                              self.parse_error(error, price, amount, response))
@@ -1977,10 +1977,10 @@ class LiveTradingEnvironment(TradingEnvironment):
                              self.parse_error(error))
 
             if hasattr(self, 'email'):
-                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (error,
                                                                         datetime.strftime(self.timestamp,
                                                                                           "%Y-%m-%d %H:%M:%S")),
-                            self.parse_error(e))
+                            self.parse_error(error))
 
             raise e
 
@@ -2068,19 +2068,19 @@ class LiveTradingEnvironment(TradingEnvironment):
                                         self.parse_error(error))
                     raise error
 
-        except Exception as e:
+        except Exception as error:
             try:
                 Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error, price, amount, response))
             except Exception:
                 Logger.error(LiveTradingEnvironment.immediate_buy, self.parse_error(error))
 
             if hasattr(self, 'email'):
-                self.send_email("LiveTradingEnvironment Error: %s at %s" % (e,
+                self.send_email("LiveTradingEnvironment Error: %s at %s" % (error,
                                                                         datetime.strftime(self.timestamp,
                                                                                           "%Y-%m-%d %H:%M:%S")),
-                            self.parse_error(e))
+                            self.parse_error(error))
 
-            raise e
+            raise error
 
     # Online Trading methods
     def rebalance_sell(self, balance_change, order_type="immediate"):

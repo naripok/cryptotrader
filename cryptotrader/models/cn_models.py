@@ -198,6 +198,7 @@ def get_target(obs, target_type):
     else:
         raise TypeError("Bad target_type params.")
 
+
 def make_train_batch(env, batch_size, target_type):
     obs_batch = []
     target_batch = []
