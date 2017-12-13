@@ -107,7 +107,7 @@ class APrioriAgent(Agent):
                 for i in range(nb_max_start_steps):
                     obs, _, _, status = env.step(start_step_policy.rebalance(obs))
                     if status['OOD']:
-                        return 0.0
+                        return 0.0, 0.0
 
                 # Get max episode length
                 if nb_max_episode_steps is None:
@@ -153,7 +153,8 @@ class APrioriAgent(Agent):
 
                         if status['OOD'] or self.step == nb_max_episode_steps:
                             rewards.append(episode_reward)
-                            print("\nReward mean: {}, Reward std: {}".format(np.mean(rewards), np.std(rewards)))
+                            if verbose:
+                                print("\nReward mean: {}, Reward std: {}".format(np.mean(rewards), np.std(rewards)))
                             break
 
                         if status['Error']:
@@ -254,9 +255,10 @@ class APrioriAgent(Agent):
 
                     # Update progress
                     if verbose:
-                        print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
+                        print("Optimization step {0}/{1}, batch reward mean: {2}, batch reward std {3}:, ETC: {4}                     ".format(i,
                                                                             nb_steps,
                                                                             r,
+                                                                            rstd,
                                                                             str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                               end="\r")
                         t0 = time()
@@ -1188,7 +1190,7 @@ class ORAGS(APrioriAgent):
         :param radius: polar return radius
         :return: alpha
         """
-        return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+        return safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
 
     def estimate_gamma(self, alpha, Z, w):
         """
