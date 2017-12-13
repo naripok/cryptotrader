@@ -791,7 +791,7 @@ class TradingEnvironment(Env):
             posit_change = dec_vec_sub(action, self.calc_portfolio_vector())[:-1]
 
             # Get initial portval
-            portval = self.calc_total_portval(timestamp)
+            portval = self.calc_total_portval()
 
             # Sell assets first
             for i, change in enumerate(posit_change):
@@ -811,7 +811,7 @@ class TradingEnvironment(Env):
                     self.crypto = {symbol: crypto_pool, 'timestamp': timestamp}
 
             # Uodate prev portval with deduced taxes
-            portval = self.calc_total_portval(timestamp)
+            portval = self.calc_total_portval()
 
             # Then buy some goods
             for i, change in enumerate(posit_change):
@@ -1776,17 +1776,32 @@ class PaperTradingEnvironment(TradingEnvironment):
         # assert isinstance(tapi, PaperTradingDataFeed) or isinstance(tapi, DataFeed), "Paper trade tapi must be a instance of PaperTradingDataFeed."
         super().__init__(period, obs_steps, tapi, fiat, name)
 
+    def setup(self):
+        # Set spaces
+        self.set_observation_space()
+        self.set_action_space()
+
+        # Get fee values
+        for symbol in self.symbols:
+            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+
+        # Start balance
+        # self.init_balance = self.get_balance()
+
+        # Set flag
+        self.initialized = True
+
     def reset(self):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
 
-        self.set_observation_space()
-        self.set_action_space()
+        # self.set_observation_space()
+        # self.set_action_space()
 
         self.balance = self.init_balance = self.get_balance()
 
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+        # for symbol in self.symbols:
+        #     self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
 
         obs = self.get_observation(True)
 
@@ -1807,7 +1822,7 @@ class PaperTradingEnvironment(TradingEnvironment):
         self.log_action_vector(timestamp, action, False)
 
         # Save portval for reward calculation
-        previous_portval = self.calc_total_portval(timestamp)
+        previous_portval = self.calc_total_portval()
 
         # Simulate portifolio rebalance
         done = self.simulate_trade(action, timestamp)
@@ -2225,7 +2240,7 @@ class LiveTradingEnvironment(TradingEnvironment):
             self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
 
         # Start balance
-        self.init_balance = self.get_balance()
+        # self.init_balance = self.get_balance()
 
         # Set flag
         self.initialized = True
@@ -2233,23 +2248,22 @@ class LiveTradingEnvironment(TradingEnvironment):
     def reset(self):
         self.obs_df = pd.DataFrame()
         self.portfolio_df = pd.DataFrame()
-        ticker = self.tapi.returnTicker()
 
-        self.set_observation_space()
-        self.set_action_space()
+        # self.set_observation_space()
+        # self.set_action_space()
 
         self.balance = self.init_balance = self.get_balance()
 
-        for symbol in self.symbols:
-            self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
+        # for symbol in self.symbols:
+        #     self.tax[symbol] = convert_to.decimal(self.get_fee(symbol))
 
         obs = self.get_observation(True)
 
-        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector(ticker)) + [False]],
+        self.action_df = pd.DataFrame([list(self.calc_portfolio_vector()) + [False]],
                                       columns=list(self.symbols) + ['online'],
                                       index=[self.timestamp])
 
-        self.portval = {'portval': self.calc_total_portval(ticker),
+        self.portval = {'portval': self.calc_total_portval(),
                         'timestamp': self.portfolio_df.index[-1]}
 
         return obs.astype(np.float64)
