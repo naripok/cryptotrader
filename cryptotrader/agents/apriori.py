@@ -154,7 +154,7 @@ class APrioriAgent(Agent):
                         if status['OOD'] or self.step == nb_max_episode_steps:
                             rewards.append(episode_reward)
                             if verbose:
-                                print("\nReward mean: {}, Reward std: {}".format(np.mean(rewards), np.std(rewards)))
+                                print("\nReward mean: {:.08f}, Reward std: {:.08f}".format(np.mean(rewards), np.std(rewards)))
                             break
 
                         if status['Error']:
@@ -255,7 +255,7 @@ class APrioriAgent(Agent):
 
                     # Update progress
                     if verbose:
-                        print("Optimization step {0}/{1}, batch reward mean: {2}, batch reward std {3}:, ETC: {4}                     ".format(i,
+                        print("Optimization step {0}/{1}, batch reward mean: {2:.8f}, batch reward std: {3:.8f}, ETC: {4}                     ".format(i,
                                                                             nb_steps,
                                                                             r,
                                                                             rstd,
