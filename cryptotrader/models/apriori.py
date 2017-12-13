@@ -9,10 +9,10 @@ def price_relative(obs, period=1):
     price_relative = prices.apply(ta.ROCR, timeperiod=period, raw=True).fillna(1.0)
     return price_relative
 
-def momentum(obs, period=7):
+def momentum(obs, period=14):
     prices = obs.xs('open', level=1, axis=1).astype(np.float64)
     mom = prices.apply(ta.MOM, timeperiod=period, raw=True).fillna(0.0)
-    return mom * 100 + 1
+    return 1 + mom * safe_div(1, prices.iloc[-1])
 
 def tsf(obs, period=14):
     prices = obs.xs('open', level=1, axis=1).astype(np.float64).apply(ta.ROCR, timeperiod=1, raw=True).fillna(1)

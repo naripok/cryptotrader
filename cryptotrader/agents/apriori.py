@@ -87,85 +87,87 @@ class APrioriAgent(Agent):
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
-    def test(self, env, nb_episodes=1, reward_type='return', action_repetition=1, callbacks=None, visualize=False, start_step=0,
+    def test(self, env, nb_episodes=1, action_repetition=1, callbacks=None, visualize=False, start_step=0,
              nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, noise_abs=0.0, verbose=False):
         """
         Test agent on environment
         """
+        rewards = []
         try:
-            # Get env params
-            self.fiat = env._fiat
+            for t in range(nb_episodes):
+                # Get env params
+                self.fiat = env._fiat
 
-            # Reset observations
-            env.reset_status()
-            obs = env.reset()
+                # Reset observations
+                env.reset_status()
+                obs = env.reset()
 
-            # Run start steps
-            # Run start steps
-            for i in range(nb_max_start_steps):
-                obs, _, _, status = env.step(start_step_policy.rebalance(obs))
-                if status['OOD']:
-                    return 0.0
+                # Run start steps
+                # Run start steps
+                for i in range(nb_max_start_steps):
+                    obs, _, _, status = env.step(start_step_policy.rebalance(obs))
+                    if status['OOD']:
+                        return 0.0
 
-            # Get max episode length
-            if nb_max_episode_steps is None:
-                nb_max_episode_steps = env.data_length
+                # Get max episode length
+                if nb_max_episode_steps is None:
+                    nb_max_episode_steps = env.data_length
 
-            #Reset counters
-            t0 = time()
-            self.step = start_step
-            episode_reward = 0.0
-            while True:
-                try:
-                    # Data augmentation
-                    if noise_abs:
-                        obs.applymap(lambda x: x + np.random.random(1) * noise_abs)
+                #Reset counters
+                t0 = time()
+                self.step = start_step
+                episode_reward = 0.0
+                while True:
+                    try:
+                        # Data augmentation
+                        if noise_abs:
+                            obs = obs.apply(lambda x: x + np.random.random(len(x)) * noise_abs * x, raw=True)
 
-                    # Take actions
-                    action = self.rebalance(obs)
-                    obs, reward, _, status = env.step(action)
+                        # Take actions
+                        action = self.rebalance(obs)
+                        obs, reward, _, status = env.step(action)
 
-                    # Accumulate reward
-                    # Sharpe
-                    if reward_type == 'sharpe':
-                        episode_reward += safe_div(reward, env.portfolio_df.portval.astype(np.float64).std())
-                    # Payoff
-                    elif reward_type == 'return':
+                        # Accumulate reward
+                        # Payoff
                         episode_reward += reward
-                    else:
-                        raise TypeError("Bad reward argument.")
 
-                    # Increment step counter
-                    self.step += 1
+                        # Increment step counter
+                        self.step += 1
 
-                    if visualize:
-                        env.render()
+                        if visualize:
+                            env.render()
 
-                    if verbose:
-                        print(">> step {0}/{1}, {2} % done, Cumulative Reward: {3:.08f}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
-                            self.step,
-                            nb_max_episode_steps - env.obs_steps - 2,
-                            int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
-                            episode_reward,
-                            str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
-                                                                 - self.step), unit='s')),
-                            1 / (time() - t0)
-                        ), end="\r", flush=True)
-                        t0 = time()
+                        if verbose:
+                            print(">> run {6}/{7}, step {0}/{1}, {2} % done, Cumulative Reward: {3:.08f}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
+                                self.step,
+                                nb_max_episode_steps - env.obs_steps - 2,
+                                int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
+                                episode_reward,
+                                str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
+                                                                     - self.step), unit='s')),
+                                1 / (time() - t0),
+                                t + 1,
+                                nb_episodes
+                            ), end="\r", flush=True)
+                            t0 = time()
 
-                    if status['OOD'] or self.step == nb_max_episode_steps:
-                        return episode_reward
+                        if status['OOD'] or self.step == nb_max_episode_steps:
+                            rewards.append(episode_reward)
+                            print("\nReward mean: {}, Reward std: {}".format(np.mean(rewards), np.std(rewards)))
+                            break
 
-                    if status['Error']:
-                        e = status['Error']
-                        print("Env error:",
+                        if status['Error']:
+                            e = status['Error']
+                            print("Env error:",
+                                  type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
+                            break
+
+                    except Exception as e:
+                        print("Model Error:",
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                        break
+                        raise e
 
-                except Exception as e:
-                    print("Model Error:",
-                          type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
-                    raise e
+            return np.mean(rewards), np.std(rewards)
 
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order to test.")
@@ -174,11 +176,11 @@ class APrioriAgent(Agent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
-            return 0.0
+            return np.mean(rewards), np.std(rewards)
 
     def fit(self, env, nb_steps, batch_size, search_space, constraints=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000, start_step=0,
-            nb_max_episode_steps=None):
+            nb_max_episode_steps=None, noise_abs=0.0):
         """
         Fit the model on parameters on the environment
         :param env: BacktestEnvironment instance
@@ -194,6 +196,7 @@ class APrioriAgent(Agent):
         :param start_step_policy:
         :param log_interval:
         :param nb_max_episode_steps: Number of steps for one episode
+        :param noise_abs: Noise radius to use on sample runs
         :return: tuple: Optimal parameters, information about the optimization process
         """
         try:
@@ -230,25 +233,22 @@ class APrioriAgent(Agent):
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
                     # Sample params
+                    self.init = False
                     self.set_params(**kwargs)
 
                     # Try model for a batch
-                    batch_reward = 0
-                    for batch in range(batch_size):
-                        # sample environment
-                        r = self.test(env,
-                                        nb_episodes=1,
-                                        action_repetition=action_repetition,
-                                        callbacks=callbacks,
-                                        visualize=visualize,
-                                        nb_max_episode_steps=nb_max_episode_steps,
-                                        nb_max_start_steps=nb_max_start_steps,
-                                        start_step_policy=start_step_policy,
-                                        start_step=start_step,
-                                        verbose=False)
-
-                        # Accumulate reward
-                        batch_reward += r
+                    # sample environment
+                    r, rstd = self.test(env,
+                                    nb_episodes=batch_size,
+                                    action_repetition=action_repetition,
+                                    callbacks=callbacks,
+                                    visualize=visualize,
+                                    nb_max_episode_steps=nb_max_episode_steps,
+                                    nb_max_start_steps=nb_max_start_steps,
+                                    start_step_policy=start_step_policy,
+                                    start_step=start_step,
+                                    noise_abs=noise_abs,
+                                    verbose=False)
 
                     # Increment step counter
                     i += 1
@@ -257,13 +257,13 @@ class APrioriAgent(Agent):
                     if verbose:
                         print("Optimization step {0}/{1}, step reward: {2}, ETC: {3}                     ".format(i,
                                                                             nb_steps,
-                                                                            batch_reward / batch_size,
+                                                                            r,
                                                                             str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                               end="\r")
                         t0 = time()
 
                     # Average rewards and return
-                    return batch_reward / batch_size
+                    return r
 
                 except KeyboardInterrupt:
                     raise ot.api.fun.MaximumEvaluationsException(0)
@@ -1065,7 +1065,7 @@ class OGS(APrioriAgent):
     def __repr__(self):
         return "OGS"
 
-    def __init__(self, lr=1, eta=0., clip_grads=1e6, damping=0.99, mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, factor=models.price_relative, lr=1, eta=0., clip_grads=1e6, damping=0.99, mr=False, fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -1073,6 +1073,7 @@ class OGS(APrioriAgent):
 
         self.lr = lr
         self.damping = damping
+        self.factor = factor
         self.eta = eta
         self.clip = clip_grads
         self.mr = mr
@@ -1080,13 +1081,12 @@ class OGS(APrioriAgent):
         self.init = False
 
     def predict(self, obs):
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        if self.mr:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
-        else:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2]) - 1).values, [0.0])
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        return np.append(self.factor(obs).iloc[-1].values, [1.0])
 
-        return price_relative
 
     def rebalance(self, obs):
         if not self.init:
@@ -1110,7 +1110,7 @@ class OGS(APrioriAgent):
     def update(self, b, x):
         # calculate gradient
         grad = np.clip(safe_div(x, np.dot(b, x)), -self.clip, self.clip) - 1
-        self.gti = self.gti * self.damping + grad ** 2
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, 0.0, 1e8)
         adjusted_grad = safe_div(grad, self.gti)
 
         # update b, we are using relative log return benchmark, so we want to maximize here
@@ -1122,10 +1122,156 @@ class OGS(APrioriAgent):
         return pp * (1 - self.eta) + np.ones(len(x)) / float(len(x)) * self.eta
 
     def set_params(self, **kwargs):
-        self.lr = kwargs['lr']
-        self.eta = kwargs['eta']
+        if 'lr'in kwargs:
+            self.lr = kwargs['lr']
+        if 'eta' in kwargs:
+            self.eta = kwargs['eta']
         if 'mr' in kwargs:
             self.mr = bool(kwargs['mr'])
+        if 'damping' in kwargs:
+            self.damping = kwargs['damping']
+
+
+class ORAGS(APrioriAgent):
+    """
+    Online Risk Averse Gradient Step
+    This algorithm uses Extreme Risk Index and AdaGrad algorithm for online portfolio optimization
+    References:
+        Extreme Risk Index:
+        https://arxiv.org/pdf/1505.04045.pdf
+
+        AdaGrad:
+        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
+    """
+    def __repr__(self):
+        return "Online Risk Averse Gradient Step"
+
+    def __init__(self, factor=models.momentum, window=300, k=0.1, lr=1e-1, damping=0.99, factor_kwargs={},
+                 fiat="USDT", name='ORAGS'):
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.k = k
+        self.factor = factor
+        self.lr = lr
+        self.damping = damping
+        self.factor_kwargs = factor_kwargs
+
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        return np.append(self.factor(obs, **self.factor_kwargs).iloc[-1].values, [1.0])
+
+    def polar_returns(self, obs):
+        """
+        Calculate polar return
+        :param obs: pandas DataFrame
+        :return: return radius, return angles
+        """
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
+        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+
+        radius = np.linalg.norm(price_relative, ord=1, axis=1)
+        angle = np.divide(price_relative, np.mat(radius).T)
+
+        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
+        index = index[np.argsort(radius[index])]
+
+        return radius[index][::-1], angle[index][::-1]
+
+    def estimate_alpha(self, radius):
+        """
+        Estimate pareto's distribution alpha
+        :param radius: polar return radius
+        :return: alpha
+        """
+        return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+
+    def estimate_gamma(self, alpha, Z, w):
+        """
+        Estimate risk index gamma
+        :param self:
+        :param alpha:
+        :param Z:
+        :param w:
+        :return:
+        """
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
+
+    def loss(self, w, alpha, Z, x):
+        # minimize allocation risk
+        loss = self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
+
+        return loss
+
+    def update(self, b, x, alpha, Z):
+        # AdaGrad
+        # Calculate gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1
+        # Accumulate square gradient
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, 0.0, 1e8)
+        # Adjust gradient
+        adjusted_grad = safe_div(grad, self.gti)
+
+        # Take a step in gradient direction
+        b += adjusted_grad * self.lr
+
+        # Extreme risk index
+        # simplex constraints
+        cons = [
+            {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
+        ]
+
+        # Minimize loss starting from adjusted portfolio
+        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+
+        # Return best portfolio
+        return np.clip(w_star, 0, 1) # Truncate small errors
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+
+            # AdaGrad square gradient, started with ones for stability
+            self.gti = np.ones_like(self.crp)
+
+            self.init = True
+
+        if self.step:
+            b = self.get_portfolio_vector(obs)
+            x = self.predict(obs)
+            R, Z = self.polar_returns(obs)
+            alpha = self.estimate_alpha(R)
+
+            return self.update(b, x, alpha, Z)
+
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        if 'window' in kwargs:
+            self.window = int(kwargs['window'])
+        if 'k' in kwargs:
+            self.k = kwargs['k']
+        if 'lr' in kwargs:
+            self.lr = kwargs['lr']
+
+        for kwarg in kwargs:
+            if kwarg in self.factor_kwargs:
+                self.factor_kwargs[kwarg] = kwargs[kwarg]
 
 
 # Pattern trading
@@ -1598,26 +1744,6 @@ class STMR(APrioriAgent):
 
         return price_relative
 
-    def rebalance(self, obs):
-        """
-        Performs portfolio rebalance within environment
-        :param obs: pandas DataFrame: Environment observation
-        :return: numpy array: Portfolio vector
-        """
-        if not self.init:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            self.crp = array_normalize(action)
-            self.init = True
-
-        if self.step:
-            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
-        else:
-            return self.crp
-
     def update(self, b, x):
         """
         Update portfolio weights to satisfy constraint b * x <= eps
@@ -1637,6 +1763,26 @@ class STMR(APrioriAgent):
 
         # project it onto simplex
         return self.activation(b) * (1 - self.eta) + self.eta * self.crp
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.init = True
+
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
+            return self.crp
 
     def set_params(self, **kwargs):
         self.eps = kwargs['eps']
@@ -1890,142 +2036,6 @@ class LinearMixture(APrioriAgent):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
         for i in range(len(self.factors)):
             self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
-
-
-class ORAGS(APrioriAgent):
-    """
-    Online Risk Averse Gradient Step
-    This algorithm uses Extreme Risk Index and AdaGrad algorithm for online portfolio optimization
-    References:
-        Extreme Risk Index:
-        https://arxiv.org/pdf/1505.04045.pdf
-
-        AdaGrad:
-        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
-    """
-    def __repr__(self):
-        return "Online Risk Averse Gradient Step"
-
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-2, damping=0.99, fiat="USDT", name='ORAGS'):
-        super().__init__(fiat=fiat, name=name)
-        self.window = window - 1
-        self.k = k
-        self.factor = factor
-        self.lr = lr
-        self.damping = damping
-
-        self.init = False
-
-    def predict(self, obs):
-        """
-        Performs prediction given environment observation
-        :param obs: pandas DataFrame: Environment observation
-        """
-        return np.append(self.factor(obs).iloc[-1].values, [1.0])
-
-    def polar_returns(self, obs):
-        """
-        Calculate polar return
-        :param obs: pandas DataFrame
-        :return: return radius, return angles
-        """
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
-        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
-            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
-
-        radius = np.linalg.norm(price_relative, ord=1, axis=1)
-        angle = np.divide(price_relative, np.mat(radius).T)
-
-        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
-        index = index[np.argsort(radius[index])]
-
-        return radius[index][::-1], angle[index][::-1]
-
-    def estimate_alpha(self, radius):
-        """
-        Estimate pareto's distribution alpha
-        :param radius: polar return radius
-        :return: alpha
-        """
-        return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
-
-    def estimate_gamma(self, alpha, Z, w):
-        """
-        Estimate risk index gamma
-        :param self:
-        :param alpha:
-        :param Z:
-        :param w:
-        :return:
-        """
-        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
-
-    def loss(self, w, alpha, Z, x):
-        # minimize allocation risk
-        loss = self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
-
-        return loss
-
-    def update(self, b, x, alpha, Z):
-        # AdaGrad
-        # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1
-        # Accumulate square gradient
-        self.gti = self.gti * self.damping + grad ** 2
-        # Adjust gradient
-        adjusted_grad = safe_div(grad, self.gti)
-
-        # Take a step in gradient direction
-        b += adjusted_grad * self.lr
-
-        # Extreme risk index
-        # simplex constraints
-        cons = [
-            {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
-        ]
-
-        # Minimize loss starting from adjusted portfolio
-        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
-
-        # Return best portfolio
-        return np.clip(w_star, 0, 1) # Truncate small errors
-
-    def rebalance(self, obs):
-        """
-        Performs portfolio rebalance within environment
-        :param obs: pandas DataFrame: Environment observation
-        :return: numpy array: Portfolio vector
-        """
-        if not self.init:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            self.crp = array_normalize(action)
-
-            # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp)
-
-            self.init = True
-
-        if self.step:
-            b = self.get_portfolio_vector(obs)
-            x = self.predict(obs)
-            R, Z = self.polar_returns(obs)
-            alpha = self.estimate_alpha(R)
-
-            return self.update(b, x, alpha, Z)
-
-        else:
-            return self.crp
-
-    def set_params(self, **kwargs):
-        if 'window' in kwargs:
-            self.window = int(kwargs['window'])
-        if 'k' in kwargs:
-            self.k = kwargs['k']
-        if 'lr' in kwargs:
-            self.lr = kwargs['lr']
 
 
 # Modern Portfolio Theory
