@@ -97,7 +97,7 @@ class APrioriAgent(Agent):
             for t in range(nb_episodes):
                 # Get env params
                 self.fiat = env._fiat
-
+                self.init = False
                 # Reset observations
                 env.reset_status()
                 obs = env.reset()
@@ -233,7 +233,6 @@ class APrioriAgent(Agent):
                     nonlocal i, nb_steps, t0, env, nb_max_episode_steps
 
                     # Sample params
-                    self.init = False
                     self.set_params(**kwargs)
 
                     # Try model for a batch
