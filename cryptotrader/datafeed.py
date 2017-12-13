@@ -555,11 +555,10 @@ class BacktestDataFeed(ExchangeConnection):
             )
 
             i = -1
-            last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
+            last_close = ohlc_df.at[ohlc_df.index[i], 'close']
             while not dec_con.create_decimal(last_close).is_finite():
                 i -= 1
-                last_close = ohlc_df.get_value(ohlc_df.index[i], 'close')
-
+                last_close = ohlc_df.at[ohlc_df.index[i], 'close']
             # Replace missing values with last close
             fill_dict = {col: last_close for col in ['open', 'high', 'low', 'close']}
             fill_dict.update({'volume': '0E-16'})
