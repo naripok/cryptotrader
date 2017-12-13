@@ -158,7 +158,7 @@ class FeedDaemon(Process):
                 # Wait for request
                 req = sock.recv_string()
 
-                Logger.debug(FeedDaemon.worker, req)
+                Logger.info(FeedDaemon.worker, req)
 
                 # Handle request
                 call = self.handle_req(req)
@@ -170,14 +170,14 @@ class FeedDaemon(Process):
                         rep = self.api[call[0]].__call__(*call[1:])
                     except ExchangeError as e:
                         rep = e.__str__()
-                        Logger.error(FeedDaemon.worker, req)
+                        Logger.error(FeedDaemon.worker, "Exchange error: %s\n%s" % (req, rep))
 
                     except DataFeedException as e:
                         rep = e.__str__()
-                        Logger.error(FeedDaemon.worker, req)
+                        Logger.error(FeedDaemon.worker,  "DataFeedException: %s\n%s" % (req, rep))
 
                     if debug:
-                        Logger.debug(FeedDaemon.worker, rep)
+                        Logger.debug(FeedDaemon.worker, "Debug: %s" % req)
 
                     # send reply back to client
                     sock.send_json(rep)
