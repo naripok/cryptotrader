@@ -88,7 +88,7 @@ class APrioriAgent(Agent):
         raise NotImplementedError("You must overwrite this class in your implementation.")
 
     def test(self, env, nb_episodes=1, reward_type='return', action_repetition=1, callbacks=None, visualize=False, start_step=0,
-             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, verbose=False):
+             nb_max_episode_steps=None, nb_max_start_steps=0, start_step_policy=None, noise_abs=0.0, verbose=False):
         """
         Test agent on environment
         """
@@ -117,6 +117,10 @@ class APrioriAgent(Agent):
             episode_reward = 0.0
             while True:
                 try:
+                    # Data augmentation
+                    if noise_abs:
+                        obs.applymap(lambda x: x + np.random.random(1) * noise_abs)
+
                     # Take actions
                     action = self.rebalance(obs)
                     obs, reward, _, status = env.step(action)
@@ -1055,22 +1059,25 @@ class ONS(APrioriAgent):
 
 class OGS(APrioriAgent):
     """
-    Online gradient step
+    Online gradient step with AdaGrad algorithm optimizer
     """
 
     def __repr__(self):
         return "OGS"
 
-    def __init__(self, lr=1, eta=0., clip_grads=1e6, mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, lr=1, eta=0., clip_grads=1e6, damping=0.99, mr=False, fiat="USDT", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
         super().__init__(fiat=fiat, name=name)
 
         self.lr = lr
+        self.damping = damping
         self.eta = eta
         self.clip = clip_grads
         self.mr = mr
+
+        self.init = False
 
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
@@ -1082,22 +1089,32 @@ class OGS(APrioriAgent):
         return price_relative
 
     def rebalance(self, obs):
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+
+            # AdaGrad square gradient
+            self.gti = np.ones_like(self.crp)
+
+            self.init = True
+
         if self.step:
             prev_posit = self.get_portfolio_vector(obs, index=-1)
             price_relative = self.predict(obs)
             return self.update(prev_posit, price_relative)
         else:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            return array_normalize(action)
+            return self.crp
 
     def update(self, b, x):
         # calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -self.clip, self.clip)
+        grad = np.clip(safe_div(x, np.dot(b, x)), -self.clip, self.clip) - 1
+        self.gti = self.gti * self.damping + grad ** 2
+        adjusted_grad = safe_div(grad, self.gti)
 
         # update b, we are using relative log return benchmark, so we want to maximize here
-        b -= self.lr * grad
+        b += self.lr * adjusted_grad
 
         # projection of p
         pp = simplex_proj(b)
@@ -1876,19 +1893,26 @@ class LinearMixture(APrioriAgent):
 
 
 class ORAGS(APrioriAgent):
+    """
+    Online Risk Averse Gradient Step
+    This algorithm uses Extreme Risk Index and AdaGrad algorithm for online portfolio optimization
+    References:
+        Extreme Risk Index:
+        https://arxiv.org/pdf/1505.04045.pdf
 
+        AdaGrad:
+        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
+    """
     def __repr__(self):
-        return "Extreme Risk Index"
+        return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-2, fiat="USDT", name='ORAGS'):
-        """
-        :param window: Window parameter.
-        """
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-2, damping=0.99, fiat="USDT", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
         self.factor = factor
         self.lr = lr
+        self.damping = damping
 
         self.init = False
 
@@ -1900,7 +1924,11 @@ class ORAGS(APrioriAgent):
         return np.append(self.factor(obs).iloc[-1].values, [1.0])
 
     def polar_returns(self, obs):
-
+        """
+        Calculate polar return
+        :param obs: pandas DataFrame
+        :return: return radius, return angles
+        """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
         price_relative = np.hstack([np.mat(prices.rolling(2).apply(
             lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
@@ -1914,29 +1942,51 @@ class ORAGS(APrioriAgent):
         return radius[index][::-1], angle[index][::-1]
 
     def estimate_alpha(self, radius):
-         return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+        """
+        Estimate pareto's distribution alpha
+        :param radius: polar return radius
+        :return: alpha
+        """
+        return safe_div((len(radius) - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
 
     def estimate_gamma(self, alpha, Z, w):
+        """
+        Estimate risk index gamma
+        :param self:
+        :param alpha:
+        :param Z:
+        :param w:
+        :return:
+        """
         return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
 
     def loss(self, w, alpha, Z, x):
-        # minimize gamma, portfolio turnover and regret
+        # minimize allocation risk
         loss = self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
 
         return loss
 
     def update(self, b, x, alpha, Z):
-        # Gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e3, 1e3)
+        # AdaGrad
+        # Calculate gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1
+        # Accumulate square gradient
+        self.gti = self.gti * self.damping + grad ** 2
+        # Adjust gradient
+        adjusted_grad = safe_div(grad, self.gti)
 
+        # Take a step in gradient direction
+        b += adjusted_grad * self.lr
+
+        # Extreme risk index
         # simplex constraints
         cons = [
             {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        # Minimize loss
-        w_star = minimize(self.loss, b + grad * self.lr, args=(alpha, Z, x), constraints=cons)['x']
+        # Minimize loss starting from adjusted portfolio
+        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
 
         # Return best portfolio
         return np.clip(w_star, 0, 1) # Truncate small errors
@@ -1952,6 +2002,10 @@ class ORAGS(APrioriAgent):
             action = np.ones(n_pairs)
             action[-1] = 0
             self.crp = array_normalize(action)
+
+            # AdaGrad square gradient, started with ones for stability
+            self.gti = np.ones_like(self.crp)
+
             self.init = True
 
         if self.step:
@@ -1966,10 +2020,12 @@ class ORAGS(APrioriAgent):
             return self.crp
 
     def set_params(self, **kwargs):
-        self.window = int(kwargs['window'])
-        self.k = kwargs['k']
-        self.lr = kwargs['lr']
-
+        if 'window' in kwargs:
+            self.window = int(kwargs['window'])
+        if 'k' in kwargs:
+            self.k = kwargs['k']
+        if 'lr' in kwargs:
+            self.lr = kwargs['lr']
 
 
 # Modern Portfolio Theory

@@ -97,6 +97,8 @@ def safe_div(x, y, eps=(dec_eps, 1e-8)):
             out = x / y
         except ZeroDivisionError:
             out = x / (y + eps[1])
+        except TypeError:
+            out = float(x) / (float(y) + eps[1])
 
     return out
 
