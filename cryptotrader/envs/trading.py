@@ -1487,7 +1487,6 @@ class BacktestEnvironment(TradingEnvironment):
         # TODO 1 FIND A BETTER WAY
         # TODO: FIX TIMESTAMP
         # Set index
-
         ohlc_df.set_index(ohlc_df.date.transform(lambda x: datetime.fromtimestamp(x).astimezone(timezone.utc)),
                           inplace=True, drop=True)
 
