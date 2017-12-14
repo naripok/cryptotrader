@@ -121,7 +121,7 @@ class APrioriAgent(Agent):
                     try:
                         # Data augmentation
                         if noise_abs:
-                            obs = obs.apply(lambda x: x + np.random.random(len(x)) * noise_abs * x, raw=True)
+                            obs = obs.apply(lambda x: x + np.random.random(x.shape) * noise_abs * x, raw=True)
 
                         # Take actions
                         action = self.rebalance(obs)
@@ -348,19 +348,19 @@ class APrioriAgent(Agent):
             reward = 0
 
             print(
-                "Executing paper trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
+                "Executing trading with %d min frequency.\nInitial portfolio value: %f fiat units." % (env.period,
                                                                                                              init_portval)
                 )
 
             Logger.info(APrioriAgent.trade, "Starting trade routine...")
 
+            # Init step counter
+            self.step = start_step
+
             if verbose:
                 msg = self.make_report(env, obs, reward, episode_reward, t0, init_time, env.calc_portfolio_vector(),
                                        prev_portval, init_portval)
                 print(msg, end="\r", flush=True)
-
-            # Init step counter
-            self.step = start_step
 
             while True:
                 try:
@@ -1214,7 +1214,7 @@ class ORAGS(APrioriAgent):
         # Calculate gradient
         grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1
         # Accumulate square gradient
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, 0.0, 1e8)
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
         # Adjust gradient
         adjusted_grad = safe_div(grad, self.gti)
 
@@ -1269,6 +1269,8 @@ class ORAGS(APrioriAgent):
             self.k = kwargs['k']
         if 'lr' in kwargs:
             self.lr = kwargs['lr']
+        if 'damping' in kwargs:
+            self.damping = kwargs['damping']
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
@@ -1786,8 +1788,10 @@ class STMR(APrioriAgent):
             return self.crp
 
     def set_params(self, **kwargs):
-        self.eps = kwargs['eps']
-        self.eta = kwargs['eta']
+        if 'eps' in kwargs:
+            self.eps = kwargs['eps']
+        if 'eta' in kwargs:
+            self.eta = kwargs['eta']
 
 
 class KAMAMR(STMR):
@@ -2037,6 +2041,106 @@ class LinearMixture(APrioriAgent):
         self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
         for i in range(len(self.factors)):
             self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
+
+
+class OOM(APrioriAgent):
+    """
+    Online Optimized Mixture
+    This algorithm takes input allocation strategies and optimize its mixture using adaptive gradient descent
+    """
+    def __repr__(self):
+       return "OOM"
+
+    def __init__(self, factors=[], prior_weights=None, lr=1e-1, damping=0.99, factor_kwargs={}, fiat="USDT", name="OOM"):
+        """
+        :factors: list: Agent instances
+        :param weights: numpy array: weight array
+        :param fiat: str:
+        :param name: str:
+        """
+        super(OOM, self).__init__(fiat=fiat, name=name)
+        self.factors = factors
+        self.lr = lr
+        self.damping = damping
+        self.factor_kwargs = factor_kwargs
+
+        for factor in self.factors:
+            factor.set_params(**self.factor_kwargs)
+
+        if not prior_weights:
+            self.prior_weights = np.ones(len(factors), dtype='f')
+        else:
+            assert isinstance(prior_weights, np.ndarray), "Prior weights must be a numpy array"
+            self.prior_weights = prior_weights
+
+    def predict(self, obs):
+        # Predict future price movement
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
+
+        # Query strategies for portfolio weights
+        factors_out = np.mat([factor.rebalance(obs) for factor in self.factors]).T
+
+        # Return factors portfolio weights and expected returns at the next step
+        return factors_out, np.dot(price_relative, factors_out).T
+
+    def update(self, b, x):
+        # AdaGrad
+        # Calculate gradient
+        grad = np.ravel(np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1)
+
+        # Accumulate square gradient
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
+        # Adjust gradient
+        adjusted_grad = safe_div(grad, self.gti)
+
+        # Take a step in gradient direction
+        self.weights = simplex_proj(self.weights + adjusted_grad * self.lr)
+
+    def rebalance(self, obs):
+        """
+         Performs portfolio rebalance within environment
+         :param obs: pandas DataFrame: Environment observation
+         :return: numpy array: Portfolio vector
+         """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+
+            # Initial weight distribution
+            self.weights = self.prior_weights
+            # AdaGrad square gradient, started with ones for stability
+            self.gti = np.ones_like(self.weights)
+
+            self.init = True
+
+        if self.step:
+            # Update factors step counter
+            for factor in self.factors:
+                factor.step = self.step
+
+            # Predict factor returns
+            factors_out, expected_returns = self.predict(obs)
+
+            # Update factor weights
+            self.update(self.weights, expected_returns)
+
+            # Perform forward pass on weights with factors predictions
+            return np.dot(self.weights, factors_out.T)
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        if 'lr' in kwargs:
+            self.lr = kwargs['lr']
+        if 'damping' in kwargs:
+            self.damping = kwargs['damping']
+
+        for kwarg in kwargs:
+            if kwarg in self.factor_kwargs:
+                self.factor_kwargs[kwarg] = kwargs[kwarg]
 
 
 # Modern Portfolio Theory
