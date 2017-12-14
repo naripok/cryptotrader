@@ -1201,7 +1201,7 @@ class ORAGS(APrioriAgent):
         :param w:
         :return:
         """
-        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0, np.inf), alpha).sum()
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
 
     def loss(self, w, alpha, Z, x):
         # minimize allocation risk
@@ -1212,7 +1212,7 @@ class ORAGS(APrioriAgent):
     def update(self, b, x, alpha, Z):
         # AdaGrad
         # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e8, 1e8) - 1
         # Accumulate square gradient
         self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
         # Adjust gradient
@@ -1274,7 +1274,10 @@ class ORAGS(APrioriAgent):
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
-                self.factor_kwargs[kwarg] = kwargs[kwarg]
+                if 'period' in kwarg:
+                    self.factor_kwargs[kwarg] = int(kwargs[kwarg])
+                else:
+                    self.factor_kwargs[kwarg] = kwargs[kwarg]
 
 
 # Pattern trading
@@ -1723,7 +1726,7 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, eta=0.0, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, rebalance=False, activation=simplex_proj, fiat="USDT", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
@@ -2051,7 +2054,7 @@ class OOM(APrioriAgent):
     def __repr__(self):
        return "OOM"
 
-    def __init__(self, factors=[], prior_weights=None, lr=1e-1, damping=0.99, factor_kwargs={}, fiat="USDT", name="OOM"):
+    def __init__(self, factors=[], factor_kwargs={}, fiat="USDT", name="OOM"):
         """
         :factors: list: Agent instances
         :param weights: numpy array: weight array
@@ -2060,42 +2063,21 @@ class OOM(APrioriAgent):
         """
         super(OOM, self).__init__(fiat=fiat, name=name)
         self.factors = factors
-        self.lr = lr
-        self.damping = damping
-        self.factor_kwargs = factor_kwargs
 
         for factor in self.factors:
-            factor.set_params(**self.factor_kwargs)
+            factor.set_params(**factor_kwargs)
 
-        if not prior_weights:
-            self.prior_weights = np.ones(len(factors), dtype='f')
-        else:
-            assert isinstance(prior_weights, np.ndarray), "Prior weights must be a numpy array"
-            self.prior_weights = prior_weights
+        self.init = False
 
     def predict(self, obs):
-        # Predict future price movement
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
-
         # Query strategies for portfolio weights
         factors_out = np.mat([factor.rebalance(obs) for factor in self.factors]).T
 
         # Return factors portfolio weights and expected returns at the next step
-        return factors_out, np.dot(price_relative, factors_out).T
+        return factors_out
 
-    def update(self, b, x):
-        # AdaGrad
-        # Calculate gradient
-        grad = np.ravel(np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1)
-
-        # Accumulate square gradient
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
-        # Adjust gradient
-        adjusted_grad = safe_div(grad, self.gti)
-
-        # Take a step in gradient direction
-        self.weights = simplex_proj(self.weights + adjusted_grad * self.lr)
+    def update(self, obs):
+        volume = obs.xs('open', level=1, axis=1).apply(lambda x: safe_div(x[-1] / x[-2]), raw=True).values
 
     def rebalance(self, obs):
         """
@@ -2109,11 +2091,7 @@ class OOM(APrioriAgent):
             action[-1] = 0
             self.crp = array_normalize(action)
 
-            # Initial weight distribution
-            self.weights = self.prior_weights
-            # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.weights)
-
+            # Update flag
             self.init = True
 
         if self.step:
@@ -2122,13 +2100,16 @@ class OOM(APrioriAgent):
                 factor.step = self.step
 
             # Predict factor returns
-            factors_out, expected_returns = self.predict(obs)
+            factors_out = self.predict(obs)
 
             # Update factor weights
-            self.update(self.weights, expected_returns)
+            self.update(self.weights)
 
             # Perform forward pass on weights with factors predictions
-            return np.dot(self.weights, factors_out.T)
+            out = np.dot(factors_out, self.weights)
+
+            return np.ravel(out)
+
         else:
             return self.crp
 
@@ -2138,9 +2119,8 @@ class OOM(APrioriAgent):
         if 'damping' in kwargs:
             self.damping = kwargs['damping']
 
-        for kwarg in kwargs:
-            if kwarg in self.factor_kwargs:
-                self.factor_kwargs[kwarg] = kwargs[kwarg]
+        for factor in self.factors:
+            factor.set_params(**kwargs)
 
 
 # Modern Portfolio Theory
