@@ -687,36 +687,63 @@ class PaperTradingDataFeed(ExchangeConnection):
 
 # Live datafeeds
 class PoloniexConnection(DataFeed):
-    def __init__(self, tapi, period, pairs=[]):
+    def __init__(self, period, pairs=[], exchange='', addr='ipc:///tmp/feed.ipc', timeout=20):
         """
         :param tapi: exchange api instance: Exchange api instance
         :param period: int: Data period
         :param pairs: list: Pairs to trade
         """
-        super().__init__(tapi, period, pairs)
+        super().__init__(period, pairs, exchange, addr, timeout)
 
-    # Data feed methods
-    @property
-    def balance(self):
-        return self.tapi.returnBalances()
+    @staticmethod
+    def convert_volume(data):
+        return json.loads(pd.DataFrame.from_records(data).drop('volume',
+            axis=1).rename(columns={'quoteVolume': 'volume'}).to_json(orient='records'))
 
-    # Trade execution methods
-    def sell(self, currencyPair, rate, amount, orderType=False):
-        return self.tapi.sell(currencyPair, rate, amount, orderType=orderType)
-
-    def buy(self, currencyPair, rate, amount, orderType=False):
-        return self.tapi.buy(currencyPair, rate, amount, orderType=orderType)
-
-
-class MultiExchangeConnection(DataFeed):
-    """
-    Exchanges connection helper.
-    This class communicate with all exchanges apis.
-    """
-    def __init__(self, tapis={}, period=None, pairs=[]):
+    @DataFeed.retry
+    def returnChartData(self, currencyPair, period, start=None, end=None):
         """
-        :param tapis: dict: Dictionary containing the exchanges names and api instances
-        :param period: int: Data period
-        :param pairs: list: Pairs to trade
+        Return pair OHLC data
+        :param currencyPair: str: Desired pair str
+        :param period: int: Candle period. Must be in [300, 900, 1800, 7200, 14400, 86400]
+        :param start: str: UNIX timestamp to start from
+        :param end:  str: UNIX timestamp to end returned data
+        :return: list: List containing desired asset data in "records" format
         """
-        super().__init__(tapis, period, pairs)
+        try:
+            call = "returnChartData %s %s %s %s" % (str(currencyPair),
+                                                    str(period),
+                                                    str(start),
+                                                    str(end))
+            rep = self.convert_volume(self.get_response(call))
+
+            if 'Invalid currency pair.' in rep:
+                try:
+                    symbols = currencyPair.split('_')
+                    pair = symbols[1] + '_' + symbols[0]
+
+                    call = "returnChartData %s %s %s %s" % (str(pair),
+                                                            str(period),
+                                                            str(start),
+                                                            str(end))
+
+                    rep =  json.loads(
+                        self.pair_reciprocal(
+                            pd.DataFrame.from_records(
+                                self.convert_volume(
+                                    self.get_response(call)
+                                )
+                            )
+                        ).to_json(orient='records'))
+
+                except Exception as e:
+                    raise e
+
+            assert isinstance(rep, list), "returnChartData reply is not list: %s" % str(rep)
+            assert int(rep[-1]['date']), "Bad returnChartData reply data"
+            assert float(rep[-1]['open']), "Bad returnChartData reply data"
+            assert float(rep[-1]['close']), "Bad returnChartData reply data"
+            return rep
+
+        except AssertionError:
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnChartData")
