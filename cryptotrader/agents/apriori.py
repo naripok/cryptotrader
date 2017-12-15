@@ -92,7 +92,7 @@ class APrioriAgent(Agent):
         """
         Test agent on environment
         """
-        rewards = []
+        self.test_rewards = []
         try:
             for t in range(nb_episodes):
                 # Get env params
@@ -152,9 +152,10 @@ class APrioriAgent(Agent):
                             t0 = time()
 
                         if status['OOD'] or self.step == nb_max_episode_steps:
-                            rewards.append(episode_reward)
+                            self.test_rewards.append(episode_reward)
                             if verbose:
-                                print("\nReward mean: {:.08f}, Reward std: {:.08f}".format(np.mean(rewards), np.std(rewards)))
+                                print("\nReward mean: {:.08f}, Reward std: {:.08f}".format(np.mean(self.test_rewards),
+                                                                                           np.std(self.test_rewards)))
                             break
 
                         if status['Error']:
@@ -168,7 +169,7 @@ class APrioriAgent(Agent):
                               type(e).__name__ + ' in line ' + str(e.__traceback__.tb_lineno) + ': ' + str(e))
                         raise e
 
-            return np.mean(rewards), np.std(rewards)
+            return np.mean(self.test_rewards), np.std(self.test_rewards)
 
         except TypeError:
             print("\nYou must fit the model or provide indicator parameters in order to test.")
@@ -177,7 +178,7 @@ class APrioriAgent(Agent):
             print("\nKeyboard Interrupt: Stoping backtest\nElapsed steps: {0}/{1}, {2} % done.".format(self.step,
                                                                              nb_max_episode_steps,
                                                                              int(100 * self.step / nb_max_episode_steps)))
-            return np.mean(rewards), np.std(rewards)
+            return np.mean(self.test_rewards), np.std(self.test_rewards)
 
     def fit(self, env, nb_steps, batch_size, search_space, constraints=None, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000, start_step=0,
@@ -1136,7 +1137,7 @@ class OGS(APrioriAgent):
 class ORAGS(APrioriAgent):
     """
     Online Risk Averse Gradient Step
-    This algorithm uses Extreme Risk Index and AdaGrad algorithm for online portfolio optimization
+    This algorithm uses Extreme Risk Index and AdaGrad algorithms for online portfolio optimization
     References:
         Extreme Risk Index:
         https://arxiv.org/pdf/1505.04045.pdf
@@ -1164,7 +1165,8 @@ class ORAGS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        return np.append(self.factor(obs, **self.factor_kwargs).iloc[-1].values, [1.0])
+        return np.append(models.tsf(self.factor(obs, **self.factor_kwargs),
+                                    self.factor_kwargs['period']).iloc[-1].values, [1.0])
 
     def polar_returns(self, obs):
         """
@@ -1211,9 +1213,10 @@ class ORAGS(APrioriAgent):
 
     def update(self, b, x, alpha, Z):
         # AdaGrad
-        # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e8, 1e8) - 1
+        # Calculate gradient3
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e8, 1e8) - 1 # remove bias from gradient
         # Accumulate square gradient
+        # As our data is non stationary, we use a forgetting factor here
         self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
         # Adjust gradient
         adjusted_grad = safe_div(grad, self.gti)
@@ -1247,7 +1250,7 @@ class ORAGS(APrioriAgent):
             self.crp = array_normalize(action)
 
             # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp)
+            self.gti = np.ones_like(self.crp) * 1e-1
 
             self.init = True
 

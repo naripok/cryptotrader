@@ -11,11 +11,11 @@ def price_relative(obs, period=1):
 
 def momentum(obs, period=14):
     prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-    volume = obs.xs('volume', level=1, axis=1).astype(np.float64)
+    # mean_volume = obs.xs('volume', level=1, axis=1).astype(np.float64).apply(lambda x: safe_div(x[-period:-1].sum(),
+    #                                                                     x[-int(2 * period):-period].sum()), raw=True)
     mom = prices.apply(ta.MOM, timeperiod=period, raw=True).fillna(0.0)
-    return 1 + safe_div(mom, prices.iloc[-period]) * volume.iloc[-period:].mean()
+    return 1 + safe_div(mom, prices.iloc[-period])# * mean_volume
 
-def tsf(obs, period=14):
-    prices = obs.xs('open', level=1, axis=1).astype(np.float64).apply(ta.ROCR, timeperiod=1, raw=True).fillna(1)
-    tsf = prices.apply(ta.TSF, timeperiod=period, raw=True).fillna(1.0)
+def tsf(ts, period=14):
+    tsf = ts.apply(ta.TSF, timeperiod=period, raw=True).fillna(1.0)
     return tsf
