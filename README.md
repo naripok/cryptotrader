@@ -49,3 +49,11 @@ There is, as well, an example notebook inside notebooks dir.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+
+## Buy us a coffee
+
+If this module or some of our strategies makes you some money, we gladly accept some coffee... or coins... =D
+
+BTC: 1Q9xCNhqs5gWToovR8petSRYMreEvZEQyA
+
+Thank you very much!
