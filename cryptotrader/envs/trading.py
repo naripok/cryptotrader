@@ -1066,7 +1066,7 @@ class TradingEnvironment(Env):
             mode='vline'
             )
 
-        p_val = figure(title="Portifolio / Benchmark Value",
+        p_val = figure(title="Portfolio / Benchmark Value",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='value',
@@ -1104,7 +1104,7 @@ class TradingEnvironment(Env):
         p_pval.legend.click_policy = "hide"
 
         # Portifolio and benchmark returns
-        p_ret = figure(title="Portifolio / Benchmark Returns",
+        p_ret = figure(title="Portfolio / Benchmark Returns",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='Returns',
@@ -1121,7 +1121,7 @@ class TradingEnvironment(Env):
                                        ("port returns", [results['port_ret']])], location=(0, -31)), 'right')
         p_ret.legend.click_policy = "hide"
 
-        p_hist = figure(title="Portifolio Value Pct Change Distribution",
+        p_hist = figure(title="Portfolio Value Pct Change Distribution",
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
                         plot_width=900, plot_height=300,
@@ -1136,7 +1136,7 @@ class TradingEnvironment(Env):
                     fill_color="#036564", line_color="#033649")
 
         # Portifolio rolling alpha
-        p_alpha = figure(title="Portifolio rolling alpha",
+        p_alpha = figure(title="Portfolio rolling alpha",
                          x_axis_type="datetime",
                          x_axis_label='timestep',
                          y_axis_label='alpha',
@@ -1149,7 +1149,7 @@ class TradingEnvironment(Env):
         results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow', line_width=1.2)
 
         # Portifolio rolling beta
-        p_beta = figure(title="Portifolio rolling beta",
+        p_beta = figure(title="Portfolio rolling beta",
                         x_axis_type="datetime",
                         x_axis_label='timestep',
                         y_axis_label='beta',
@@ -1162,7 +1162,7 @@ class TradingEnvironment(Env):
         results['beta'] = p_beta.line(df.index, df.beta, color='yellow', line_width=1.2)
 
         # Rolling Drawdown
-        p_dd = figure(title="Portifolio rolling drawdown",
+        p_dd = figure(title="Portfolio rolling drawdown",
                       x_axis_type="datetime",
                       x_axis_label='timestep',
                       y_axis_label='drawdown',
@@ -1175,7 +1175,7 @@ class TradingEnvironment(Env):
         results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red', line_width=1.2)
 
         # Portifolio Sharpe ratio
-        p_sharpe = figure(title="Portifolio rolling Sharpe ratio",
+        p_sharpe = figure(title="Portfolio rolling Sharpe ratio",
                           x_axis_type="datetime",
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
@@ -1187,13 +1187,13 @@ class TradingEnvironment(Env):
 
         results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow', line_width=1.2)
 
-        print("\n################### > Portifolio Performance Analysis < ###################\n")
-        print("Portifolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
-        print("Portifolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
+        print("\n################### > Portfolio Performance Analysis < ###################\n")
+        print("Portfolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
+        print("Portfolio / Benchmark Sharpe ratio:      %f / %f" % (ec.sharpe_ratio(df.returns),
                                                                      ec.sharpe_ratio(df.benchmark_returns)))
-        print("Portifolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
+        print("Portfolio / Benchmark Omega ratio:       %f / %f" % (ec.omega_ratio(df.returns),
                                                                      ec.omega_ratio(df.benchmark_returns)))
-        print("Portifolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
+        print("Portfolio / Benchmark max drawdown:      %f / %f" % (ec.max_drawdown(df.returns),
                                                                      ec.max_drawdown(df.benchmark_returns)))
 
         results['handle'] = show(column(p_val, p_pval, p_pos, p_ret, p_hist, p_sharpe, p_dd, p_alpha, p_beta),
