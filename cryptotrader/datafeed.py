@@ -695,11 +695,6 @@ class PoloniexConnection(DataFeed):
         """
         super().__init__(period, pairs, exchange, addr, timeout)
 
-    @staticmethod
-    def convert_volume(data):
-        return json.loads(pd.DataFrame.from_records(data).drop('volume',
-            axis=1).rename(columns={'quoteVolume': 'volume'}).to_json(orient='records'))
-
     @DataFeed.retry
     def returnChartData(self, currencyPair, period, start=None, end=None):
         """
@@ -715,7 +710,7 @@ class PoloniexConnection(DataFeed):
                                                     str(period),
                                                     str(start),
                                                     str(end))
-            rep = self.convert_volume(self.get_response(call))
+            rep = self.get_response(call)
 
             if 'Invalid currency pair.' in rep:
                 try:
@@ -730,9 +725,7 @@ class PoloniexConnection(DataFeed):
                     rep =  json.loads(
                         self.pair_reciprocal(
                             pd.DataFrame.from_records(
-                                self.convert_volume(
-                                    self.get_response(call)
-                                )
+                                self.get_response(call)
                             )
                         ).to_json(orient='records'))
 
