@@ -106,6 +106,8 @@ class APrioriAgent(Agent):
                 # Run start steps
                 for i in range(nb_max_start_steps):
                     obs, _, _, status = env.step(start_step_policy.rebalance(obs))
+                    # Increment step counter
+                    self.step += 1
                     if status['OOD']:
                         return 0.0, 0.0
 
