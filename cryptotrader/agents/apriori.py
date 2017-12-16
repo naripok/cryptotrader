@@ -226,13 +226,16 @@ class APrioriAgent(Agent):
             if not constraints:
                 constraints = [lambda *args, **kwargs: True]
 
+            # Initialize buffer
+            optimization_rewards = []
+
             # Then, define optimization routine
             @ot.constraints.constrained(constraints)
             @ot.constraints.violations_defaulted(-100)
             def find_hp(**kwargs):
                 try:
                     # Init variables
-                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps
+                    nonlocal i, nb_steps, t0, env, nb_max_episode_steps, optimization_rewards
 
                     # Sample params
                     self.set_params(**kwargs)
@@ -251,15 +254,19 @@ class APrioriAgent(Agent):
                                     noise_abs=noise_abs,
                                     verbose=False)
 
+                    # Log batch reward
+                    optimization_rewards.append(r)
+
                     # Increment step counter
                     i += 1
 
                     # Update progress
                     if verbose:
-                        print("Optimization step {0}/{1}, batch reward mean: {2:.8f}, batch reward std: {3:.8f}, ETC: {4}                     ".format(i,
+                        print("Optimization step {0}/{1}, r: {2:.8f}, r std: {3:.8f}, mean r: {4:.8f} ETC: {5}                     ".format(i,
                                                                             nb_steps,
                                                                             r,
                                                                             rstd,
+                                                                            np.mean(optimization_rewards),
                                                                             str(pd.to_timedelta((time() - t0) * (nb_steps - i), unit='s'))),
                               end="\r")
                         t0 = time()
@@ -1148,14 +1155,15 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.momentum, window=300, k=0.1, lr=1e-1, damping=0.99, factor_kwargs={},
-                 fiat="USDT", name='ORAGS'):
+    def __init__(self, factor=models.momentum, window=300, k=0.1, lr=1e-1, damping=0.99, eta=0.0,
+                 factor_kwargs={}, fiat="USDT", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
         self.factor = factor
         self.lr = lr
         self.damping = damping
+        self.eta = eta
         self.factor_kwargs = factor_kwargs
 
         self.init = False
@@ -1222,7 +1230,7 @@ class ORAGS(APrioriAgent):
         adjusted_grad = safe_div(grad, self.gti)
 
         # Take a step in gradient direction
-        b += adjusted_grad * self.lr
+        b += (1 - self.eta) * adjusted_grad * self.lr + self.eta * self.crp
 
         # Extreme risk index
         # simplex constraints
@@ -1250,7 +1258,7 @@ class ORAGS(APrioriAgent):
             self.crp = array_normalize(action)
 
             # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp) * 1e-1
+            self.gti = np.ones_like(self.crp) * 5e-1
 
             self.init = True
 
@@ -1274,6 +1282,8 @@ class ORAGS(APrioriAgent):
             self.lr = kwargs['lr']
         if 'damping' in kwargs:
             self.damping = kwargs['damping']
+        if 'eta' in kwargs:
+            self.eta = kwargs['eta']
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
