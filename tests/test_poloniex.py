@@ -1,4 +1,4 @@
-import poloniex
+import cryptotrader.exchange_api.poloniex
 import unittest
 
 

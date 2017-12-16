@@ -17,5 +17,5 @@ def momentum(obs, period=14):
     return 1 + safe_div(mom, prices.iloc[-period])# * mean_volume
 
 def tsf(ts, period=14):
-    tsf = ts.apply(ta.TSF, timeperiod=period, raw=True).fillna(1.0)
+    tsf = ts.apply(ta.TSF, timeperiod=period, raw=True).fillna(0.0)
     return tsf

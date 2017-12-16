@@ -106,6 +106,8 @@ class APrioriAgent(Agent):
                 # Run start steps
                 for i in range(nb_max_start_steps):
                     obs, _, _, status = env.step(start_step_policy.rebalance(obs))
+                    # Increment step counter
+                    self.step += 1
                     if status['OOD']:
                         return 0.0, 0.0
 
@@ -138,17 +140,25 @@ class APrioriAgent(Agent):
                             env.render()
 
                         if verbose:
-                            print(">> run {6}/{7}, step {0}/{1}, {2} % done, Cumulative Reward: {3:.08f}, ETC: {4}, Samples/s: {5:.04f}                        ".format(
+                            progress = ">> run {0}/{1}, step {2}/{3}, {4} % done, Cum r: {5:.08f}, ".format(
+                                t + 1,
+                                nb_episodes,
                                 self.step,
                                 nb_max_episode_steps - env.obs_steps - 2,
                                 int(100 * self.step / (nb_max_episode_steps - env.obs_steps - 2)),
-                                episode_reward,
+                                episode_reward)
+
+                            for item in self.log:
+                                progress += "{}: {}, ".format(item, self.log[item])
+
+                            progress += "ETC: {0}, Samples/s: {1:.04f}                       ".format(
                                 str(pd.to_timedelta((time() - t0) * ((nb_max_episode_steps - env.obs_steps - 2)
-                                                                     - self.step), unit='s')),
-                                1 / (time() - t0),
-                                t + 1,
-                                nb_episodes
-                            ), end="\r", flush=True)
+                                                             - self.step), unit='s')),
+                                1 / (time() - t0)
+                                )
+
+                            print(progress
+                            , end="\r", flush=True)
                             t0 = time()
 
                         if status['OOD'] or self.step == nb_max_episode_steps:
@@ -1155,7 +1165,7 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.momentum, window=300, k=0.1, lr=1e-1, damping=0.99, eta=0.0,
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, eta=0.0,
                  factor_kwargs={}, fiat="USDT", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
@@ -1173,7 +1183,8 @@ class ORAGS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        return np.append(models.tsf(self.factor(obs, **self.factor_kwargs),
+        factor = self.factor(obs, **self.factor_kwargs)
+        return np.append(models.tsf(safe_div(factor, 1 + factor.var()),
                                     self.factor_kwargs['period']).iloc[-1].values, [1.0])
 
     def polar_returns(self, obs):
@@ -1182,16 +1193,20 @@ class ORAGS(APrioriAgent):
         :param obs: pandas DataFrame
         :return: return radius, return angles
         """
+        # Find relation between price and previous price
         prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
         price_relative = np.hstack([np.mat(prices.rolling(2).apply(
             lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
 
+        # Find the radius and the angle decomposition on price relative vectors
         radius = np.linalg.norm(price_relative, ord=1, axis=1)
         angle = np.divide(price_relative, np.mat(radius).T)
 
+        # Select the 'window' greater values on the observation
         index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
         index = index[np.argsort(radius[index])]
 
+        # Return the radius and the angle for extreme found values
         return radius[index][::-1], angle[index][::-1]
 
     def estimate_alpha(self, radius):
@@ -1215,17 +1230,21 @@ class ORAGS(APrioriAgent):
 
     def loss(self, w, alpha, Z, x):
         # minimize allocation risk
-        loss = self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
-
-        return loss
+         return self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
 
     def update(self, b, x, alpha, Z):
         # AdaGrad
-        # Calculate gradient3
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e8, 1e8) - 1 # remove bias from gradient
+        # Calculate gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1# remove bias from gradient
+
+        # Log grad for analytics
+        self.log['g'] = "%.4f" % grad.sum()
         # Accumulate square gradient
         # As our data is non stationary, we use a forgetting factor here
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, self.epsilon, 1e8)
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1e-1, 1e6)
+
+        # Log gti for analytics
+        self.log['gti'] = "%.4f" % self.gti.sum()
         # Adjust gradient
         adjusted_grad = safe_div(grad, self.gti)
 
@@ -1258,7 +1277,7 @@ class ORAGS(APrioriAgent):
             self.crp = array_normalize(action)
 
             # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp) * 5e-1
+            self.gti = np.ones_like(self.crp)
 
             self.init = True
 
