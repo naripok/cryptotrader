@@ -529,7 +529,7 @@ class BacktestDataFeed(ExchangeConnection):
                 with open(self.load_dir + '/currencies.json') as file:
                     return json.load(file)
             except Exception as e:
-                print(str(e.__cause__) + str(e))
+                Logger.error(BacktestDataFeed.returnCurrencies, str(e.__cause__) + str(e))
                 return self.tapi.returnCurrencies()
         else:
             return self.tapi.returnCurrencies()
