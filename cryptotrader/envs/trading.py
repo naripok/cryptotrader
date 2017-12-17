@@ -1076,11 +1076,16 @@ class TradingEnvironment(Env):
                        )
         config_fig(p_val)
 
-        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2)
         results['benchmark'] = p_val.line(df.index, df.benchmark, color='red', line_width=1.2)
+        results['m_bench'] = p_val.line(df.index, df.benchmark.rolling(int(window * 10)).mean(), color='black', line_width=1.2, alpha=0.8)
+        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2)
+        results['m_portval'] = p_val.line(df.index, df.portval.rolling(int(window * 10)).mean(), color='yellow', line_width=1.2, alpha=0.8)
 
         p_val.add_layout(Legend(items=[("portval", [results['portval']]),
-                                       ("benchmark", [results['benchmark']])], location=(0, -31)), 'right')
+                                       ("benchmark", [results['benchmark']]),
+                                       ("mean portval", [results['m_portval']]),
+                                       ("mean bench", [results['m_bench']])
+                                       ], location=(0, -31)), 'right')
         p_val.legend.click_policy = "hide"
 
         # Individual assets portval
@@ -1173,33 +1178,50 @@ class TradingEnvironment(Env):
                          x_axis_type="datetime",
                          x_axis_label='timestep',
                          y_axis_label='alpha',
-                         plot_width=900, plot_height=200,
+                         plot_width=900, plot_height=300,
                          tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                          toolbar_location="above"
                          )
         config_fig(p_alpha)
 
+        mu = df.alpha.mean()
         results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow', line_width=1.2)
+        p_alpha.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        p_alpha.add_layout(Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5))
+        p_alpha.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke', angle=45))
 
         # Portifolio rolling beta
         p_beta = figure(title="Portfolio rolling beta",
                         x_axis_type="datetime",
                         x_axis_label='timestep',
                         y_axis_label='beta',
-                        plot_width=900, plot_height=200,
+                        plot_width=900, plot_height=300,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
         config_fig(p_beta)
 
+        mu = df.beta.mean()
         results['beta'] = p_beta.line(df.index, df.beta, color='yellow', line_width=1.2)
+        p_beta.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        p_beta.add_layout(Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5))
+        p_beta.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke', angle=45))
+
 
         # Rolling Drawdown
         p_dd = figure(title="Portfolio rolling drawdown",
                       x_axis_type="datetime",
                       x_axis_label='timestep',
                       y_axis_label='drawdown',
-                      plot_width=900, plot_height=200,
+                      plot_width=900, plot_height=300,
                       tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                       toolbar_location="above"
                       )
@@ -1212,13 +1234,22 @@ class TradingEnvironment(Env):
                           x_axis_type="datetime",
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
-                          plot_width=900, plot_height=200,
+                          plot_width=900, plot_height=300,
                           tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                           toolbar_location="above"
                           )
         config_fig(p_sharpe)
 
+        mu = df.sharpe.mean()
         results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow', line_width=1.2)
+        p_sharpe.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        p_sharpe.add_layout(Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5))
+        p_sharpe.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke', angle=45))
+
 
         print("\n################### > Portfolio Performance Analysis < ###################\n")
         print("Portfolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
