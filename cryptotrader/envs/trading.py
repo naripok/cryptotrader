@@ -21,7 +21,7 @@ import optunity as ot
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
-from bokeh.models import HoverTool, Legend
+from bokeh.models import HoverTool, Legend, Span, Label
 
 from ..exchange_api.poloniex import ExchangeError
 
@@ -993,7 +993,7 @@ class TradingEnvironment(Env):
 
         return self.results
 
-    def plot_results(self, window=7, benchmark='crp', subset=None):
+    def plot_results(self, window=14, benchmark='crp', subset=None):
         def config_fig(fig):
             fig.background_fill_color = "black"
             fig.background_fill_alpha = 0.1
@@ -1035,7 +1035,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=900, plot_height=400,
+                       plot_width=900, plot_height=400 + len(self.pairs) * 5,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
@@ -1076,11 +1076,16 @@ class TradingEnvironment(Env):
                        )
         config_fig(p_val)
 
-        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2)
         results['benchmark'] = p_val.line(df.index, df.benchmark, color='red', line_width=1.2)
+        results['m_bench'] = p_val.line(df.index, df.benchmark.rolling(int(window * 10)).mean(), color='black', line_width=1.2, alpha=0.8)
+        results['portval'] = p_val.line(df.index, df.portval, color='green', line_width=1.2)
+        results['m_portval'] = p_val.line(df.index, df.portval.rolling(int(window * 10)).mean(), color='yellow', line_width=1.2, alpha=0.8)
 
         p_val.add_layout(Legend(items=[("portval", [results['portval']]),
-                                       ("benchmark", [results['benchmark']])], location=(0, -31)), 'right')
+                                       ("benchmark", [results['benchmark']]),
+                                       ("mean portval", [results['m_portval']]),
+                                       ("mean bench", [results['m_bench']])
+                                       ], location=(0, -31)), 'right')
         p_val.legend.click_policy = "hide"
 
         # Individual assets portval
@@ -1088,7 +1093,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=900, plot_height=400,
+                       plot_width=900, plot_height=400 + len(self.pairs) * 5,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
@@ -1108,23 +1113,36 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='Returns',
-                       plot_width=900, plot_height=200,
+                       plot_width=900, plot_height=400,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom'],
                        toolbar_location="above"
                        )
         config_fig(p_ret)
 
+        roll_mu = df.returns.rolling(int(df.index.shape[0] / 5)).mean()
+        roll_std =  df.returns.rolling(int(df.index.shape[0] / 5)).var()
+
         results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red', line_width=1.2)
-        results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2)
+        results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2, alpha=0.6)
+        results['ret_mean'] = p_ret.line(df.index, roll_mu,
+                                         color='yellow', line_width=1.2, alpha=0.6)
+        results['ret_std_1'] = p_ret.line(df.index, roll_mu + roll_std,
+                                         color='blue', line_width=1.2, alpha=0.6)
+        results['ret_std_2'] = p_ret.line(df.index, roll_mu - roll_std,
+                                         color='blue', line_width=1.2, alpha=0.6)
 
         p_ret.add_layout(Legend(items=[("bench returns", [results['bench_ret']]),
-                                       ("port returns", [results['port_ret']])], location=(0, -31)), 'right')
+                                       ("port returns", [results['port_ret']]),
+                                       ("returns_mean", [results['ret_mean']]),
+                                       ("returns_std", [results['ret_std_1'], results['ret_std_2']])
+                                       ], location=(0, -31),), 'right')
         p_ret.legend.click_policy = "hide"
 
+        # Returns histogram
         p_hist = figure(title="Portfolio Value Pct Change Distribution",
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
-                        plot_width=900, plot_height=300,
+                        plot_width=900, plot_height=400,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
@@ -1135,57 +1153,128 @@ class TradingEnvironment(Env):
         p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
                     fill_color="#036564", line_color="#033649")
 
+        sigma = df.returns.std()
+        mu = df.returns.mean()
+        quantiles = (df.returns.quantile(0.05), df.returns.quantile(0.95))
+
+        results['mhist'] = Span(location=mu, dimension='height', line_color='red',
+                                                                                     line_dash='dashed', line_width=2)
+
+        p_hist.add_layout(results['mhist'])
+        p_hist.add_layout(Label(x=mu, y=max(hist), x_offset=4,
+                                y_offset=-5, text='%.06f' % mu,
+                                text_color='red'))
+        p_hist.add_layout(Label(x=quantiles[0], y=0, text='%.06f' % quantiles[0], text_color='yellow', angle=45,))
+        p_hist.add_layout(Label(x=quantiles[1], y=0, text='%.06f' % quantiles[1], text_color='yellow', angle=45))
+
+        # PDF
+        x = np.linspace(df.returns.min(), df.returns.max(), 1000)
+        pdf = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-(x - mu) ** 2 / (2 * sigma ** 2))
+
+        p_hist.line(x, pdf, line_color="#D95B43", line_width=1.8, alpha=0.7)
+        results['cihist'] = p_hist.line(np.linspace(quantiles[0], quantiles[1], 1000), 0, line_color='yellow',
+                    line_width=3, alpha=0.7, line_dash='dashed')
+        p_hist.add_layout(Legend(items=[
+                                       ("95% credible interval", [results['cihist']])
+                                       ], location=(0, -31),), 'right')
+
+
         # Portifolio rolling alpha
         p_alpha = figure(title="Portfolio rolling alpha",
                          x_axis_type="datetime",
                          x_axis_label='timestep',
                          y_axis_label='alpha',
-                         plot_width=900, plot_height=200,
+                         plot_width=900, plot_height=270,
                          tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                          toolbar_location="above"
                          )
         config_fig(p_alpha)
 
+        mu = df.alpha.mean()
         results['alpha'] = p_alpha.line(df.index, df.alpha, color='yellow', line_width=1.2)
+        p_alpha.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        results['malpha'] = Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5)
+        p_alpha.add_layout(results['malpha'])
+        p_alpha.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke'))
+        p_alpha.add_layout(Legend(items=[("alpha", [results['alpha']])
+                                       ], location=(0, -31),), 'right')
 
         # Portifolio rolling beta
         p_beta = figure(title="Portfolio rolling beta",
                         x_axis_type="datetime",
                         x_axis_label='timestep',
                         y_axis_label='beta',
-                        plot_width=900, plot_height=200,
+                        plot_width=900, plot_height=270,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
         config_fig(p_beta)
 
+        mu = df.beta.mean()
         results['beta'] = p_beta.line(df.index, df.beta, color='yellow', line_width=1.2)
-
-        # Rolling Drawdown
-        p_dd = figure(title="Portfolio rolling drawdown",
-                      x_axis_type="datetime",
-                      x_axis_label='timestep',
-                      y_axis_label='drawdown',
-                      plot_width=900, plot_height=200,
-                      tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
-                      toolbar_location="above"
-                      )
-        config_fig(p_dd)
-
-        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red', line_width=1.2)
+        p_beta.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        results['mbeta'] = Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5)
+        p_beta.add_layout(results['mbeta'])
+        p_beta.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke'))
+        p_beta.add_layout(Legend(items=[("beta", [results['beta']])
+                                       ], location=(0, -31),), 'right')
 
         # Portifolio Sharpe ratio
         p_sharpe = figure(title="Portfolio rolling Sharpe ratio",
                           x_axis_type="datetime",
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
-                          plot_width=900, plot_height=200,
+                          plot_width=900, plot_height=270,
                           tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                           toolbar_location="above"
                           )
         config_fig(p_sharpe)
 
+        mu = df.sharpe.mean()
         results['sharpe'] = p_sharpe.line(df.index, df.sharpe, color='yellow', line_width=1.2)
+        p_sharpe.add_layout(Span(location=0, dimension='width', line_color='black',
+                            line_dash='dashed', line_width=1.5))
+        results['msharpe'] = Span(location=mu, dimension='width', line_color='whitesmoke',
+                            line_dash='dashed', line_width=1.5)
+        p_sharpe.add_layout(results['msharpe'])
+        p_sharpe.add_layout(Label(x=df.index[window], y=mu, x_offset=10,
+                                y_offset=1, text='mu: %.06f' % mu,
+                                text_color='whitesmoke'))
+        p_sharpe.add_layout(Legend(items=[("sharpe", [results['sharpe']])
+                                       ], location=(0, -31),), 'right')
+
+        # Rolling Drawdown
+        p_dd = figure(title="Portfolio rolling drawdown",
+                      x_axis_type="datetime",
+                      x_axis_label='timestep',
+                      y_axis_label='drawdown',
+                      plot_width=900, plot_height=270,
+                      tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                      toolbar_location="above"
+                      )
+        config_fig(p_dd)
+
+        md = df.drawdown.min()
+        results['drawdown'] = p_dd.line(df.index, df.drawdown, color='red', line_width=1.2)
+        results['mdrawdown'] = Span(location=md, dimension='width',
+                                                    line_color='whitesmoke', line_dash='dashed', line_width=2)
+        p_dd.add_layout(results['mdrawdown'])
+        p_dd.add_layout(Label(x=df.index[window], y=md, x_offset=4,
+                                y_offset=5, text='max dd: %.06f' % md,
+                                text_color='whitesmoke'))
+
+        p_dd.add_layout(Legend(items=[("drawdown", [results['drawdown']])
+                                       ], location=(0, -31),), 'right')
+
+
 
         print("\n################### > Portfolio Performance Analysis < ###################\n")
         print("Portfolio excess Sharpe:                 %f" % ec.excess_sharpe(df.returns, df.benchmark_returns))
