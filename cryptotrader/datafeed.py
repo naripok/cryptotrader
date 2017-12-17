@@ -632,6 +632,7 @@ class BacktestDataFeed(ExchangeConnection):
             self.ohlc_data.update({df:self.ohlc_data[df].reindex(index=self.ohlc_data[df].index[::-1])})
             self.ohlc_data[df]['date'] = self.ohlc_data[df].index[::-1]
             self.ohlc_data[df].index = self.ohlc_data[df].index[::-1]
+            self.ohlc_data[df] = self.ohlc_data[df].rename(columns={'close': 'open', 'open': 'close'})
 
 
 class PaperTradingDataFeed(ExchangeConnection):
