@@ -21,7 +21,7 @@ import optunity as ot
 from bokeh.layouts import column
 from bokeh.palettes import inferno
 from bokeh.plotting import figure, show
-from bokeh.models import HoverTool, Legend
+from bokeh.models import HoverTool, Legend, Span, Label
 
 from ..exchange_api.poloniex import ExchangeError
 
@@ -993,7 +993,7 @@ class TradingEnvironment(Env):
 
         return self.results
 
-    def plot_results(self, window=7, benchmark='crp', subset=None):
+    def plot_results(self, window=14, benchmark='crp', subset=None):
         def config_fig(fig):
             fig.background_fill_color = "black"
             fig.background_fill_alpha = 0.1
@@ -1035,7 +1035,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=900, plot_height=400,
+                       plot_width=900, plot_height=400 + len(self.pairs) * 5,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
                        toolbar_location="above"
                        )
@@ -1088,7 +1088,7 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='position',
-                       plot_width=900, plot_height=400,
+                       plot_width=900, plot_height=400 + len(self.pairs) * 5,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
                        )
@@ -1108,23 +1108,36 @@ class TradingEnvironment(Env):
                        x_axis_type="datetime",
                        x_axis_label='timestep',
                        y_axis_label='Returns',
-                       plot_width=900, plot_height=200,
+                       plot_width=900, plot_height=400,
                        tools=['crosshair','reset','xwheel_zoom','pan,box_zoom'],
                        toolbar_location="above"
                        )
         config_fig(p_ret)
 
+        roll_mu = df.returns.rolling(int(df.index.shape[0] / 5)).mean()
+        roll_std =  df.returns.rolling(int(df.index.shape[0] / 5)).var()
+
         results['bench_ret'] = p_ret.line(df.index, df.benchmark_returns, color='red', line_width=1.2)
-        results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2)
+        results['port_ret'] = p_ret.line(df.index, df.returns, color='green', line_width=1.2, alpha=0.6)
+        results['ret_mean'] = p_ret.line(df.index, roll_mu,
+                                         color='yellow', line_width=1.2, alpha=0.6)
+        results['ret_std_1'] = p_ret.line(df.index, roll_mu + roll_std,
+                                         color='blue', line_width=1.2, alpha=0.6)
+        results['ret_std_2'] = p_ret.line(df.index, roll_mu - roll_std,
+                                         color='blue', line_width=1.2, alpha=0.6)
 
         p_ret.add_layout(Legend(items=[("bench returns", [results['bench_ret']]),
-                                       ("port returns", [results['port_ret']])], location=(0, -31)), 'right')
+                                       ("port returns", [results['port_ret']]),
+                                       ("returns_mean", [results['ret_mean']]),
+                                       ("returns_std", [results['ret_std_1'], results['ret_std_2']])
+                                       ], location=(0, -31),), 'right')
         p_ret.legend.click_policy = "hide"
 
+        # Returns histogram
         p_hist = figure(title="Portfolio Value Pct Change Distribution",
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
-                        plot_width=900, plot_height=300,
+                        plot_width=900, plot_height=400,
                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
                         toolbar_location="above"
                         )
@@ -1134,6 +1147,26 @@ class TradingEnvironment(Env):
 
         p_hist.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:],
                     fill_color="#036564", line_color="#033649")
+
+        sigma = df.returns.std()
+        mu = df.returns.mean()
+        quantiles = (df.returns.quantile(0.05), df.returns.quantile(0.95))
+
+        p_hist.add_layout(Span(location=mu, dimension='height', line_color='red',
+                            line_dash='dashed', line_width=2))
+        p_hist.add_layout(Label(x=mu, y=max(hist), x_offset=4,
+                                y_offset=-5, text='%.06f' % mu,
+                                text_color='red'))
+        p_hist.add_layout(Label(x=quantiles[0], y=0, text='%.06f' % quantiles[0], text_color='yellow', angle=45,))
+        p_hist.add_layout(Label(x=quantiles[1], y=0, text='%.06f' % quantiles[1], text_color='yellow', angle=45))
+
+        # PDF
+        x = np.linspace(df.returns.min(), df.returns.max(), 1000)
+        pdf = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-(x - mu) ** 2 / (2 * sigma ** 2))
+
+        p_hist.line(x, pdf, line_color="#D95B43", line_width=1.8, alpha=0.7)
+        p_hist.line(np.linspace(quantiles[0], quantiles[1], 1000), 0, line_color='yellow',
+                    line_width=3, alpha=0.7, line_dash='dashed')
 
         # Portifolio rolling alpha
         p_alpha = figure(title="Portfolio rolling alpha",
