@@ -627,6 +627,12 @@ class BacktestDataFeed(ExchangeConnection):
             elif "Invalid pair" == e:
                 raise ExchangeError("Invalid currency pair.")
 
+    def reverse_data(self):
+        for df in self.ohlc_data:
+            self.ohlc_data.update({df:self.ohlc_data[df].reindex(index=self.ohlc_data[df].index[::-1])})
+            self.ohlc_data[df]['date'] = self.ohlc_data[df].index[::-1]
+            self.ohlc_data[df].index = self.ohlc_data[df].index[::-1]
+
 
 class PaperTradingDataFeed(ExchangeConnection):
     """
