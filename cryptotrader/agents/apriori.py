@@ -552,6 +552,7 @@ class Momentum(APrioriAgent):
         self.std_span = int(kwargs['std_span'])
 
 
+# No regret
 class ONS(APrioriAgent):
     """
     Online Newton Step algorithm.
@@ -732,7 +733,7 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, eta=0.0,
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
                  factor_kwargs={}, fiat="USDT", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
@@ -740,7 +741,7 @@ class ORAGS(APrioriAgent):
         self.factor = factor
         self.lr = lr
         self.damping = damping
-        self.eta = eta
+        self.mpc = mpc
         self.factor_kwargs = factor_kwargs
 
         self.init = False
@@ -751,8 +752,11 @@ class ORAGS(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         """
         factor = self.factor(obs, **self.factor_kwargs)
-        return np.append(models.tsf(safe_div(factor, 1 + factor.var()),
-                                    self.factor_kwargs['period']).iloc[-1].values, [1.0])
+        periods = [int(p * np.sqrt(2)) for p in range(3, self.factor_kwargs['period'])]
+        regression = np.mean(np.vstack([models.tsf(factor,
+                                         p).iloc[-1].values for p in periods]), axis=0)
+
+        return np.append(regression, [1.0])
 
     def polar_returns(self, obs):
         """
@@ -797,18 +801,19 @@ class ORAGS(APrioriAgent):
 
     def loss(self, w, alpha, Z, x):
         # minimize allocation risk
-         return self.estimate_gamma(alpha, Z, w) + w[-1] * (x.var() * x.mean()) ** 2
+        gamma = self.estimate_gamma(alpha, Z, w)
+        return gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
         # AdaGrad
         # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1# remove bias from gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1 # remove bias from gradient
 
         # Log grad for analytics
         self.log['g'] = "%.4f" % grad.sum()
         # Accumulate square gradient
         # As our data is non stationary, we use a forgetting factor here
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1e-1, 1e6)
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1, 1e6)
 
         # Log gti for analytics
         self.log['gti'] = "%.4f" % self.gti.sum()
@@ -816,7 +821,7 @@ class ORAGS(APrioriAgent):
         adjusted_grad = safe_div(grad, self.gti)
 
         # Take a step in gradient direction
-        b += (1 - self.eta) * adjusted_grad * self.lr + self.eta * self.crp
+        b -= b * adjusted_grad * self.lr
 
         # Extreme risk index
         # simplex constraints
@@ -826,7 +831,7 @@ class ORAGS(APrioriAgent):
         ]
 
         # Maximum position concentration constraint
-        # cons.append({'type': 'ineq', 'fun': lambda w: .5 - np.linalg.norm(w[:-1], ord=2)})
+        cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2)})
 
         # Minimize loss starting from adjusted portfolio
         w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
@@ -871,8 +876,6 @@ class ORAGS(APrioriAgent):
             self.lr = kwargs['lr']
         if 'damping' in kwargs:
             self.damping = kwargs['damping']
-        if 'eta' in kwargs:
-            self.eta = kwargs['eta']
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
