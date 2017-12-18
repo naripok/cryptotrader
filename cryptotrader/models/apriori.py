@@ -19,3 +19,14 @@ def momentum(obs, period=14):
 def tsf(ts, period=14):
     tsf = ts.apply(ta.TSF, timeperiod=period, raw=True).fillna(0.0)
     return tsf
+
+class OLS(object):
+    def __init__(self):
+        pass
+
+    def fit(self, X, Y):
+        self.ls_coef_ = np.cov(X, Y)[0, 1] / np.var(X)
+        self.ls_intercept = Y.mean() - self.ls_coef_ * X.mean()
+
+    def predict(self, X):
+        return self.ls_coef_ * X + self.ls_intercept

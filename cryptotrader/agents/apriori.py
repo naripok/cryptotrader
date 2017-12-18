@@ -832,7 +832,7 @@ class ORAGS(APrioriAgent):
         ]
 
         # Maximum position concentration constraint
-        cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2)})
+        cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2) ** 2})
 
         # Minimize loss starting from adjusted portfolio
         w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
@@ -877,6 +877,8 @@ class ORAGS(APrioriAgent):
             self.lr = kwargs['lr']
         if 'damping' in kwargs:
             self.damping = kwargs['damping']
+        if 'mpc' in kwargs:
+            self.mpc = kwargs['mpc']
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
@@ -1605,130 +1607,6 @@ class Anticor(APrioriAgent):
         self.window = int(kwargs['window'])
 
 
-class LinearMixture(APrioriAgent):
-    """
-    Factors Weighted Superposition
-    """
-    def __repr__(self):
-       return "LinearMixture"
-
-    def __init__(self, factors, weights=None, rebalance=True, fiat="USDT", name="LinearMixture"):
-        """
-        :factors: list: Agent instances
-        :param weights: numpy array: weight array
-        :param fiat: str:
-        :param name: str:
-        """
-        super(LinearMixture, self).__init__(fiat=fiat, name=name)
-        self.factors = factors
-        if not weights:
-            self.weights = np.ones(len(factors), dtype='f')
-        else:
-            assert isinstance(weights, np.ndarray)
-            self.weights = weights
-        if rebalance:
-            self.reb = -2
-        else:
-            self.reb = -1
-
-    def predict(self, obs):
-        for factor in self.factors:
-            factor.step = self.step
-        return np.array([self.weights[i] * factor.rebalance(obs) for i, factor in enumerate(self.factors)]).mean(axis=0) -\
-               self.get_portfolio_vector(obs, index=self.reb)
-
-    def rebalance(self, obs):
-        for factor in self.factors:
-            factor.step = self.step
-
-        sup = np.array([self.weights[i] * factor.rebalance(obs)
-                                      for i, factor in enumerate(self.factors)], dtype='f').astype('f')
-
-        return simplex_proj(sup.mean(axis=0))
-
-    def set_params(self, **kwargs):
-        self.weights = np.array([kwargs[key] for key in kwargs if 'w_' in key], dtype='f')
-        for i in range(len(self.factors)):
-            self.factors[i].set_params(**{key.split('_')[0]: kwargs[key] for key in kwargs if str(i) in key})
-
-
-class OOM(APrioriAgent):
-    """
-    Online Optimized Mixture
-    This algorithm takes input allocation strategies and optimize its mixture using adaptive gradient descent
-    """
-    def __repr__(self):
-       return "OOM"
-
-    def __init__(self, factors=[], factor_kwargs={}, fiat="USDT", name="OOM"):
-        """
-        :factors: list: Agent instances
-        :param weights: numpy array: weight array
-        :param fiat: str:
-        :param name: str:
-        """
-        super(OOM, self).__init__(fiat=fiat, name=name)
-        self.factors = factors
-
-        for factor in self.factors:
-            factor.set_params(**factor_kwargs)
-
-        self.init = False
-
-    def predict(self, obs):
-        # Query strategies for portfolio weights
-        factors_out = np.mat([factor.rebalance(obs) for factor in self.factors]).T
-
-        # Return factors portfolio weights and expected returns at the next step
-        return factors_out
-
-    def update(self, obs):
-        volume = obs.xs('open', level=1, axis=1).apply(lambda x: safe_div(x[-1] / x[-2]), raw=True).values
-
-    def rebalance(self, obs):
-        """
-         Performs portfolio rebalance within environment
-         :param obs: pandas DataFrame: Environment observation
-         :return: numpy array: Portfolio vector
-         """
-        if not self.init:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            self.crp = array_normalize(action)
-
-            # Update flag
-            self.init = True
-
-        if self.step:
-            # Update factors step counter
-            for factor in self.factors:
-                factor.step = self.step
-
-            # Predict factor returns
-            factors_out = self.predict(obs)
-
-            # Update factor weights
-            self.update(self.weights)
-
-            # Perform forward pass on weights with factors predictions
-            out = np.dot(factors_out, self.weights)
-
-            return np.ravel(out)
-
-        else:
-            return self.crp
-
-    def set_params(self, **kwargs):
-        if 'lr' in kwargs:
-            self.lr = kwargs['lr']
-        if 'damping' in kwargs:
-            self.damping = kwargs['damping']
-
-        for factor in self.factors:
-            factor.set_params(**kwargs)
-
-
 # Modern Portfolio Theory
 class MeanVariance(APrioriAgent):
 
@@ -1955,3 +1833,141 @@ class Markowitz(MeanVariance):
         # Put weights into a labeled series
         weights = np.append(np.squeeze(sol['x']), [0.0])
         return weights
+
+
+# Risk optimization
+class ERI(APrioriAgent):
+    """
+    This algorithm uses Extreme Risk Index to optimize a constant rebalance portfolio
+    References:
+        Extreme Risk Index:
+        https://arxiv.org/pdf/1505.04045.pdf
+    """
+    def __repr__(self):
+        return "Extreme Risk Index"
+
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, mpc=1, factor_kwargs={},
+                 fiat="BTC", name='ERI'):
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.k = k
+        self.mpc = mpc
+        self.factor = factor
+        self.factor_kwargs = factor_kwargs
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        factor = self.factor(obs, **self.factor_kwargs)
+        regression = models.tsf(factor, self.factor_kwargs['period']).iloc[-1].values
+        return np.append(regression, [1.0])
+
+    def polar_returns(self, obs):
+        """
+        Calculate polar return
+        :param obs: pandas DataFrame
+        :return: return radius, return angles
+        """
+        # Find relation between price and previous price
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
+        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+
+        # Find the radius and the angle decomposition on price relative vectors
+        radius = np.linalg.norm(price_relative, ord=1, axis=1)
+        angle = np.divide(price_relative, np.mat(radius).T)
+
+        # Select the 'window' greater values on the observation
+        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
+        index = index[np.argsort(radius[index])]
+
+        # Return the radius and the angle for extreme found values
+        return radius[index][::-1], angle[index][::-1]
+
+    def estimate_alpha(self, radius):
+        """
+        Estimate pareto's distribution alpha
+        :param radius: polar return radius
+        :return: alpha
+        """
+        return safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+
+    def estimate_gamma(self, alpha, Z, w):
+        """
+        Estimate risk index gamma
+        :param self:
+        :param alpha:
+        :param Z:
+        :param w:
+        :return:
+        """
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
+
+    def loss(self, w, alpha, Z, x):
+        # minimize allocation risk
+        gamma = self.estimate_gamma(alpha, Z, w)
+        # if the experts mean returns are low and you have no options, you can choose fiat
+        return gamma + w[-1] * (x.mean() * x.var()) ** 2 + self.mpc * np.linalg.norm(w - self.crp, ord=2) ** 2
+
+    def update(self, b, x, alpha, Z):
+        # Extreme risk index
+        # simplex constraints
+        cons = [
+            {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
+        ]
+
+        # Maximum position concentration constraint
+        # cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2) ** 2})
+
+        # Minimize loss starting from adjusted portfolio
+        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+
+        # Return best portfolio
+        return np.clip(w_star, 0, 1) # Truncate small errors
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+
+            # AdaGrad square gradient, started with ones for stability
+            self.gti = np.ones_like(self.crp)
+
+            self.init = True
+
+        if self.step:
+            b = self.get_portfolio_vector(obs)
+            x = self.predict(obs)
+            R, Z = self.polar_returns(obs)
+            alpha = self.estimate_alpha(R)
+
+            return self.update(b, x, alpha, Z)
+
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        if 'window' in kwargs:
+            self.window = int(kwargs['window'])
+        if 'k' in kwargs:
+            self.k = kwargs['k']
+        if 'mpc' in kwargs:
+            self.mpc = kwargs['mpc']
+
+        for kwarg in kwargs:
+            if kwarg in self.factor_kwargs:
+                if 'period' in kwarg:
+                    self.factor_kwargs[kwarg] = int(kwargs[kwarg])
+                else:
+                    self.factor_kwargs[kwarg] = kwargs[kwarg]
