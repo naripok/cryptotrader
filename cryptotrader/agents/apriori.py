@@ -802,6 +802,7 @@ class ORAGS(APrioriAgent):
     def loss(self, w, alpha, Z, x):
         # minimize allocation risk
         gamma = self.estimate_gamma(alpha, Z, w)
+        # if the experts mean returns are low and you have no options, you can choose fiat
         return gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
@@ -820,13 +821,13 @@ class ORAGS(APrioriAgent):
         # Adjust gradient
         adjusted_grad = safe_div(grad, self.gti)
 
-        # Take a step in gradient direction
-        b -= b * adjusted_grad * self.lr
+        # Take a step in gradient direction with multiplicative weights
+        b += b * self.lr * adjusted_grad
 
         # Extreme risk index
         # simplex constraints
         cons = [
-            {'type': 'eq', 'fun': lambda w: np.array([w.sum() - 1])}, # Simplex region
+            {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
