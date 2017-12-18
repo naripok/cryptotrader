@@ -1092,7 +1092,7 @@ class TradingEnvironment(Env):
         p_pval = figure(title="Pair Performance",
                        x_axis_type="datetime",
                        x_axis_label='timestep',
-                       y_axis_label='position',
+                       y_axis_label='performance',
                        plot_width=900, plot_height=400 + len(self.pairs) * 5,
                        tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
                        toolbar_location="above"
