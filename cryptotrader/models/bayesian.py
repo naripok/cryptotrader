@@ -26,8 +26,10 @@ class RobustBayesAction(object):
             mean = pm.Deterministic("mean", alpha + beta * X)
             # Posterior distribution
             obs = pm.Normal("obs", mu=mean, sd=std, observed=Y)
-            # Run MCMC
+            ## Run MCMC
+            # Find search start value with maximum a posterior estimation
             start = pm.find_MAP()
+            # sample posterior distribution for latent variables
             trace = pm.sample(n_samples, njobs=n_jobs, tune=tune_steps, start=start)
             # Recover posterior samples
             self.burned_trace = trace[int(n_samples / 2):]
@@ -49,13 +51,15 @@ class RobustBayesAction(object):
         return sol
 
     def predict(self, X, risk_coef=300):
+        # Sample posterior distribution of possibles outcomes
         std_samples = self.burned_trace["std"]
         alpha_samples = self.burned_trace["alpha"]
         beta_samples = self.burned_trace["beta"]
 
         N = std_samples.shape[0]
         noise = std_samples * np.random.randn(N)
-        possible_outcomes = lambda signal: alpha_samples + beta_samples * signal + noise
-        _possible_outcomes = possible_outcomes(X)
-        tomin = lambda pred: self.loss(_possible_outcomes, pred, coef=risk_coef).mean()
-        return fmin(tomin, 0, disp=False)
+        possible_outcomes = alpha_samples + beta_samples * X + noise
+
+        # Minimize loss function
+        tomin = lambda pred: self.loss(possible_outcomes, pred, coef=risk_coef).mean()
+        return fmin(tomin, 0, disp=False, xtol=1e-7, ftol=1e-7)

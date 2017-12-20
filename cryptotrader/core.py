@@ -44,6 +44,32 @@ class Agent(object):
     def rebalance(self, obs):
         return NotImplementedError()
 
+    def get_portfolio_vector(self, obs, index=-1):
+        """
+        Calculate portfolio vector from observation
+        :param obs: pandas DataFrame: Observation
+        :param index: int: Index to vector retrieve. -1 = last
+        :return: numpy array: Portfolio vector with values ranging [0, 1] and norm 1
+        """
+        coin_val = {}
+        for symbol in obs.columns.levels[0]:
+            if symbol not in self.fiat:
+                coin_val[symbol.split("_")[1]] = obs.at[obs.index[index], (symbol, symbol.split("_")[1])] * \
+                                                 obs.at[obs.index[index], (symbol, 'open')]
+
+        portval = 0
+        for symbol in coin_val:
+            portval += coin_val[symbol]
+        portval += obs[self.fiat].iloc[index].values
+
+        port_vec = np.zeros(obs.columns.levels[0].shape)
+        for i, symbol in enumerate(coin_val):
+            port_vec[i] = safe_div(coin_val[symbol], portval)
+
+        port_vec[-1] = safe_div(obs[self.fiat].iloc[index].values, portval)
+
+        return port_vec
+
     def fit(self, env, nb_steps, batch_size, search_space, constrains, action_repetition=1, callbacks=None, verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None):
@@ -206,6 +232,9 @@ class Agent(object):
                 msg = self.make_report(env, obs, reward, episode_reward, t0, init_time, env.calc_portfolio_vector(),
                                        prev_portval, init_portval)
                 print(msg, end="\r", flush=True)
+                if email and may_report:
+                    if hasattr(env, 'email'):
+                        env.send_email("Trading report " + self.name, msg)
 
             while True:
                 try:

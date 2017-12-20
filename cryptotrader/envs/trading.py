@@ -80,6 +80,7 @@ class TradingEnvironment(Env):
         self.add_pairs(self.tapi.pairs)
         self.fiat = fiat
 
+        self.set_action_space()
         self.reset_benchmark()
         self.setup()
 
@@ -593,15 +594,18 @@ class TradingEnvironment(Env):
         :return:
         """
         if index is None:
-            start = self.portfolio_df.index[0]
-            end = self.portfolio_df.index[-1]
+            start = self.action_df.index[0]
+            end = self.action_df.index[-1]
 
         else:
             start = index[0]
             end = index[-1]
 
         # TODO 1 FIND A BETTER WAY
-        return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
+        if start != end:
+            return self.action_df.loc[start:end].resample("%dmin" % self.period).last()
+        else:
+            return self.action_df.loc[:end].resample("%dmin" % self.period).last()
 
     ## Trading methods
     def get_open_price(self, symbol, timestamp=None):
@@ -661,6 +665,7 @@ class TradingEnvironment(Env):
         # TODO WRITE TEST
         try:
             action = convert_to.decimal(action)
+            assert self.action_space.contains(action)
             # normalize
             if action.sum() != dec_one:
                 action = safe_div(action, action.sum())
@@ -882,7 +887,7 @@ class TradingEnvironment(Env):
         :return:
         """
         # Action space
-        self.action_space = Box(0., 1., len(self.symbols))
+        self.action_space = Box(dec_zero, dec_one, (len(self.symbols),))
         # Logger.info(TrainingEnvironment.set_action_space, "Setting environment with %d symbols." % (len(self.symbols)))
 
     def reset_status(self):
@@ -953,7 +958,7 @@ class TradingEnvironment(Env):
             for i, symbol in enumerate(self.pairs):
                 self.results[symbol+'_benchmark'] = (dec_one - self.tax[symbol.split('_')[1]]) * \
                                             obs[symbol, 'open'] * init_portval / (obs.at[init_time,
-                                            (symbol, 'open')] * Decimal(self.action_space.low.shape[0] - 1))
+                                            (symbol, 'open')] * Decimal(self.action_space.shape[0] - 1))
                 if benchmark == 'bah':
                     self.results['benchmark'] = self.results['benchmark'] + self.results[symbol + '_benchmark']
 
