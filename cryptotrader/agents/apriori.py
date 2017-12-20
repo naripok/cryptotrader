@@ -57,32 +57,6 @@ class APrioriAgent(Agent):
     def rebalance(self, obs):
         return NotImplementedError()
 
-    def get_portfolio_vector(self, obs, index=-1):
-        """
-        Calculate portfolio vector from observation
-        :param obs: pandas DataFrame: Observation
-        :param index: int: Index to vector retrieve. -1 = last
-        :return: numpy array: Portfolio vector with values ranging [0, 1] and norm 1
-        """
-        coin_val = {}
-        for symbol in obs.columns.levels[0]:
-            if symbol not in self.fiat:
-                coin_val[symbol.split("_")[1]] = obs.at[obs.index[index], (symbol, symbol.split("_")[1])] * \
-                                                 obs.at[obs.index[index], (symbol, 'open')]
-
-        portval = 0
-        for symbol in coin_val:
-            portval += coin_val[symbol]
-        portval += obs[self.fiat].iloc[index].values
-
-        port_vec = np.zeros(obs.columns.levels[0].shape)
-        for i, symbol in enumerate(coin_val):
-            port_vec[i] = safe_div(coin_val[symbol], portval)
-
-        port_vec[-1] = safe_div(obs[self.fiat].iloc[index].values, portval)
-
-        return port_vec
-
     # Train methods
     def set_params(self, **kwargs):
         raise NotImplementedError("You must overwrite this class in your implementation.")
@@ -234,7 +208,7 @@ class TestAgent(APrioriAgent):
     def __repr__(self):
         return "Test"
 
-    def __init__(self, obs_shape, fiat="USDT"):
+    def __init__(self, obs_shape, fiat="BTC"):
         super().__init__(fiat)
         self.obs_shape = obs_shape
 
@@ -328,7 +302,7 @@ class TestLookAhead(APrioriAgent):
     def __repr__(self):
         return "TestLookAhead"
 
-    def __init__(self, mr=False, fiat="USDT"):
+    def __init__(self, mr=False, fiat="BTC"):
         super().__init__(fiat=fiat)
         self.mr = mr
 
@@ -355,7 +329,7 @@ class RandomWalk(APrioriAgent):
     def __repr__(self):
         return "RandomWalk"
 
-    def __init__(self, random_process=None, activation='softmax', fiat="USDT"):
+    def __init__(self, random_process=None, activation='softmax', fiat="BTC"):
         """
         Initialization method
         :param env: Apocalipse driver instance
@@ -397,7 +371,7 @@ class BuyAndHold(APrioriAgent):
     def __repr__(self):
         return "BuyAndHold"
 
-    def __init__(self, fiat="USDT"):
+    def __init__(self, fiat="BTC"):
         super().__init__(fiat)
 
     def predict(self, obs):
@@ -422,7 +396,7 @@ class ConstantRebalance(APrioriAgent):
     def __repr__(self):
         return "ContantRebalance"
 
-    def __init__(self, position=None, fiat="USDT"):
+    def __init__(self, position=None, fiat="BTC"):
         super().__init__(fiat)
         if position:
             self.position = array_normalize(position)
@@ -455,7 +429,7 @@ class Momentum(APrioriAgent):
         return "Momentum"
 
     def __init__(self, ma_span=[2, 3], weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
-                 activation=simplex_proj, fiat="USDT"):
+                 activation=simplex_proj, fiat="BTC"):
         """
         :param mean_type: str: Mean type to use. It can be simple, exp or kama.
         """
@@ -566,7 +540,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.125, beta=1, eta=0., clip_grads=1e6, mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, delta=0.125, beta=1, eta=0., clip_grads=1e6, mr=False, fiat="BTC", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -652,7 +626,7 @@ class OGS(APrioriAgent):
     def __repr__(self):
         return "OGS"
 
-    def __init__(self, factor=models.price_relative, lr=1, eta=0., clip_grads=1e6, damping=0.99, mr=False, fiat="USDT", name="ONS"):
+    def __init__(self, factor=models.price_relative, lr=1, eta=0., clip_grads=1e6, damping=0.99, mr=False, fiat="BTC", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -719,6 +693,63 @@ class OGS(APrioriAgent):
             self.damping = kwargs['damping']
 
 
+class MW(APrioriAgent):
+    """
+    Multiplicative-Weights algorithm
+    """
+
+    def __repr__(self):
+        return "Multiplicative Weights"
+
+    def __init__(self, factor=models.price_relative, lr=1, fiat="BTC", name="MW"):
+        """
+        :param delta, beta, eta: Model parameters. See paper.
+        """
+        super().__init__(fiat=fiat, name=name)
+
+        self.lr = lr
+        self.factor = factor
+
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        return np.append(self.factor(obs).iloc[-1].values, [1.0])
+
+
+    def rebalance(self, obs):
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+
+            # AdaGrad square gradient
+            self.gti = np.ones_like(self.crp)
+
+            self.init = True
+
+        if self.step:
+            prev_posit = self.get_portfolio_vector(obs, index=-1)
+            price_relative = self.predict(obs)
+            return self.update(prev_posit, price_relative)
+        else:
+            return self.crp
+
+    def update(self, b, x):
+        # update b, we are using relative log return benchmark, so we want to maximize here
+        b += self.lr * b * x
+
+        return simplex_proj(b)
+
+    def set_params(self, **kwargs):
+        if 'lr'in kwargs:
+            self.lr = kwargs['lr']
+
+
 class ORAGS(APrioriAgent):
     """
     Online Risk Averse Gradient Step
@@ -734,7 +765,7 @@ class ORAGS(APrioriAgent):
         return "Online Risk Averse Gradient Step"
 
     def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
-                 factor_kwargs={}, fiat="USDT", name='ORAGS'):
+                 factor_kwargs={}, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
@@ -897,7 +928,7 @@ class HarmonicTrader(APrioriAgent):
     def __repr__(self):
         return "HarmonicTrader"
 
-    def __init__(self, peak_order=7, err_allowed=0.05, decay=0.99, activation=simplex_proj, fiat="USDT", name="Harmonic"):
+    def __init__(self, peak_order=7, err_allowed=0.05, decay=0.99, activation=simplex_proj, fiat="BTC", name="Harmonic"):
         """
         Fibonacci trader init method
         :param peak_order: Extreme finder movement magnitude threshold
@@ -1021,7 +1052,7 @@ class PAMR(APrioriAgent):
     def __repr__(self):
         return "PAMR"
 
-    def __init__(self, eps=0.03, C=2444, variant="PAMR1", fiat="USDT", name="PAMR"):
+    def __init__(self, eps=0.03, C=2444, variant="PAMR1", fiat="BTC", name="PAMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         :param C: float: Aggressiveness parameter. For PAMR1 and PAMR2 variants.
@@ -1113,7 +1144,7 @@ class OLMAR(APrioriAgent):
     def __repr__(self):
         return "OLMAR"
 
-    def __init__(self, window=7, eps=0.02, fiat="USDT", name="OLMAR"):
+    def __init__(self, window=7, eps=0.02, fiat="BTC", name="OLMAR"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1184,7 +1215,7 @@ class CWMR(APrioriAgent):
     def __repr__(self):
         return "CWMR"
 
-    def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="USDT", name="CWMR"):
+    def __init__(self, eps=-0.5, confidence=0.95, var=0, rebalance=True, fiat="BTC", name="CWMR"):
         """
         :param eps: Mean reversion threshold (expected return on current day must be lower
                     than this threshold). Recommended value is -0.5.
@@ -1334,7 +1365,7 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, eta=0.0, rebalance=False, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, rebalance=False, activation=simplex_proj, fiat="BTC", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
@@ -1416,7 +1447,7 @@ class KAMAMR(STMR):
     def __repr__(self):
         return "KAMAMR"
 
-    def __init__(self, eps=0.02, window=3, rebalance=True, activation=simplex_proj, fiat="USDT", name="STMR"):
+    def __init__(self, eps=0.02, window=3, rebalance=True, activation=simplex_proj, fiat="BTC", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
@@ -1457,7 +1488,7 @@ class TCO(APrioriAgent):
     def __repr__(self):
         return "TCO"
 
-    def __init__(self, factor=models.price_relative, toff=0.1, optimize_factor=True, rebalance=True, fiat="USDT", name="TCO"):
+    def __init__(self, factor=models.price_relative, toff=0.1, optimize_factor=True, rebalance=True, fiat="BTC", name="TCO"):
         """
         :param window: integer: Lookback window size.
         :param eps: float: Threshold value for updating portfolio.
@@ -1534,7 +1565,7 @@ class Anticor(APrioriAgent):
     def __repr__(self):
         return "Anticor"
 
-    def __init__(self, window=30, fiat="USDT"):
+    def __init__(self, window=30, fiat="BTC"):
         """
         :param window: Window parameter.
         """
@@ -1613,7 +1644,7 @@ class MeanVariance(APrioriAgent):
     def __repr__(self):
         return "Modern Portfolio Theory"
 
-    def __init__(self, factor=models.price_relative, fiat="USDT", name='TangentPortfolio'):
+    def __init__(self, factor=models.price_relative, fiat="BTC", name='TangentPortfolio'):
         """
         :param window: Window parameter.
         """
@@ -1734,7 +1765,7 @@ class Markowitz(MeanVariance):
     def __repr__(self):
         return "Markowitz Portfolio"
 
-    def __init__(self, factor=models.price_relative, target_return=0.0025, fiat="USDT", name='Markowitz'):
+    def __init__(self, factor=models.price_relative, target_return=0.0025, fiat="BTC", name='Markowitz'):
         """
         :param window: Window parameter.
         """

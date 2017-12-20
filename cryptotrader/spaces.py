@@ -1,5 +1,5 @@
 import numpy as np
-
+from decimal import Decimal
 from .core import Space
 from .random_process import np_random
 
@@ -18,16 +18,20 @@ class Box(Space):
             Box(-1.0, 1.0, (3,4)) # low and high are scalars, and shape is provided
             Box(np.array([-1.0,-2.0]), np.array([2.0,4.0])) # low and high are arrays of the same shape
         """
-        if shape is None:
-            assert low.shape == high.shape
-            self.low = low
-            self.high = high
-        else:
-            assert np.isscalar(low) and np.isscalar(high)
-            self.low = low + np.zeros(shape)
-            self.high = high + np.zeros(shape)
+        # if shape is None:
+        #     assert low.shape == high.shape
+        #     self.low = low
+        #     self.high = high
+        # else:
+        #     assert np.isscalar(low) and np.isscalar(high)
+        #     self.low = low + np.zeros(shape)
+        #     self.high = high + np.zeros(shape)
+        self.low = low
+        self.high = high
+        self.shape = shape
+
     def sample(self):
-        return np_random.uniform(low=self.low, high=self.high, size=self.low.shape)
+        return np_random.uniform(low=self.low, high=self.high, size=self.low.shape, dtype=Decimal)
     def contains(self, x):
         return x.shape == self.shape and (x >= self.low).all() and (x <= self.high).all()
 
@@ -36,9 +40,9 @@ class Box(Space):
     def from_jsonable(self, sample_n):
         return [np.asarray(sample) for sample in sample_n]
 
-    @property
-    def shape(self):
-        return self.low.shape
+    # @property
+    # def shape(self):
+    #     return self.shape
     def __repr__(self):
         return "Box" + str(self.shape)
     def __eq__(self, other):
