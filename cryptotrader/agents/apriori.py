@@ -594,7 +594,7 @@ class ONS(APrioriAgent):
 
     def projection_in_norm(self, x, M):
         """
-        Projection of x to simplex indiced by matrix M. Uses quadratic programming.
+        Projection of x to simplex induced by matrix M. Uses quadratic programming.
         """
         m = M.shape[0]
 
@@ -764,7 +764,7 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1,
                  factor_kwargs={}, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
@@ -773,8 +773,11 @@ class ORAGS(APrioriAgent):
         self.lr = lr
         self.damping = damping
         self.mpc = mpc
+        self.rc = rc
         self.factor_kwargs = factor_kwargs
 
+        self.crp = None
+        self.last_port = None
         self.init = False
 
     def predict(self, obs):
@@ -834,18 +837,18 @@ class ORAGS(APrioriAgent):
         # minimize allocation risk
         gamma = self.estimate_gamma(alpha, Z, w)
         # if the experts mean returns are low and you have no options, you can choose fiat
-        return gamma + w[-1] * (x.mean() * x.var()) ** 2
+        return self.rc * gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
         # AdaGrad
         # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e6, 1e6) - 1 # remove bias from gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e7, 1e7) - 1 # remove bias from gradient
 
         # Log grad for analytics
         self.log['g'] = "%.4f" % grad.sum()
         # Accumulate square gradient
         # As our data is non stationary, we use a forgetting factor here
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1, 1e6)
+        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1, 1e7)
 
         # Log gti for analytics
         self.log['gti'] = "%.4f" % self.gti.sum()
@@ -862,8 +865,9 @@ class ORAGS(APrioriAgent):
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        # Maximum position concentration constraint
-        cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2) ** 2})
+        if self.mpc < 1:
+            # Maximum position concentration constraint
+            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
 
         # Minimize loss starting from adjusted portfolio
         w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
@@ -882,19 +886,19 @@ class ORAGS(APrioriAgent):
             action = np.ones(n_pairs)
             action[-1] = 0
             self.crp = array_normalize(action)
-
+            self.last_port = self.crp
             # AdaGrad square gradient, started with ones for stability
             self.gti = np.ones_like(self.crp)
 
             self.init = True
 
         if self.step:
-            b = self.get_portfolio_vector(obs)
+            # b = self.get_portfolio_vector(obs)
             x = self.predict(obs)
             R, Z = self.polar_returns(obs)
             alpha = self.estimate_alpha(R)
-
-            return self.update(b, x, alpha, Z)
+            self.last_port = self.update(self.last_port, x, alpha, Z)
+            return self.last_port
 
         else:
             return self.crp
@@ -1365,18 +1369,17 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, eta=0.0, rebalance=False, activation=simplex_proj, fiat="BTC", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, window=120, k=0.1, mpc=1,rc=1, fiat="BTC", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
         super().__init__(fiat=fiat, name=name)
         self.eps = eps
         self.eta = eta
-        self.activation = activation
-        if rebalance:
-            self.reb = -2
-        else:
-            self.reb = -1
+        self.window = window - 1
+        self.k = k
+        self.mpc = mpc
+        self.rc = rc
 
         self.init = False
 
@@ -1385,11 +1388,58 @@ class STMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
 
         return price_relative
 
-    def update(self, b, x):
+    def polar_returns(self, obs):
+        """
+        Calculate polar return
+        :param obs: pandas DataFrame
+        :return: return radius, return angles
+        """
+        # Find relation between price and previous price
+        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
+        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+
+        # Find the radius and the angle decomposition on price relative vectors
+        radius = np.linalg.norm(price_relative, ord=1, axis=1)
+        angle = np.divide(price_relative, np.mat(radius).T)
+
+        # Select the 'window' greater values on the observation
+        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
+        index = index[np.argsort(radius[index])]
+
+        # Return the radius and the angle for extreme found values
+        return radius[index][::-1], angle[index][::-1]
+
+    def estimate_alpha(self, radius):
+        """
+        Estimate pareto's distribution alpha
+        :param radius: polar return radius
+        :return: alpha
+        """
+        return safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
+
+    def estimate_gamma(self, alpha, Z, w):
+        """
+        Estimate risk index gamma
+        :param self:
+        :param alpha:
+        :param Z:
+        :param w:
+        :return:
+        """
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
+
+    def loss(self, w, alpha, Z, x):
+        # minimize allocation risk
+        gamma = self.estimate_gamma(alpha, Z, w)
+        # if the experts mean returns are low and you have no options, you can choose fiat
+        return self.rc * gamma + w[-1] * ((x.mean()) * x.var()) ** 2
+
+    def update(self, b, x, alpha, Z):
         """
         Update portfolio weights to satisfy constraint b * x <= eps
         and minimize distance to previous portfolio.
@@ -1399,15 +1449,34 @@ class STMR(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
+        change = abs((portvar - 1 + x[np.argmax(abs(x - x_mean))]) / 2)
 
         lam = np.clip(safe_div(change - self.eps, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
 
         # update portfolio
         b += lam * (x - x_mean)
 
-        # project it onto simplex
-        return self.activation(b) * (1 - self.eta) + self.eta * self.crp
+        # # project it onto simplex
+        b = simplex_proj(b) * (1 - self.eta) + self.eta * self.crp
+
+        # Extreme risk index
+        # simplex constraints
+        cons = [
+            {'type': 'eq', 'fun': lambda w: w.sum() - 1},  # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w}  # Positive bound
+        ]
+
+        if self.mpc < 1:
+            # Maximum position concentration constraint
+            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
+
+        if self.rc > 0:
+            # Minimize loss starting from adjusted portfolio
+            b = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+
+        # Return best portfolio
+        return np.clip(b, 0, 1)  # Truncate small errors
+
 
     def rebalance(self, obs):
         """
@@ -1423,9 +1492,14 @@ class STMR(APrioriAgent):
             self.init = True
 
         if self.step:
-            prev_posit = self.get_portfolio_vector(obs, index=self.reb)
-            price_relative = self.predict(obs)
-            return self.update(prev_posit, price_relative)
+            b = self.get_portfolio_vector(obs)
+            x = self.predict(obs)
+            # return self.update(prev_posit, price_relative)
+            R, Z = self.polar_returns(obs)
+            alpha = self.estimate_alpha(R)
+            self.last_port = self.update(b, x, alpha, Z)
+            return self.last_port
+
         else:
             return self.crp
 
@@ -1437,13 +1511,6 @@ class STMR(APrioriAgent):
 
 
 class KAMAMR(STMR):
-    """
-    Short term mean reversion strategy for portfolio selection.
-
-    Original algo by José Olímpio Mendes
-    27/11/2017
-    """
-
     def __repr__(self):
         return "KAMAMR"
 
@@ -1877,12 +1944,11 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, mpc=1, factor_kwargs={},
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, factor_kwargs={},
                  fiat="BTC", name='ERI'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
-        self.mpc = mpc
         self.factor = factor
         self.factor_kwargs = factor_kwargs
         self.init = False
@@ -1941,7 +2007,7 @@ class ERI(APrioriAgent):
         # minimize allocation risk
         gamma = self.estimate_gamma(alpha, Z, w)
         # if the experts mean returns are low and you have no options, you can choose fiat
-        return gamma + w[-1] * (x.mean() * x.var()) ** 2 + self.mpc * np.linalg.norm(w - self.crp, ord=2) ** 2
+        return gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
         # Extreme risk index
@@ -1972,9 +2038,6 @@ class ERI(APrioriAgent):
             action[-1] = 0
             self.crp = array_normalize(action)
 
-            # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp)
-
             self.init = True
 
         if self.step:
@@ -1993,8 +2056,6 @@ class ERI(APrioriAgent):
             self.window = int(kwargs['window'])
         if 'k' in kwargs:
             self.k = kwargs['k']
-        if 'mpc' in kwargs:
-            self.mpc = kwargs['mpc']
 
         for kwarg in kwargs:
             if kwarg in self.factor_kwargs:
@@ -2002,3 +2063,56 @@ class ERI(APrioriAgent):
                     self.factor_kwargs[kwarg] = int(kwargs[kwarg])
                 else:
                     self.factor_kwargs[kwarg] = kwargs[kwarg]
+
+
+# # Strategy Ensambles
+class TradingEnsemble(APrioriAgent):
+    def __init__(self, factor, risk,
+                 factor_kwargs={}, fiat="BTC", name='ORAGS'):
+        super().__init__(fiat=fiat, name=name)
+        self.factor = factor
+        self.factor_kwargs = factor_kwargs
+        self.risk = risk
+
+        self.crp = None
+        self.last_port = None
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        factor = self.factor(obs, **self.factor_kwargs)
+        return np.append(factor, [1.0])
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            # Initialization step
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            # Equally distributed portfolio
+            self.crp = array_normalize(action)
+            self.last_port = self.get_portfolio_vector(obs)
+            # Set initialized flag
+            self.init = True
+
+        if self.step:
+            # Predict market movement
+            x = self.predict(obs)
+            # Minimize allocation risk
+            R, Z = self.risk.polar_returns(obs)
+            alpha = self.risk.estimate_alpha(R)
+            self.last_port = self.risk.update(self.last_port, x, alpha, Z)
+            # Return portfolio vector
+            return self.last_port
+
+        else:
+            # Start equally distributed
+            return self.crp
