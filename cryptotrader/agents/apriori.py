@@ -865,15 +865,18 @@ class ORAGS(APrioriAgent):
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        if self.mpc < 1:
-            # Maximum position concentration constraint
-            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
+        # if self.mpc < 1:
+        #     # Maximum position concentration constraint
+        #     cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
 
+        # if self.rc > 0:
         # Minimize loss starting from adjusted portfolio
-        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+        b = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+        # else:
+        #     b = simplex_proj(b)
 
         # Return best portfolio
-        return np.clip(w_star, 0, 1) # Truncate small errors
+        return np.clip(b, 0, 1) # Truncate small errors
 
     def rebalance(self, obs):
         """
@@ -1369,7 +1372,7 @@ class STMR(APrioriAgent):
     def __repr__(self):
         return "STMR"
 
-    def __init__(self, eps=0.02, eta=0.0, window=120, k=0.1, mpc=1,rc=1, fiat="BTC", name="STMR"):
+    def __init__(self, eps=0.02, eta=0.0, window=120, k=0.1, mpc=1, rc=1, fiat="BTC", name="STMR"):
         """
         :param sensitivity: float: Sensitivity parameter. Lower is more sensitive.
         """
@@ -1388,7 +1391,7 @@ class STMR(APrioriAgent):
         Performs prediction given environment observation
         """
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1]) - 1).values, [0.0])
 
         return price_relative
 
@@ -1449,7 +1452,7 @@ class STMR(APrioriAgent):
         x_mean = np.mean(x)
         portvar = np.dot(b, x)
 
-        change = abs((portvar - 1 + x[np.argmax(abs(x - x_mean))]) / 2)
+        change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
 
         lam = np.clip(safe_div(change - self.eps, np.linalg.norm(x - x_mean) ** 2), 0.0, 1e6)
 
@@ -1459,24 +1462,23 @@ class STMR(APrioriAgent):
         # # project it onto simplex
         b = simplex_proj(b) * (1 - self.eta) + self.eta * self.crp
 
-        # Extreme risk index
-        # simplex constraints
-        cons = [
-            {'type': 'eq', 'fun': lambda w: w.sum() - 1},  # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w}  # Positive bound
-        ]
-
-        if self.mpc < 1:
-            # Maximum position concentration constraint
-            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
-
         if self.rc > 0:
+            # Extreme risk index
+            # simplex constraints
+            cons = [
+                {'type': 'eq', 'fun': lambda w: w.sum() - 1},  # Simplex region
+                {'type': 'ineq', 'fun': lambda w: w}  # Positive bound
+            ]
+
+            if self.mpc < 1:
+                # Maximum position concentration constraint
+                cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
+
             # Minimize loss starting from adjusted portfolio
-            b = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
+            b = minimize(self.loss, b, args=(alpha, Z, x + 1), constraints=cons)['x']
 
         # Return best portfolio
         return np.clip(b, 0, 1)  # Truncate small errors
-
 
     def rebalance(self, obs):
         """
