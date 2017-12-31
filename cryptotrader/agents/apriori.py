@@ -764,7 +764,7 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1,
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1, eta=0.0,
                  factor_kwargs={}, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
@@ -775,6 +775,7 @@ class ORAGS(APrioriAgent):
         self.mpc = mpc
         self.rc = rc
         self.factor_kwargs = factor_kwargs
+        self.eta = eta
 
         self.crp = None
         self.last_port = None
@@ -856,7 +857,7 @@ class ORAGS(APrioriAgent):
         adjusted_grad = safe_div(grad, self.gti)
 
         # Take a step in gradient direction with multiplicative weights
-        b += b * self.lr * adjusted_grad
+        b += b * self.lr * adjusted_grad * self.eta + (1 - self.eta) * self.crp
 
         # Extreme risk index
         # simplex constraints
@@ -865,9 +866,9 @@ class ORAGS(APrioriAgent):
             {'type': 'ineq', 'fun': lambda w: w} # Positive bound
         ]
 
-        # if self.mpc < 1:
-        #     # Maximum position concentration constraint
-        #     cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
+        if self.mpc < 1:
+            # Maximum position concentration constraint
+            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
 
         # if self.rc > 0:
         # Minimize loss starting from adjusted portfolio
