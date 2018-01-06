@@ -648,7 +648,6 @@ class OGS(APrioriAgent):
         """
         return np.append(self.factor(obs).iloc[-1].values, [1.0])
 
-
     def rebalance(self, obs):
         if not self.init:
             n_pairs = obs.columns.levels[0].shape[0]
@@ -753,7 +752,8 @@ class MW(APrioriAgent):
 class ORAGS(APrioriAgent):
     """
     Online Risk Averse Gradient Step
-    This algorithm uses Extreme Risk Index and AdaGrad algorithms for online portfolio optimization
+    This is a novel (?) algorithm that uses multiplicative weights with gradient experts
+    and Extreme Risk Index for portfolio allocation
     References:
         Extreme Risk Index:
         https://arxiv.org/pdf/1505.04045.pdf
@@ -764,8 +764,8 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1, eta=0.0,
-                 factor_kwargs={}, fiat="BTC", name='ORAGS'):
+    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
+                 rc=1e-6, eta=0.0, factor_kwargs={}, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
@@ -777,6 +777,20 @@ class ORAGS(APrioriAgent):
         self.factor_kwargs = factor_kwargs
         self.eta = eta
 
+        self.periods = [int(p * np.sqrt(2)) for p in range(3, self.factor_kwargs['period'])]
+
+        # Extreme risk index
+        # simplex constraints
+        self.cons = [
+            {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
+        ]
+
+        # Maximum position concentration constraint
+        if self.mpc < 1:
+            self.cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
+
+
         self.crp = None
         self.last_port = None
         self.init = False
@@ -787,9 +801,8 @@ class ORAGS(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         """
         factor = self.factor(obs, **self.factor_kwargs)
-        periods = [int(p * np.sqrt(2)) for p in range(3, self.factor_kwargs['period'])]
-        regression = np.mean(np.vstack([models.tsf(factor,
-                                         p).iloc[-1].values for p in periods]), axis=0)
+        regression = np.mean(np.vstack([factor.iloc[-1].values] + [models.tsf(factor,
+                                         p).iloc[-1].values for p in self.periods]), axis=0)
 
         return np.append(regression, [1.0])
 
@@ -838,46 +851,40 @@ class ORAGS(APrioriAgent):
         # minimize allocation risk
         gamma = self.estimate_gamma(alpha, Z, w)
         # if the experts mean returns are low and you have no options, you can choose fiat
-        return self.rc * gamma + w[-1] * (x.mean() * x.var()) ** 2
+        return gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
         # AdaGrad
         # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e7, 1e7) - 1 # remove bias from gradient
+        grad = np.clip(safe_div(x, np.dot(b, x)), -1e7, 1e7) - 1 # center grad around zero
 
-        # Log grad for analytics
-        self.log['g'] = "%.4f" % grad.sum()
         # Accumulate square gradient
         # As our data is non stationary, we use a forgetting factor here
-        self.gti = np.clip(self.gti * self.damping + grad ** 2, 1, 1e7)
+        self.gti = np.clip(self.gti * self.damping + grad, self.lr, 1e7)
 
-        # Log gti for analytics
-        self.log['gti'] = "%.4f" % self.gti.sum()
         # Adjust gradient
-        adjusted_grad = safe_div(grad, self.gti)
+        adjusted_grad = grad * self.gti
 
         # Take a step in gradient direction with multiplicative weights
-        b += b * self.lr * adjusted_grad * self.eta + (1 - self.eta) * self.crp
+        b += b * adjusted_grad * (1 - self.eta) + self.eta * self.crp
 
-        # Extreme risk index
-        # simplex constraints
-        cons = [
-            {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
-        ]
-
-        if self.mpc < 1:
-            # Maximum position concentration constraint
-            cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
-
-        # if self.rc > 0:
         # Minimize loss starting from adjusted portfolio
-        b = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
-        # else:
-        #     b = simplex_proj(b)
+        risk = minimize(self.loss,
+                        b,
+                        args=(alpha, Z, x),
+                        constraints=self.cons,
+                        options={'maxiter': 500},
+                        tol=self.rc,
+                        bounds=tuple((0,1) for _ in range(b.shape[0]))
+                        )
+
+        # Log variables
+        self.log['g'] = "%.4f, %.4f, %.4f" % (grad.sum(), grad.min(), grad.max())
+        self.log['gti'] = "%.1f, %.1f, %.1f" % (self.gti.sum(), self.gti.min(), self.gti.max())
+        self.log['risk'] = "%.6f" % risk['fun']
 
         # Return best portfolio
-        return np.clip(b, 0, 1) # Truncate small errors
+        return risk['x']
 
     def rebalance(self, obs):
         """

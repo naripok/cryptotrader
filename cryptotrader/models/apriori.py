@@ -23,7 +23,7 @@ def tsf(ts, period=14):
     return tsf
 
 
-def eir(obs, window, k):
+def eri(obs, window, k, w):
     # polar returns
     # Find relation between price and previous price
     prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-window - 1:]
@@ -51,8 +51,8 @@ def eir(obs, window, k):
 
 
 class OLS(object):
-    def __init__(self):
-        pass
+    def __init__(self, X, Y):
+        self.fit(X, Y)
 
     def fit(self, X, Y):
         self.ls_coef_ = np.cov(X, Y)[0, 1] / np.var(X)
@@ -60,4 +60,3 @@ class OLS(object):
 
     def predict(self, X):
         return self.ls_coef_ * X + self.ls_intercept
-
