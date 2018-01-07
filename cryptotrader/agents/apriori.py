@@ -765,7 +765,7 @@ class ORAGS(APrioriAgent):
         return "Online Risk Averse Gradient Step"
 
     def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
-                 rc=1e-6, eta=0.0, factor_kwargs={}, fiat="BTC", name='ORAGS'):
+                 rc=1e-6, eta=1.0, factor_kwargs={}, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
@@ -803,6 +803,8 @@ class ORAGS(APrioriAgent):
         factor = self.factor(obs, **self.factor_kwargs)
         regression = np.mean(np.vstack([factor.iloc[-1].values] + [models.tsf(factor,
                                          p).iloc[-1].values for p in self.periods]), axis=0)
+
+        # regression = factor.iloc[-10:].ewm(alpha=.2).mean().iloc[-1].values
 
         return np.append(regression, [1.0])
 
@@ -856,7 +858,7 @@ class ORAGS(APrioriAgent):
     def update(self, b, x, alpha, Z):
         # AdaGrad
         # Calculate gradient
-        grad = np.clip(safe_div(x, np.dot(b, x)), -1e7, 1e7) - 1 # center grad around zero
+        grad = safe_div(x, np.dot(b, x)) - 1 # center grad around zero
 
         # Accumulate square gradient
         # As our data is non stationary, we use a forgetting factor here
@@ -866,7 +868,7 @@ class ORAGS(APrioriAgent):
         adjusted_grad = grad * self.gti
 
         # Take a step in gradient direction with multiplicative weights
-        b += b * adjusted_grad * (1 - self.eta) + self.eta * self.crp
+        b += b * adjusted_grad * self.eta + self.crp * (1 - self.eta)
 
         # Minimize loss starting from adjusted portfolio
         risk = minimize(self.loss,
@@ -880,7 +882,7 @@ class ORAGS(APrioriAgent):
 
         # Log variables
         self.log['g'] = "%.4f, %.4f, %.4f" % (grad.sum(), grad.min(), grad.max())
-        self.log['gti'] = "%.1f, %.1f, %.1f" % (self.gti.sum(), self.gti.min(), self.gti.max())
+        self.log['gti'] = "%.2f, %.2f, %.2f" % (self.gti.sum(), self.gti.min(), self.gti.max())
         self.log['risk'] = "%.6f" % risk['fun']
 
         # Return best portfolio
