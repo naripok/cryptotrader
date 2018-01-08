@@ -221,9 +221,9 @@ class DataFeed(ExchangeConnection):
     Data feeder for backtesting with TradingEnvironment.
     """
     # TODO WRITE TESTS
-    retryDelays = [2 ** i for i in range(5)]
+    retryDelays = [2 ** i for i in range(8)]
 
-    def __init__(self, period, pairs=[], exchange='', addr='ipc:///tmp/feed.ipc', timeout=20):
+    def __init__(self, period, pairs=[], exchange='', addr='ipc:///tmp/feed.ipc', timeout=30):
         """
 
         :param period: int: Data sampling period

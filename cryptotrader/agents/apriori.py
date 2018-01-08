@@ -764,20 +764,16 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1,
-                 rc=1e-6, eta=1.0, factor_kwargs={}, fiat="BTC", name='ORAGS'):
+    def __init__(self, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1e-6, eta=0.0, mom=2, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
-        self.factor = factor
         self.lr = lr
+        self.mom = mom
         self.damping = damping
         self.mpc = mpc
         self.rc = rc
-        self.factor_kwargs = factor_kwargs
         self.eta = eta
-
-        self.periods = [int(p * np.sqrt(2)) for p in range(3, self.factor_kwargs['period'])]
 
         # Extreme risk index
         # simplex constraints
@@ -790,7 +786,6 @@ class ORAGS(APrioriAgent):
         if self.mpc < 1:
             self.cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
 
-
         self.crp = None
         self.last_port = None
         self.init = False
@@ -800,13 +795,9 @@ class ORAGS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        factor = self.factor(obs, **self.factor_kwargs)
-        regression = np.mean(np.vstack([factor.iloc[-1].values] + [models.tsf(factor,
-                                         p).iloc[-1].values for p in self.periods]), axis=0)
+        factor = obs.xs('open',level=1, axis=1).apply(lambda x: safe_div(x[-1], x[-self.mom])).values
 
-        # regression = factor.iloc[-10:].ewm(alpha=.2).mean().iloc[-1].values
-
-        return np.append(regression, [1.0])
+        return np.append(factor, [1.0])
 
     def polar_returns(self, obs):
         """
@@ -868,7 +859,9 @@ class ORAGS(APrioriAgent):
         adjusted_grad = grad * self.gti
 
         # Take a step in gradient direction with multiplicative weights
-        b += b * adjusted_grad * self.eta + self.crp * (1 - self.eta)
+        self.eta = np.clip(self.eta * (1 + adjusted_grad.mean()), .05, .95)
+        b += b * adjusted_grad * (1 - self.eta) + self.crp * self.eta
+        b = simplex_proj(b)
 
         # Minimize loss starting from adjusted portfolio
         risk = minimize(self.loss,
@@ -883,6 +876,7 @@ class ORAGS(APrioriAgent):
         # Log variables
         self.log['g'] = "%.4f, %.4f, %.4f" % (grad.sum(), grad.min(), grad.max())
         self.log['gti'] = "%.2f, %.2f, %.2f" % (self.gti.sum(), self.gti.min(), self.gti.max())
+        self.log['eta'] = "%.4f" % self.eta
         self.log['risk'] = "%.6f" % risk['fun']
 
         # Return best portfolio
