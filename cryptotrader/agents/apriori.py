@@ -4,6 +4,9 @@ from ..core import Agent
 from ..utils import *
 
 from cryptotrader.models import apriori as models
+from cryptotrader.optimizers import gradient as gd
+from cryptotrader.optimizers import gt
+from cryptotrader.models import risk
 
 import optunity as ot
 import pandas as pd
@@ -749,7 +752,7 @@ class MW(APrioriAgent):
             self.lr = kwargs['lr']
 
 
-class ORAGS(APrioriAgent):
+class ORAMW(APrioriAgent):
     """
     Online Risk Averse Gradient Step
     This is a novel (?) algorithm that uses multiplicative weights with gradient experts
@@ -764,16 +767,138 @@ class ORAGS(APrioriAgent):
     def __repr__(self):
         return "Online Risk Averse Gradient Step"
 
-    def __init__(self, window=300, k=0.1, lr=1e-1, damping=0.99, mpc=1, rc=1e-6, eta=0.0, mom=2, fiat="BTC", name='ORAGS'):
+    def __init__(self, window=120, k=0.1, lr=0.5, gradlr=1e-2,
+                 mpc=1, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
+        self.mpc = mpc
+        self.opt = gt.GradientFollowingMultiplicativeWeights(lr, gradlr)
         self.lr = lr
+
+        # Extreme risk index
+        self.cons = [
+            {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
+            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            # Maximum position concentration constraint
+            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)}
+        ]
+
+        self.crp = None
+        self.b = None
+        self.init = False
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        prices = obs.xs('open',level=1, axis=1)
+
+        factor = np.hstack([prices.rolling(2).apply(
+            lambda x: safe_div(x[-1], x[-2]) - 1).dropna().values, np.zeros((self.window, 1))])
+
+        factor2 = np.hstack([prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values, np.zeros((self.window, 1))])
+
+        return factor, factor2
+
+    def loss(self, w, R, Z, x):
+        # minimize allocation risk
+        return risk.ERI(R, Z, w) + (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
+
+    def update(self, b, x, x2):
+
+        # Update portfolio with no regret
+        last_x = x[-1, :]
+        leader = np.zeros_like(last_x)
+        leader[np.argmax(last_x)] = -1
+
+        b = simplex_proj(self.opt.optimize(leader, last_x, b))
+
+        # Manage allocation risk
+        b = minimize(
+            self.loss,
+            b,
+            args=(*risk.polar_returns(x2, self.k), last_x),
+            constraints=self.cons,
+            options={'maxiter': 300},
+            tol=1e-6,
+            bounds=tuple((0,1) for _ in range(b.shape[0]))
+        )
+
+        # Log variables
+        self.log['lr'] = "%.4f" % self.opt.lr
+        self.log['mpc'] = "%.4f" % self.mpc
+        self.log['risk'] = "%.6f" % b['fun']
+
+        # Return best portfolio
+        return b['x']
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.init:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = array_normalize(action)
+            self.b = self.crp
+            # AdaGrad square gradient, started with ones for stability
+            self.init = True
+
+        if self.step:
+            # b = self.get_portfolio_vector(obs)
+            x, x2 = self.predict(obs)
+            self.b = self.update(self.b, x, x2)
+            return self.b
+
+        else:
+            return self.crp
+
+    def set_params(self, **kwargs):
+        if 'window' in kwargs:
+            self.window = int(kwargs['window'])
+        if 'k' in kwargs:
+            self.k = kwargs['k']
+        if 'lr' in kwargs:
+            self.lr = kwargs['lr']
+        if 'mpc' in kwargs:
+            self.mpc = kwargs['mpc']
+
+
+class NRS(APrioriAgent):
+    """
+    Online Risk Averse Gradient Step
+    This is a novel (?) algorithm that uses multiplicative weights with gradient experts
+    and Extreme Risk Index for portfolio allocation
+    References:
+        Extreme Risk Index:
+        https://arxiv.org/pdf/1505.04045.pdf
+
+        AdaGrad:
+        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
+    """
+    def __repr__(self):
+        return "Online Risk Averse Gradient Step"
+
+    def __init__(self, window=300, k=0.1, lr=1e-1, er=0.0025,
+                 mpc=1, rc=1e-6, mom=2, fiat="BTC", name='ORAGS'):
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.k = k
         self.mom = mom
-        self.damping = damping
         self.mpc = mpc
         self.rc = rc
-        self.eta = eta
+        self.er = er
+        self.opt1 = gt.MultiplicativeWeights(lr)
+        self.opt2 = gd.SGD(lr / 10)
+        # self.opt2 = gd.Nadam(lr, beta1, beta2)
+        # self.opt3 = gd.SGD(lr)
+        self.lr = lr
 
         # Extreme risk index
         # simplex constraints
@@ -795,10 +920,13 @@ class ORAGS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        factor = obs.xs('open',level=1, axis=1).apply(lambda x: safe_div(x[-1], x[-self.mom])).values
+        factor = obs.xs('open',level=1, axis=1)\
+            .rolling(self.mom + 1)\
+            .apply(lambda x: safe_div(x[-1], x[-(self.mom + 1)])).fillna(1.0)#.ewm(alpha=0.9).mean()
 
-        return np.append(factor, [1.0])
+        return factor
 
+    # Risk Model Extreme Risk Index
     def polar_returns(self, obs):
         """
         Calculate polar return
@@ -847,36 +975,37 @@ class ORAGS(APrioriAgent):
         return gamma + w[-1] * (x.mean() * x.var()) ** 2
 
     def update(self, b, x, alpha, Z):
-        # AdaGrad
-        # Calculate gradient
-        grad = safe_div(x, np.dot(b, x)) - 1 # center grad around zero
 
-        # Accumulate square gradient
-        # As our data is non stationary, we use a forgetting factor here
-        self.gti = np.clip(self.gti * self.damping + grad, self.lr, 1e7)
+        # Take a gradient step
+        log_x = np.log(x)
 
-        # Adjust gradient
-        adjusted_grad = grad * self.gti
+        leader = np.zeros_like(x)
+        leader[np.argmax(x)] = -1
 
-        # Take a step in gradient direction with multiplicative weights
-        self.eta = np.clip(self.eta * (1 + adjusted_grad.mean()), .05, .95)
-        b += b * adjusted_grad * (1 - self.eta) + self.crp * self.eta
-        b = simplex_proj(b)
+        self.w1 = simplex_proj(self.opt1.optimize(leader, self.w1))
+        self.w2 = simplex_proj(self.opt2.optimize(log_x, self.w2))
 
-        # Minimize loss starting from adjusted portfolio
+        # Find portfolio with lowest risk with ERI
+        if self.er > 0:
+            cons = self.cons + [{'type': 'eq', 'fun': lambda w: np.dot(x, w) - self.er}]
+        else:
+            cons = self.cons
+
+        b = simplex_proj((self.w1 + self.w2) / 2)
+
         risk = minimize(self.loss,
                         b,
                         args=(alpha, Z, x),
-                        constraints=self.cons,
+                        constraints=cons,
                         options={'maxiter': 500},
                         tol=self.rc,
-                        bounds=tuple((0,1) for _ in range(b.shape[0]))
+                        bounds=tuple((0, 1) for _ in range(b.shape[0]))
                         )
 
         # Log variables
-        self.log['g'] = "%.4f, %.4f, %.4f" % (grad.sum(), grad.min(), grad.max())
-        self.log['gti'] = "%.2f, %.2f, %.2f" % (self.gti.sum(), self.gti.min(), self.gti.max())
-        self.log['eta'] = "%.4f" % self.eta
+        self.log['lr'] = "%.4f" % self.lr
+        # self.log['v'] = "%.4f, %.4f" % (self.opt1.v.min(), self.opt1.v.max())
+        # self.log['gamma'] = "%.4f" % self.opt1.gamma
         self.log['risk'] = "%.6f" % risk['fun']
 
         # Return best portfolio
@@ -895,8 +1024,12 @@ class ORAGS(APrioriAgent):
             self.crp = array_normalize(action)
             self.last_port = self.crp
             # AdaGrad square gradient, started with ones for stability
-            self.gti = np.ones_like(self.crp)
-
+            self.w1 = self.crp
+            self.w2 = self.crp
+            self.w3 = self.crp
+            self.w4 = self.crp
+            self.w5 = self.crp
+            self.lr_w = np.ones(4)
             self.init = True
 
         if self.step:
@@ -904,7 +1037,8 @@ class ORAGS(APrioriAgent):
             x = self.predict(obs)
             R, Z = self.polar_returns(obs)
             alpha = self.estimate_alpha(R)
-            self.last_port = self.update(self.last_port, x, alpha, Z)
+            # corr = np.append(np.mean(np.vstack([x.apply(lambda x: x.autocorr(lag=l)).values for l in range(5)]), axis=1).ravel(), [1.0])
+            self.last_port = self.update(self.last_port, np.append(x.iloc[-1].values, [1.0]), alpha, Z)
             return self.last_port
 
         else:

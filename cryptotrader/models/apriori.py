@@ -23,33 +23,6 @@ def tsf(ts, period=14):
     return tsf
 
 
-def eri(obs, window, k, w):
-    # polar returns
-    # Find relation between price and previous price
-    prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-window - 1:]
-    price_relative = np.hstack([np.mat(prices.rolling(2).apply(
-        lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((window, 1))])
-
-    # Find the radius and the angle decomposition on price relative vectors
-    radius = np.linalg.norm(price_relative, ord=1, axis=1)
-    angle = np.divide(price_relative, np.mat(radius).T)
-
-    # Select the 'window' greater values on the observation
-    index = np.argpartition(radius, -(int(window * k) + 1))[-(int(window * k) + 1):]
-    index = index[np.argsort(radius[index])]
-
-    # Return the radius and the angle for extreme found values
-    R, Z = radius[index][::-1], angle[index][::-1]
-
-    # alpha
-    alpha = safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
-
-    # gamma
-    gamma = (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
-
-    return gamma
-
-
 class OLS(object):
     def __init__(self, X, Y):
         self.fit(X, Y)
