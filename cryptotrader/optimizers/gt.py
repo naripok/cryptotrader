@@ -28,7 +28,7 @@ class MultiplicativeWeights(Optimizer):
 
     def compute_grad(self, x, w):
         self.step += 1
-        return self.lr * x * w
+        return self.lr * x * (w - x * 0.1)
 
     def update(self, grad, w):
         return w - grad
@@ -68,3 +68,19 @@ class GradientFollowingMultiplicativeWeights(Optimizer):
 
     def optimize(self, leader, x, w):
         return self.update(self.compute_grad(leader, x, w), w)
+
+
+class PursuitAndEvade(Optimizer):
+    def __init__(self, lr=0.5):
+        super(PursuitAndEvade, self).__init__(lr=lr)
+        self.lr = lr
+
+    def compute_grad(self, w_leader, b):
+        self.step += 1
+        return self.lr * (b - w_leader)
+
+    def update(self, grad, w):
+        return w - grad
+
+    def optimize(self, w_leader, b):
+        return self.update(self.compute_grad(w_leader, b), b)

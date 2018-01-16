@@ -754,8 +754,8 @@ class MW(APrioriAgent):
 
 class ORAMW(APrioriAgent):
     """
-    Online Risk Averse Gradient Step
-    This is a novel (?) algorithm that uses multiplicative weights with gradient experts
+    Online Risk Averse Multiplicative Weights
+    This is an algorithm that uses multiplicative weights with gradient experts
     and Extreme Risk Index for portfolio allocation
     References:
         Extreme Risk Index:
@@ -765,7 +765,7 @@ class ORAMW(APrioriAgent):
         http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
     """
     def __repr__(self):
-        return "Online Risk Averse Gradient Step"
+        return "Online Risk Averse Multiplicative Weights"
 
     def __init__(self, window=120, k=0.1, lr=0.5, gradlr=1e-2,
                  mpc=1, fiat="BTC", name='ORAGS'):
@@ -773,7 +773,7 @@ class ORAMW(APrioriAgent):
         self.window = window - 1
         self.k = k
         self.mpc = mpc
-        self.opt = gt.GradientFollowingMultiplicativeWeights(lr, gradlr)
+        self.opt = gt.MultiplicativeWeights(lr)
         self.lr = lr
 
         # Extreme risk index
@@ -814,7 +814,7 @@ class ORAMW(APrioriAgent):
         leader = np.zeros_like(last_x)
         leader[np.argmax(last_x)] = -1
 
-        b = simplex_proj(self.opt.optimize(leader, last_x, b))
+        b = simplex_proj(self.opt.optimize(leader, b))
 
         # Manage allocation risk
         b = minimize(
@@ -872,47 +872,31 @@ class ORAMW(APrioriAgent):
 
 class NRS(APrioriAgent):
     """
-    Online Risk Averse Gradient Step
-    This is a novel (?) algorithm that uses multiplicative weights with gradient experts
-    and Extreme Risk Index for portfolio allocation
-    References:
-        Extreme Risk Index:
-        https://arxiv.org/pdf/1505.04045.pdf
-
-        AdaGrad:
-        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
+    Pursuit and Evade No-Regret System
     """
     def __repr__(self):
-        return "Online Risk Averse Gradient Step"
+        return "Pursuit and Evade No-Regret System"
 
-    def __init__(self, window=300, k=0.1, lr=1e-1, er=0.0025,
-                 mpc=1, rc=1e-6, mom=2, fiat="BTC", name='ORAGS'):
+    def __init__(self, window=120, k=0.1, lr=0.5, gradlr=1e-2, beta=0.5,
+                 mpc=1, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
-        self.mom = mom
         self.mpc = mpc
-        self.rc = rc
-        self.er = er
-        self.opt1 = gt.MultiplicativeWeights(lr)
-        self.opt2 = gd.SGD(lr / 10)
-        # self.opt2 = gd.Nadam(lr, beta1, beta2)
-        # self.opt3 = gd.SGD(lr)
-        self.lr = lr
+        self.opt = gt.GradientFollowingMultiplicativeWeights(lr, gradlr)
+        self.pe = gt.PursuitAndEvade(gradlr)
+        self.beta = beta
 
         # Extreme risk index
-        # simplex constraints
         self.cons = [
             {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
+            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)} # Maximum position concentration constraint
         ]
 
-        # Maximum position concentration constraint
-        if self.mpc < 1:
-            self.cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)})
-
-        self.crp = None
-        self.last_port = None
+        self.b = None
+        self.w = None
+        self.score = None
         self.init = False
 
     def predict(self, obs):
@@ -920,96 +904,87 @@ class NRS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        factor = obs.xs('open',level=1, axis=1)\
-            .rolling(self.mom + 1)\
-            .apply(lambda x: safe_div(x[-1], x[-(self.mom + 1)])).fillna(1.0)#.ewm(alpha=0.9).mean()
+        prices = obs.xs('open',level=1, axis=1)
 
-        return factor
+        factor = np.hstack([prices.rolling(2).apply(
+            lambda x: safe_div(x[-1], x[-2]) - 1).dropna().values, np.zeros((self.window, 1))])
 
-    # Risk Model Extreme Risk Index
-    def polar_returns(self, obs):
-        """
-        Calculate polar return
-        :param obs: pandas DataFrame
-        :return: return radius, return angles
-        """
-        # Find relation between price and previous price
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
-        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
-            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
+        factor2 = np.hstack([prices.rolling(2).apply(
+            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values, np.zeros((self.window, 1))])
 
-        # Find the radius and the angle decomposition on price relative vectors
-        radius = np.linalg.norm(price_relative, ord=1, axis=1)
-        angle = np.divide(price_relative, np.mat(radius).T)
+        return factor, factor2
 
-        # Select the 'window' greater values on the observation
-        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
-        index = index[np.argsort(radius[index])]
-
-        # Return the radius and the angle for extreme found values
-        return radius[index][::-1], angle[index][::-1]
-
-    def estimate_alpha(self, radius):
-        """
-        Estimate pareto's distribution alpha
-        :param radius: polar return radius
-        :return: alpha
-        """
-        return safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
-
-    def estimate_gamma(self, alpha, Z, w):
-        """
-        Estimate risk index gamma
-        :param self:
-        :param alpha:
-        :param Z:
-        :param w:
-        :return:
-        """
-        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
-
-    def loss(self, w, alpha, Z, x):
+    def loss(self, w, R, Z, x):
         # minimize allocation risk
-        gamma = self.estimate_gamma(alpha, Z, w)
-        # if the experts mean returns are low and you have no options, you can choose fiat
-        return gamma + w[-1] * (x.mean() * x.var()) ** 2
+        return risk.ERI(R, Z, w) + (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
 
-    def update(self, b, x, alpha, Z):
+    def update(self, b, x1, x2):
 
-        # Take a gradient step
-        log_x = np.log(x)
+        # Update portfolio with no regret
+        last_x1 = x1[-1, :]
+        last_x2 = x2[-1, :]
 
-        leader = np.zeros_like(x)
-        leader[np.argmax(x)] = -1
+        # Compute experts scores
+        for i in range(self.score.shape[0]):
+            self.score[i] = self.score[i] * self.beta + (1 - self.beta) * np.dot(last_x1, self.w[i])
 
-        self.w1 = simplex_proj(self.opt1.optimize(leader, self.w1))
-        self.w2 = simplex_proj(self.opt2.optimize(log_x, self.w2))
-
-        # Find portfolio with lowest risk with ERI
-        if self.er > 0:
-            cons = self.cons + [{'type': 'eq', 'fun': lambda w: np.dot(x, w) - self.er}]
+        # Choose to follow or pursuit
+        best_w = self.w[np.argmax(self.score)]
+        if np.allclose(self.b, best_w, 1e-2, 1e-2):
+            action = 'follow'
         else:
-            cons = self.cons
+            action = 'pursuit'
 
-        b = simplex_proj((self.w1 + self.w2) / 2)
+        # Update experts
+        leader1 = np.zeros_like(last_x1)
+        leader1[np.argmax(last_x1)] = -1
+        leader2 = np.zeros_like(last_x2)
+        leader2[np.argmax(last_x2)] = -1
 
-        risk = minimize(self.loss,
-                        b,
-                        args=(alpha, Z, x),
-                        constraints=cons,
-                        options={'maxiter': 500},
-                        tol=self.rc,
-                        bounds=tuple((0, 1) for _ in range(b.shape[0]))
-                        )
+        # Manage allocation risk
+        self.w[0] = minimize(
+            self.loss,
+            simplex_proj(self.opt.optimize(leader1, last_x1, self.w[1])),
+            args=(*risk.polar_returns(x2, self.k), last_x1),
+            constraints=self.cons,
+            options={'maxiter': 500},
+            tol=1e-6,
+            bounds=tuple((0,1) for _ in range(b.shape[0]))
+        )['x']
+
+        self.w[1] = minimize(
+            self.loss,
+            simplex_proj(self.opt.optimize(leader2, last_x2, self.w[2])),
+            args=(*risk.polar_returns(x2, self.k), last_x1),
+            constraints=self.cons,
+            options={'maxiter': 500},
+            tol=1e-6,
+            bounds=tuple((0,1) for _ in range(b.shape[0]))
+        )['x']
+
+        self.w[2] = minimize(
+            self.loss,
+            simplex_proj(self.w[2]),
+            args=(*risk.polar_returns(x2, self.k), last_x1),
+            constraints=self.cons,
+            options={'maxiter': 500},
+            tol=1e-6,
+            bounds=tuple((0,1) for _ in range(b.shape[0]))
+        )['x']
+
+
+        if action == 'follow':
+            b = simplex_proj(self.w[np.argmax(self.score)])
+        elif action == 'pursuit':
+            b = simplex_proj(self.pe.optimize(self.w[np.argmax(self.score)], self.b))
 
         # Log variables
-        self.log['lr'] = "%.4f" % self.lr
-        # self.log['v'] = "%.4f, %.4f" % (self.opt1.v.min(), self.opt1.v.max())
-        # self.log['gamma'] = "%.4f" % self.opt1.gamma
-        self.log['risk'] = "%.6f" % risk['fun']
+        self.log['score'] = "tf: %.4f, mr: %.4f, eri: %.4f, q: %.4f" % (self.score[0], self.score[1], self.score[2], self.score[3])
+        # self.log['risk'] = "%.6f" % b['fun']
+        self.log['action'] = action
 
         # Return best portfolio
-        return risk['x']
+        return b
 
     def rebalance(self, obs):
         """
@@ -1019,27 +994,26 @@ class NRS(APrioriAgent):
         """
         if not self.init:
             n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            self.crp = array_normalize(action)
-            self.last_port = self.crp
+
+            crp = np.ones(n_pairs)
+            crp[-1] = 0
+
+            quote = np.zeros(n_pairs)
+            quote[-1] = 1
+
+            self.crp = array_normalize(crp)
+            self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(3)] + [quote])
+            self.b = self.crp
+            self.score = np.zeros(self.w.shape[0])
+
             # AdaGrad square gradient, started with ones for stability
-            self.w1 = self.crp
-            self.w2 = self.crp
-            self.w3 = self.crp
-            self.w4 = self.crp
-            self.w5 = self.crp
-            self.lr_w = np.ones(4)
             self.init = True
 
         if self.step:
             # b = self.get_portfolio_vector(obs)
-            x = self.predict(obs)
-            R, Z = self.polar_returns(obs)
-            alpha = self.estimate_alpha(R)
-            # corr = np.append(np.mean(np.vstack([x.apply(lambda x: x.autocorr(lag=l)).values for l in range(5)]), axis=1).ravel(), [1.0])
-            self.last_port = self.update(self.last_port, np.append(x.iloc[-1].values, [1.0]), alpha, Z)
-            return self.last_port
+            x, x2 = self.predict(obs)
+            self.b = self.update(self.b, x, x2)
+            return self.b
 
         else:
             return self.crp
@@ -1051,17 +1025,8 @@ class NRS(APrioriAgent):
             self.k = kwargs['k']
         if 'lr' in kwargs:
             self.lr = kwargs['lr']
-        if 'damping' in kwargs:
-            self.damping = kwargs['damping']
         if 'mpc' in kwargs:
             self.mpc = kwargs['mpc']
-
-        for kwarg in kwargs:
-            if kwarg in self.factor_kwargs:
-                if 'period' in kwarg:
-                    self.factor_kwargs[kwarg] = int(kwargs[kwarg])
-                else:
-                    self.factor_kwargs[kwarg] = kwargs[kwarg]
 
 
 # Pattern trading
