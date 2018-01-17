@@ -28,7 +28,7 @@ class MultiplicativeWeights(Optimizer):
 
     def compute_grad(self, x, w):
         self.step += 1
-        return self.lr * x * (w - x * 0.1)
+        return self.lr * x * (w - x * 0.01)
 
     def update(self, grad, w):
         return w - grad

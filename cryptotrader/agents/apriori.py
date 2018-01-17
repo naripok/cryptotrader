@@ -883,7 +883,7 @@ class NRS(APrioriAgent):
         self.window = window - 1
         self.k = k
         self.mpc = mpc
-        self.opt = gt.GradientFollowingMultiplicativeWeights(lr, gradlr)
+        self.opt = gt.MultiplicativeWeights(lr)
         self.pe = gt.PursuitAndEvade(gradlr)
         self.beta = beta
 
@@ -916,7 +916,7 @@ class NRS(APrioriAgent):
 
     def loss(self, w, R, Z, x):
         # minimize allocation risk
-        return risk.ERI(R, Z, w) + (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
+        return risk.ERI(R, Z, w) + w[-1]# (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
 
     def update(self, b, x1, x2):
 
@@ -944,20 +944,20 @@ class NRS(APrioriAgent):
         # Manage allocation risk
         self.w[0] = minimize(
             self.loss,
-            simplex_proj(self.opt.optimize(leader1, last_x1, self.w[1])),
+            simplex_proj(self.opt.optimize(leader1, self.w[0])),
             args=(*risk.polar_returns(x2, self.k), last_x1),
             constraints=self.cons,
-            options={'maxiter': 500},
+            options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
 
         self.w[1] = minimize(
             self.loss,
-            simplex_proj(self.opt.optimize(leader2, last_x2, self.w[2])),
+            simplex_proj(self.opt.optimize(leader2, self.w[1])),
             args=(*risk.polar_returns(x2, self.k), last_x1),
             constraints=self.cons,
-            options={'maxiter': 500},
+            options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
@@ -967,7 +967,7 @@ class NRS(APrioriAgent):
             simplex_proj(self.w[2]),
             args=(*risk.polar_returns(x2, self.k), last_x1),
             constraints=self.cons,
-            options={'maxiter': 500},
+            options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
@@ -979,8 +979,12 @@ class NRS(APrioriAgent):
             b = simplex_proj(self.pe.optimize(self.w[np.argmax(self.score)], self.b))
 
         # Log variables
-        self.log['score'] = "tf: %.4f, mr: %.4f, eri: %.4f, q: %.4f" % (self.score[0], self.score[1], self.score[2], self.score[3])
-        # self.log['risk'] = "%.6f" % b['fun']
+        self.log['score'] = "tf: %.4f, mr: %.4f, crp: %.4f, q: %.4f" % (self.score[0],
+                                                                        self.score[1],
+                                                                        self.score[2],
+                                                                        self.score[3])
+        self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(x2, self.k), b)
+        self.log['TCVaR'] = "%.6f" % risk.TCVaR(*risk.fit_t(np.dot(x1, b)))
         self.log['action'] = action
 
         # Return best portfolio
@@ -1002,7 +1006,7 @@ class NRS(APrioriAgent):
             quote[-1] = 1
 
             self.crp = array_normalize(crp)
-            self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(3)] + [quote])
+            self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(3)] + [quote.reshape([1, -1])])
             self.b = self.crp
             self.score = np.zeros(self.w.shape[0])
 
