@@ -50,7 +50,7 @@ from ..utils import Logger
 # # logger
 # logger = logging.getLogger(__name__)
 # logger = Logger
-retryDelays = (0, 2, 5, 30)
+retryDelays = (0, 2, 5, 5, 5, 5, 30, 30, 30)
 
 # Possible Commands
 PUBLIC_COMMANDS = [
