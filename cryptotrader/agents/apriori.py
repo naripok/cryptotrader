@@ -968,7 +968,7 @@ class NRS(APrioriAgent):
             self.loss,
             simplex_proj(self.w[2]),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons_mr,
+            constraints=self.cons_cr,
             options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
@@ -982,8 +982,8 @@ class NRS(APrioriAgent):
 
         # Log variables
         self.log['score'] = "tf: %.4f, mr: %.4f, crp: %.4f" % (self.score[0],
-                                                                        self.score[1],
-                                                                        self.score[2])
+                                                                self.score[1],
+                                                                self.score[2])
         self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(x2, self.k), b)
         self.log['TCVaR'] = "%.6f" % risk.TCVaR(*risk.fit_t(np.dot(x1, b)))
         self.log['action'] = action
@@ -1010,6 +1010,10 @@ class NRS(APrioriAgent):
             self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(3)] + [quote.reshape([1, -1])])
             self.b = self.crp
             self.score = np.zeros(self.w.shape[0])
+
+            # Constant rebalance contraints
+            self.cons_cr = self.cons + [{'type': 'ineq', 'fun': lambda w: 2 / self.crp.shape[0] - np.linalg.norm(w[:-1],
+                                                                                           ord=np.inf)}]  # Maximum position concentration constraint
 
             # AdaGrad square gradient, started with ones for stability
             self.init = True

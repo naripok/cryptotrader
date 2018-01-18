@@ -4,25 +4,25 @@ Investors and funds database
 
 import numpy as np
 import pandas as pd
-from datetime import datetime as dt
+from datetime import datetime
 from datetime import timedelta
 import pymongo as pm
 from decimal import Decimal, localcontext, ROUND_UP, ROUND_DOWN
 from .utils import send_email
-import zmq
 from .utils import Logger
+from time import sleep
+from .utils import floor_datetime
 
 class DBClient(object):
-    def __init__(self, db, api, context, email, sock_addr="ipc:///tmp/db.ipc"):
+    def __init__(self, db, api, email, period):
         self.deposits = db.deposits
         self.withdrawals = db.withdrawals
         self.funds = db.funds
         self.totalfunds = db.totalfunds
         self.clients = db.clients
         self.api = api
-        self.context = context
-        self.sock_addr = sock_addr
         self.email = email
+        self.period = period
 
     def calc_portval(self, quote="BTC"):
         with localcontext() as ctx:
@@ -72,7 +72,9 @@ class DBClient(object):
     def discouted_profit(self, profit, fee='0.0025'):
         with localcontext() as ctx:
             ctx.rounding = ROUND_UP
-            return profit - max(Decimal(fee) * Decimal(profit), Decimal('0E-8'))
+            tax = max(Decimal(fee) * Decimal(profit), Decimal('0E-8'))
+            ctx.rounding = ROUND_DOWN
+            return profit - tax
 
     def add_client(self, name, email, btcwallet, address, phone, rg, cpf, date, fee, txid=None, funds=None,
                    currency=None):
@@ -99,9 +101,9 @@ class DBClient(object):
 
     def pull_transaction_data(self, start=None, end=None):
         if not start:
-            start = dt.utcnow() - timedelta(hours=2, minutes=10)
+            start = datetime.utcnow() - timedelta(hours=4)
         if not end:
-            end = dt.utcnow()
+            end = datetime.utcnow()
         # Pull exchange data
         return self.api.returnDepositsWithdrawals(start.timestamp(), end.timestamp()), start, end
 
@@ -123,11 +125,11 @@ class DBClient(object):
         try:
             prev_funds = pd.DataFrame.from_records(self.totalfunds.find().sort('date', pm.DESCENDING).limit(1))
             prevval = Decimal(prev_funds.funds[0])
-            start = prev_funds.date.astype(dt).values[0]
+            start = prev_funds.date.astype(datetime).values[0]
 
             Logger.debug(DBClient.update_funds, prev_funds)
 
-            self.update_deposits(*self.pull_transaction_data(start, date))
+            self.update_deposits(*self.pull_transaction_data(start - timedelta(hours=4), date))
 
             profit, deposits, withdrawals = self.calc_profit(prevval, start, date)
 
@@ -167,7 +169,7 @@ class DBClient(object):
 
                 new_funds = funds * (1 + self.discouted_profit(profit, owner['fee'])) + transactions
 
-                self.write_funds(owner['cpf'], date, new_funds)
+                self.write_funds(owner['cpf'], date, new_funds.quantize(Decimal('0E-8')))
 
                 Logger.info(DBClient.update_deposits, "New funds: %s" % str(new_funds))
 
@@ -199,13 +201,13 @@ class DBClient(object):
         if megali_deposits.shape[0] > 0:
             for i, row in megali_deposits.loc[megali_deposits.status == 'PENDING'].iterrows():
                 try:
+                    Logger.debug(DBClient.update_deposits, exchange_deposits)
+                    Logger.debug(DBClient.update_deposits, row.txid)
                     Logger.info(DBClient.update_deposits, exchange_deposits.loc[exchange_deposits.txid == row.txid])
-                    if exchange_deposits.loc[exchange_deposits.txid == row.txid].status[0] == 'COMPLETE':
-                        #                     megali_deposits.loc[i, 'status'] = 'COMPLETE'
+                    if exchange_deposits.loc[exchange_deposits.txid == row.txid].status.all() == 'COMPLETE':
                         self.deposits.update_one(
                             {"_id": megali_deposits.loc[i, '_id']},
-                            {"$set": {"status": "COMPLETE", 'date': dt.fromtimestamp(
-                                exchange_deposits.loc[exchange_deposits.txid == row.txid].timestamp)}}
+                            {"$set": {"status": "COMPLETE", }}
                         )
                 except Exception as e:
                     Logger.error(DBClient.update_deposits, self.parse_error(e))
@@ -285,31 +287,37 @@ class DBClient(object):
 
         return error_msg
 
-    def handle_req(self, req):
-        try:
-            Logger.info(DBClient.handle_req, '%s request received.' % req)
-            if req == 'update':
-                self.update_funds(dt.utcnow())
-                Logger.info(DBClient.handle_req, '%s request processed.' % req)
-
-                return "Done. Total funds: %s" % str(self.calc_portval())
-
-        except Exception as e:
-            Logger.error(DBClient.handle_req, 'Error: %s' % str(e))
-            return e
-
     def run(self):
-        try:
-            self.sock = self.context.socket(zmq.REP)
-            self.sock.bind(self.sock_addr)
-            while True:
-                rep = self.handle_req(self.sock.recv_string())
-                self.sock.send_string(str(rep))
-        except KeyboardInterrupt:
-            self.sock.close()
+        last_action_time = floor_datetime(datetime.utcnow(), self.period) - timedelta(minutes=3)
+        Logger.info(DBClient.run, "DB Start time: %s" % str(last_action_time))
+        can_act = True
+        while True:
+            try:
+                # Log action time
+                loop_time = datetime.utcnow()
+                Logger.info(DBClient.run, "DB Looptime: %s" % str(loop_time))
+                # Can act?
+                if loop_time >= last_action_time + timedelta(minutes=self.period):
+                    can_act = True
 
-        except Exception as e:
-            self.sock.send_string(str(e))
+                # If can act, run strategy and step environment
+                if can_act:
+                    # Log action time
+                    last_action_time = floor_datetime(loop_time + timedelta(minutes=10), self.period) - timedelta(minutes=3)
 
-        finally:
-            self.sock.close()
+                    Logger.info(DBClient.run, "DB Last action time: %s" % str(last_action_time))
+
+                    # Run deposit and withdrawals verification and update client and total funds
+                    self.update_funds(loop_time)
+
+                    # self.report()
+
+                    Logger.info(DBClient.run, "Total Funds: %s" % str(self.calc_portval()))
+
+                    can_act = False
+
+                else:
+                    sleep(60)
+
+            except KeyboardInterrupt:
+                break
