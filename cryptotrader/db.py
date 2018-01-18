@@ -8,12 +8,12 @@ from datetime import datetime as dt
 from datetime import timedelta
 import pymongo as pm
 from decimal import Decimal, localcontext, ROUND_UP, ROUND_DOWN
-from multiprocessing import Process
+from .utils import send_email
 import zmq
 from .utils import Logger
 
 class DBClient(object):
-    def __init__(self, db, api, context, sock_addr="ipc:///tmp/db.ipc"):
+    def __init__(self, db, api, context, email, sock_addr="ipc:///tmp/db.ipc"):
         self.deposits = db.deposits
         self.withdrawals = db.withdrawals
         self.funds = db.funds
@@ -22,6 +22,7 @@ class DBClient(object):
         self.api = api
         self.context = context
         self.sock_addr = sock_addr
+        self.email = email
 
     def calc_portval(self, quote="BTC"):
         with localcontext() as ctx:
@@ -45,23 +46,26 @@ class DBClient(object):
                     '$lte': end
                 },
                     'status': {'$eq': 'COMPLETE'}
-                })).funds.apply(
-                    lambda x: Decimal(x))
-
+                }))
+                deposits_sum = deposits.funds.apply(lambda x: Decimal(x)).sum()
             except AttributeError:
-                deposits = np.array([Decimal('0.0')])
+                deposits = pd.DataFrame(np.array([Decimal('0.0')]), columns=['funds'])
+                deposits_sum = Decimal('0.0')
 
             try:
                 withdrawals = pd.DataFrame.from_records(self.withdrawals.find({'date': {
                     '$gte': start,
                     '$lte': end
                     }
-                })).funds.apply(
-                    lambda x: Decimal(x))
+                }))
+                withdrawals_sum = withdrawals.funds.apply(lambda x: Decimal(x)).sum()
             except AttributeError:
-                withdrawals = np.array([Decimal('0.0')])
+                withdrawals = pd.DataFrame(np.array([Decimal('0.0')]), columns=['funds'])
+                withdrawals_sum = Decimal('0.0')
 
-            portval = self.calc_portval() - deposits.sum() + withdrawals.sum()
+            portval = self.calc_portval() - deposits_sum + withdrawals_sum
+
+            Logger.info(DBClient.calc_profit, (deposits, withdrawals, portval))
 
             return (portval - prevval) / prevval, deposits, withdrawals
 
@@ -85,11 +89,12 @@ class DBClient(object):
                     }
 
             self.clients.insert_one(data)
+            self.write_funds(str(cpf), date, '0.0')
             if funds:
                 self.deposit(cpf, date, txid, funds, currency)
 
         except Exception as e:
-            print("Something went wrong. Call the administrator!, error:", e)
+            Logger.error(DBClient.add_client, self.parse_error(e))
             return e
 
     def pull_transaction_data(self, start=None, end=None):
@@ -110,7 +115,7 @@ class DBClient(object):
             self.funds.insert_one(data)
 
         except Exception as e:
-            Logger.info(DBClient.write_funds, 'Error: %s' % str(e))
+            Logger.error(DBClient.write_funds, self.parse_error(e))
             return e
         return True
 
@@ -135,7 +140,7 @@ class DBClient(object):
                         self.funds.find(
                             {
                                 'date': {'$lte': date},
-                                'owner': {'$eq': owner['cpf']}
+                                'owner': {'$eq': str(owner['cpf'])}
                              }
                         ).sort('date', pm.DESCENDING).limit(1))['funds'][0])
 
@@ -146,12 +151,18 @@ class DBClient(object):
 
                 transactions = Decimal('0.0')
                 try:
-                     transactions += deposits[owner['name']]
-                except IndexError:
+                    d = Decimal(deposits[deposits.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
+                    if d.is_nan():
+                        d = Decimal('0.0')
+                    transactions += d
+                except AttributeError as e:
                     Logger.info(DBClient.update_deposits, "No deposits found for %s" % str(owner['cpf']))
                 try:
-                     transactions -= withdrawals[owner['name']]
-                except IndexError:
+                    w =  Decimal(withdrawals[withdrawals.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
+                    if w.is_nan():
+                        w = Decimal('0.0')
+                    transactions -= w
+                except AttributeError:
                     Logger.info(DBClient.update_deposits, "No withdrawals found for %s" % str(owner['cpf']))
 
                 new_funds = funds * (1 + self.discouted_profit(profit, owner['fee'])) + transactions
@@ -163,7 +174,7 @@ class DBClient(object):
             self.update_totalfunds(date)
 
         except Exception as e:
-            Logger.error(DBClient.update_funds, 'Error: %s' % str(e))
+            Logger.error(DBClient.update_funds, self.parse_error(e))
 
     def update_totalfunds(self, date):
         try:
@@ -174,7 +185,7 @@ class DBClient(object):
             self.totalfunds.insert_one(data)
 
         except Exception as e:
-            Logger.error(DBClient.update_totalfunds, 'Error: %s' % str(e))
+            Logger.error(DBClient.update_totalfunds, self.parse_error(e))
             return e
         return True
 
@@ -189,7 +200,7 @@ class DBClient(object):
             for i, row in megali_deposits.loc[megali_deposits.status == 'PENDING'].iterrows():
                 try:
                     Logger.info(DBClient.update_deposits, exchange_deposits.loc[exchange_deposits.txid == row.txid])
-                    if exchange_deposits.loc[exchange_deposits.txid == row.txid].status[i] == 'COMPLETE':
+                    if exchange_deposits.loc[exchange_deposits.txid == row.txid].status[0] == 'COMPLETE':
                         #                     megali_deposits.loc[i, 'status'] = 'COMPLETE'
                         self.deposits.update_one(
                             {"_id": megali_deposits.loc[i, '_id']},
@@ -197,7 +208,7 @@ class DBClient(object):
                                 exchange_deposits.loc[exchange_deposits.txid == row.txid].timestamp)}}
                         )
                 except Exception as e:
-                    Logger.error(DBClient.update_deposits, "Error: %s"% str(e))
+                    Logger.error(DBClient.update_deposits, self.parse_error(e))
                     return e
 
         return True
@@ -216,7 +227,7 @@ class DBClient(object):
                         {"$set": {"status": "COMPLETE"}}
                     )
             except Exception as e:
-                print("Something went wrong. Call the administrator!, error:", e)
+                Logger.error(DBClient.update_withdrawals, self.parse_error(e))
                 return e
 
         return True
@@ -234,7 +245,7 @@ class DBClient(object):
 
             self.deposits.insert_one(data)
         except Exception as e:
-            Logger.error(DBClient.deposit, "Error: %s" % str(e))
+            Logger.error(DBClient.deposit, self.parse_error(e))
 
     def withdraw(self, owner, date, txid, funds, currency, status='COMPLETE'):
         try:
@@ -249,7 +260,7 @@ class DBClient(object):
 
             self.withdrawals.insert_one(data)
         except Exception as e:
-            print("Something went wrong. Call the administrator!, error:", e)
+            Logger.error(DBClient.withdraw, self.parse_error(e))
 
     def create_indexes(self):
         self.clients.create_index([("date", pm.DESCENDING)])
@@ -257,8 +268,22 @@ class DBClient(object):
         self.withdrawals.create_index([("date", pm.DESCENDING)])
         self.deposits.create_index([("date", pm.DESCENDING)])
 
-    def report(self):
+    def report(self, profits, funds, date):
+
+        msg = "DataBase Report:\n"
+        msg += "date: %s" % str(date)
+        msg += ""
+
         return False
+
+    def parse_error(self, e, *args):
+        error_msg = '\n' + ' error -> ' + type(e).__name__ + ' in line ' + str(
+            e.__traceback__.tb_lineno) + ': ' + str(e)
+
+        for args in args:
+            error_msg += "\n" + str(args)
+
+        return error_msg
 
     def handle_req(self, req):
         try:
@@ -270,7 +295,7 @@ class DBClient(object):
                 return "Done. Total funds: %s" % str(self.calc_portval())
 
         except Exception as e:
-            Logger.info(DBClient.handle_req, 'Error: %s' % str(e))
+            Logger.error(DBClient.handle_req, 'Error: %s' % str(e))
             return e
 
     def run(self):
