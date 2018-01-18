@@ -511,7 +511,7 @@ class BacktestDataFeed(ExchangeConnection):
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], balance={}, load_dir=None):
-        super().__init__(period, pairs)
+        super().__init__()
         self.tapi = tapi
         self.ohlc_data = {}
         self._balance = balance
@@ -521,6 +521,8 @@ class BacktestDataFeed(ExchangeConnection):
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
+        self.pairs = pairs
+        self.period = period
 
     def returnBalances(self):
         return self._balance
@@ -657,9 +659,11 @@ class PaperTradingDataFeed(ExchangeConnection):
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], balance={}):
-        super().__init__(period, pairs)
+        super().__init__()
         self.tapi = tapi
         self._balance = balance
+        self.pairs = pairs
+        self.period = period
 
     def returnBalances(self):
         return self._balance
@@ -716,7 +720,9 @@ class PoloniexConnection(DataFeed):
         :param period: int: Data period
         :param pairs: list: Pairs to trade
         """
-        super().__init__(period, pairs, exchange, addr, timeout)
+        super().__init__(exchange, addr, timeout)
+        self.pairs = pairs
+        self.period = period
 
     @DataFeed.retry
     def returnChartData(self, currencyPair, period, start=None, end=None):

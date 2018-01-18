@@ -891,8 +891,10 @@ class NRS(APrioriAgent):
         self.cons = [
             {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
-            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)} # Maximum position concentration constraint
         ]
+
+        self.cons_tf = self.cons + [{'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)}] # Maximum position concentration constraint
+        self.cons_mr = self.cons + [{'type': 'ineq', 'fun': lambda w: (self.mpc / 2) - np.linalg.norm(w[:-1], ord=np.inf)}] # Maximum position concentration constraint
 
         self.b = None
         self.w = None
@@ -946,7 +948,7 @@ class NRS(APrioriAgent):
             self.loss,
             simplex_proj(self.opt.optimize(leader1, self.w[0])),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons,
+            constraints=self.cons_tf,
             options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
@@ -956,7 +958,7 @@ class NRS(APrioriAgent):
             self.loss,
             simplex_proj(self.opt.optimize(leader2, self.w[1])),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons,
+            constraints=self.cons_mr,
             options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
@@ -966,7 +968,7 @@ class NRS(APrioriAgent):
             self.loss,
             simplex_proj(self.w[2]),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons,
+            constraints=self.cons_mr,
             options={'maxiter': 300},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
@@ -979,10 +981,9 @@ class NRS(APrioriAgent):
             b = simplex_proj(self.pe.optimize(self.w[np.argmax(self.score)], self.b))
 
         # Log variables
-        self.log['score'] = "tf: %.4f, mr: %.4f, crp: %.4f, q: %.4f" % (self.score[0],
+        self.log['score'] = "tf: %.4f, mr: %.4f, crp: %.4f" % (self.score[0],
                                                                         self.score[1],
-                                                                        self.score[2],
-                                                                        self.score[3])
+                                                                        self.score[2])
         self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(x2, self.k), b)
         self.log['TCVaR'] = "%.6f" % risk.TCVaR(*risk.fit_t(np.dot(x1, b)))
         self.log['action'] = action
