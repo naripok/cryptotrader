@@ -67,7 +67,9 @@ class DBClient(object):
 
             Logger.info(DBClient.calc_profit, (deposits, withdrawals, portval))
 
-            return (portval - prevval) / prevval, deposits, withdrawals
+            with localcontext() as ctx:
+                ctx.rounding = ROUND_DOWN
+                return (portval - prevval) / prevval, deposits, withdrawals
 
     def discouted_profit(self, profit, fee='0.0025'):
         with localcontext() as ctx:
@@ -123,21 +125,24 @@ class DBClient(object):
 
     def update_funds(self, date):
         try:
+            # Get previous funds values
             prev_funds = pd.DataFrame.from_records(self.totalfunds.find().sort('date', pm.DESCENDING).limit(1))
             prevval = Decimal(prev_funds.funds[0])
             start = prev_funds.date.astype(datetime).values[0]
-
             Logger.debug(DBClient.update_funds, prev_funds)
 
+            # Update pending transactions
             self.update_deposits(*self.pull_transaction_data(start - timedelta(hours=4), date))
 
+            # Calculate step profit
             profit, deposits, withdrawals = self.calc_profit(prevval, start, date)
-
             Logger.debug(DBClient.update_funds, (profit, deposits, withdrawals))
 
+            # For each client, update funds value
             for owner in self.clients.find():
                 Logger.info(DBClient.update_deposits, "Updating %s funds..." % str(owner))
                 try:
+                    # find client last funds entry
                     funds = Decimal(pd.DataFrame.from_records(
                         self.funds.find(
                             {
@@ -145,34 +150,51 @@ class DBClient(object):
                                 'owner': {'$eq': str(owner['cpf'])}
                              }
                         ).sort('date', pm.DESCENDING).limit(1))['funds'][0])
-
                 except IndexError:
+                    # If not found, then there is no funds held
                     funds = Decimal('0.0')
 
-                Logger.info(DBClient.update_deposits, "Previous funds: %s" % str(funds))
+                Logger.info(DBClient.update_deposits, "%s previous funds: %s" % (str(owner['cpf']), str(funds)))
 
+                # Aggregate deposited funds
                 transactions = Decimal('0.0')
                 try:
-                    d = Decimal(deposits[deposits.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
-                    if d.is_nan():
-                        d = Decimal('0.0')
-                    transactions += d
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_DOWN
+                        d = Decimal(deposits[deposits.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
+                        if not d.is_nan():
+                            transactions += d
                 except AttributeError as e:
                     Logger.info(DBClient.update_deposits, "No deposits found for %s" % str(owner['cpf']))
+
+                # Aggregate withdrawn funds
                 try:
-                    w =  Decimal(withdrawals[withdrawals.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
-                    if w.is_nan():
-                        w = Decimal('0.0')
-                    transactions -= w
+                    with localcontext() as ctx:
+                        ctx.rounding = ROUND_UP
+                        w =  Decimal(withdrawals[withdrawals.owner == owner['cpf']].funds.apply(lambda x: Decimal(x)).sum())
+                        if not w.is_nan():
+                            transactions -= w
                 except AttributeError:
                     Logger.info(DBClient.update_deposits, "No withdrawals found for %s" % str(owner['cpf']))
 
-                new_funds = funds * (1 + self.discouted_profit(profit, owner['fee'])) + transactions
+                # Calculate new hold value
+                with localcontext() as ctx:
+                    ctx.rounding = ROUND_DOWN
+                    new_funds = funds * (1 + self.discouted_profit(profit, owner['fee'])) + transactions
 
+                # Write to database
                 self.write_funds(owner['cpf'], date, new_funds.quantize(Decimal('0E-8')))
+                Logger.info(DBClient.update_deposits, "%s new funds: %s" % (str(owner['cpf']), str(new_funds)))
 
-                Logger.info(DBClient.update_deposits, "New funds: %s" % str(new_funds))
+            # Calculate total liability funds, just for logging
+            df_funds = pd.DataFrame.from_records(self.funds.find())
 
+            account_funds = df_funds[df_funds.date == df_funds.iloc[-1].date].funds.apply(
+                lambda x: Decimal(x).quantize(Decimal('0E-8'))).sum()
+
+            Logger.info(DBClient.update_deposits, "Total liability funds: %s" % str(account_funds))
+
+            # Update account funds on database
             self.update_totalfunds(date)
 
         except Exception as e:
@@ -180,10 +202,15 @@ class DBClient(object):
 
     def update_totalfunds(self, date):
         try:
+            funds = self.calc_portval()
+
             data = {
                 'date': date,
-                'funds': str(self.calc_portval())
+                'funds': str(funds)
             }
+
+            Logger.info(DBClient.update_totalfunds, "Total asset funds: %s" % str(funds))
+
             self.totalfunds.insert_one(data)
 
         except Exception as e:
@@ -317,7 +344,7 @@ class DBClient(object):
                     can_act = False
 
                 else:
-                    sleep(60)
+                    sleep(60 * 2)
 
             except KeyboardInterrupt:
                 break

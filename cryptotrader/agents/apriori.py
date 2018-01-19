@@ -966,7 +966,7 @@ class NRS(APrioriAgent):
 
         self.w[2] = minimize(
             self.loss,
-            simplex_proj(self.w[2]),
+            simplex_proj(self.w[2] * 0.999 + (1 - 0.999) * self.crp),
             args=(*risk.polar_returns(x2, self.k), last_x1),
             constraints=self.cons_cr,
             options={'maxiter': 300},
