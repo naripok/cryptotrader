@@ -186,7 +186,7 @@ class FeedDaemon(Process):
                     raise TypeError("Bad call format.")
 
             except Exception as e:
-                send_email(self.email, "DataFeed Error", e)
+                send_email(self.email, "FeedDaemon Error", e)
                 sock.close()
                 raise e
 

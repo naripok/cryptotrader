@@ -77,7 +77,7 @@ class PursuitAndEvade(Optimizer):
 
     def compute_grad(self, w_leader, b):
         self.step += 1
-        return self.lr * (b - w_leader)
+        return self.lr * (b - w_leader) / (np.linalg.norm(b - w_leader) + 1) ** 2
 
     def update(self, grad, w):
         return w - grad

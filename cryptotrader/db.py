@@ -20,6 +20,7 @@ class DBClient(object):
         self.funds = db.funds
         self.totalfunds = db.totalfunds
         self.clients = db.clients
+        self.profits = db.profits
         self.api = api
         self.email = email
         self.period = period
@@ -36,7 +37,7 @@ class DBClient(object):
             portval += Decimal(balance[quote])
             return portval
 
-    def calc_profit(self, prevval, start, end):
+    def calc_profit(self, prevval, portval, start, end):
         with localcontext() as ctx:
             ctx.rounding = ROUND_DOWN
 
@@ -63,13 +64,29 @@ class DBClient(object):
                 withdrawals = pd.DataFrame(np.array([Decimal('0.0')]), columns=['funds'])
                 withdrawals_sum = Decimal('0.0')
 
-            portval = self.calc_portval() - deposits_sum + withdrawals_sum
+            portval = portval - deposits_sum + withdrawals_sum
 
             Logger.info(DBClient.calc_profit, (deposits, withdrawals, portval))
 
             with localcontext() as ctx:
                 ctx.rounding = ROUND_DOWN
                 return (portval - prevval) / prevval, deposits, withdrawals
+
+    def write_profits(self, date, profits):
+        try:
+            data = {
+                'date': date,
+                'funds': str(profits)
+            }
+
+            Logger.info(DBClient.write_profits, "Profits: %s" % str(profits))
+
+            self.profits.insert_one(data)
+
+        except Exception as e:
+            Logger.error(DBClient.write_profits, self.parse_error(e))
+            return e
+        return True
 
     def discouted_profit(self, profit, fee='0.0025'):
         with localcontext() as ctx:
@@ -134,9 +151,14 @@ class DBClient(object):
             # Update pending transactions
             self.update_deposits(*self.pull_transaction_data(start - timedelta(hours=4), date))
 
+            # Calc updated portval
+            portval = self.calc_portval()
+
             # Calculate step profit
-            profit, deposits, withdrawals = self.calc_profit(prevval, start, date)
-            Logger.debug(DBClient.update_funds, (profit, deposits, withdrawals))
+            profit, deposits, withdrawals = self.calc_profit(prevval, portval, start, date)
+            Logger.debug(DBClient.update_funds, "Step profit: %s, deposits; %s, withdrawals: %s" % (str(profit),
+                                                                                                    str(deposits),
+                                                                                                    str(withdrawals)))
 
             # For each client, update funds value
             for owner in self.clients.find():
@@ -189,32 +211,49 @@ class DBClient(object):
             # Calculate total liability funds, just for logging
             df_funds = pd.DataFrame.from_records(self.funds.find())
 
-            account_funds = df_funds[df_funds.date == df_funds.iloc[-1].date].funds.apply(
+            liability_funds = df_funds[df_funds.date == df_funds.iloc[-1].date].funds.apply(
                 lambda x: Decimal(x).quantize(Decimal('0E-8'))).sum()
 
-            Logger.info(DBClient.update_deposits, "Total liability funds: %s" % str(account_funds))
+            Logger.info(DBClient.update_deposits, "Total liability funds: %s" % str(liability_funds))
 
             # Update account funds on database
-            self.update_totalfunds(date)
+            self.write_totalfunds(date, portval)
 
+            # Update profits database
+            self.write_profits(date, profit)
+
+            profits = pd.DataFrame.from_records(self.profits.find().sort('date',
+            pm.DESCENDING).limit(360)).funds.apply(lambda x: Decimal(x))
+
+            price_relatives = profits.apply(lambda x: x + Decimal('1.0'))
+            cumulative_profits = (price_relatives.prod() - Decimal('1.0')) * Decimal('100.0')
+
+            self.report(date,
+                        profit,
+                        cumulative_profits,
+                        profits.astype('f').mean(),
+                        profits.astype('f').var(),
+                        deposits,
+                        withdrawals,
+                        portval,
+                        liability_funds
+                        )
         except Exception as e:
             Logger.error(DBClient.update_funds, self.parse_error(e))
 
-    def update_totalfunds(self, date):
+    def write_totalfunds(self, date, funds):
         try:
-            funds = self.calc_portval()
-
             data = {
                 'date': date,
                 'funds': str(funds)
             }
 
-            Logger.info(DBClient.update_totalfunds, "Total asset funds: %s" % str(funds))
+            Logger.info(DBClient.write_totalfunds, "Total asset funds: %s" % str(funds))
 
             self.totalfunds.insert_one(data)
 
         except Exception as e:
-            Logger.error(DBClient.update_totalfunds, self.parse_error(e))
+            Logger.error(DBClient.write_totalfunds, self.parse_error(e))
             return e
         return True
 
@@ -297,14 +336,6 @@ class DBClient(object):
         self.withdrawals.create_index([("date", pm.DESCENDING)])
         self.deposits.create_index([("date", pm.DESCENDING)])
 
-    def report(self, profits, funds, date):
-
-        msg = "DataBase Report:\n"
-        msg += "date: %s" % str(date)
-        msg += ""
-
-        return False
-
     def parse_error(self, e, *args):
         error_msg = '\n' + ' error -> ' + type(e).__name__ + ' in line ' + str(
             e.__traceback__.tb_lineno) + ': ' + str(e)
@@ -313,6 +344,28 @@ class DBClient(object):
             error_msg += "\n" + str(args)
 
         return error_msg
+
+    def report(self, date, profit, cumulative_profit, p_mean, p_var, deposits, withdrawals, total_funds, total_liability):
+        try:
+            msg = "Database Report.\n"
+            msg += "date: %s\n\n" % str(date)
+            msg += "Step profit: %s %%\n" % str(Decimal(profit).quantize(Decimal('0E-8')) * Decimal('100'))
+            msg += "Cumulative profit last month: %s %%\n\n" % str(cumulative_profit.quantize(Decimal('0E-8')))
+            msg += "Profits mean last month: %s %%\n" % str(p_mean)
+            msg += "Profits var last month: %s %%\n\n" % str(p_var)
+            msg += "Total account funds: %s BTC\n" % str(Decimal(total_funds).quantize(Decimal('0E-8')))
+            msg += "Total liability: %s BTC\n" % str(Decimal(total_liability).quantize(Decimal('0E-8')))
+
+            megali_cash = (Decimal(total_funds) - Decimal(total_liability)).quantize(Decimal('0E-8'))
+            msg += "Megali cash and cash equivalents: %s BTC [%s %%]\n" % (str(megali_cash), str((megali_cash / Decimal(total_funds)).quantize(Decimal('0E-4'))))
+
+            msg += "step validated deposits:\n%s\n" % str(deposits)
+            msg += "step validated withdrawals:\n%s\n" % str(withdrawals)
+
+            send_email(self.email, "Database Report", msg)
+
+        except Exception as e:
+            Logger.error(DBClient.report, self.parse_error(e))
 
     def run(self):
         last_action_time = floor_datetime(datetime.utcnow(), self.period) - timedelta(minutes=3)
@@ -336,10 +389,6 @@ class DBClient(object):
 
                     # Run deposit and withdrawals verification and update client and total funds
                     self.update_funds(loop_time)
-
-                    # self.report()
-
-                    Logger.info(DBClient.run, "Total Funds: %s" % str(self.calc_portval()))
 
                     can_act = False
 

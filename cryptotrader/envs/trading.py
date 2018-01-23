@@ -1041,7 +1041,7 @@ class TradingEnvironment(Env):
                        x_axis_label='timestep',
                        y_axis_label='position',
                        plot_width=900, plot_height=400 + len(self.pairs) * 5,
-                       tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover],
+                       tools=['crosshair','reset','xwheel_zoom','pan,box_zoom', pos_hover, 'save'],
                        toolbar_location="above"
                        )
         config_fig(p_pos)
@@ -1076,7 +1076,7 @@ class TradingEnvironment(Env):
                        x_axis_label='timestep',
                        y_axis_label='value',
                        plot_width=900, plot_height=400,
-                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
+                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover, 'save'],
                        toolbar_location="above"
                        )
         config_fig(p_val)
@@ -1099,7 +1099,7 @@ class TradingEnvironment(Env):
                        x_axis_label='timestep',
                        y_axis_label='performance',
                        plot_width=900, plot_height=400 + len(self.pairs) * 5,
-                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover],
+                       tools=['crosshair', 'reset', 'xwheel_zoom', 'pan,box_zoom', val_hover, 'save'],
                        toolbar_location="above"
                        )
         config_fig(p_pval)
@@ -1119,7 +1119,7 @@ class TradingEnvironment(Env):
                        x_axis_label='timestep',
                        y_axis_label='Returns',
                        plot_width=900, plot_height=400,
-                       tools=['crosshair','reset','xwheel_zoom','pan,box_zoom'],
+                       tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                        toolbar_location="above"
                        )
         config_fig(p_ret)
@@ -1148,7 +1148,7 @@ class TradingEnvironment(Env):
                         x_axis_label='Pct Change',
                         y_axis_label='frequency',
                         plot_width=900, plot_height=400,
-                        tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                        tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                         toolbar_location="above"
                         )
         config_fig(p_hist)
@@ -1173,10 +1173,10 @@ class TradingEnvironment(Env):
         p_hist.add_layout(Label(x=quantiles[1], y=0, text='%.06f' % quantiles[1], text_color='yellow', angle=45))
 
         # PDF
-        x = np.linspace(df.returns.min(), df.returns.max(), 1000)
-        pdf = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-(x - mu) ** 2 / (2 * sigma ** 2))
-
-        p_hist.line(x, pdf, line_color="#D95B43", line_width=1.8, alpha=0.7)
+        # x = np.linspace(df.returns.min(), df.returns.max(), 1000)
+        # pdf = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-(x - mu) ** 2 / (2 * sigma ** 2))
+        #
+        # p_hist.line(x, pdf, line_color="#D95B43", line_width=1.8, alpha=0.7)
         results['cihist'] = p_hist.line(np.linspace(quantiles[0], quantiles[1], 1000), 0, line_color='yellow',
                     line_width=3, alpha=0.7, line_dash='dashed')
         p_hist.add_layout(Legend(items=[
@@ -1190,7 +1190,7 @@ class TradingEnvironment(Env):
                          x_axis_label='timestep',
                          y_axis_label='alpha',
                          plot_width=900, plot_height=270,
-                         tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                         tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                          toolbar_location="above"
                          )
         config_fig(p_alpha)
@@ -1214,7 +1214,7 @@ class TradingEnvironment(Env):
                         x_axis_label='timestep',
                         y_axis_label='beta',
                         plot_width=900, plot_height=270,
-                        tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                        tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                         toolbar_location="above"
                         )
         config_fig(p_beta)
@@ -1238,7 +1238,7 @@ class TradingEnvironment(Env):
                           x_axis_label='timestep',
                           y_axis_label='Sharpe ratio',
                           plot_width=900, plot_height=270,
-                          tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                          tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                           toolbar_location="above"
                           )
         config_fig(p_sharpe)
@@ -1262,7 +1262,7 @@ class TradingEnvironment(Env):
                       x_axis_label='timestep',
                       y_axis_label='drawdown',
                       plot_width=900, plot_height=270,
-                      tools='crosshair,reset,xwheel_zoom,pan,box_zoom',
+                      tools=['crosshair','reset','xwheel_zoom','pan', 'box_zoom', 'save'],
                       toolbar_location="above"
                       )
         config_fig(p_dd)
