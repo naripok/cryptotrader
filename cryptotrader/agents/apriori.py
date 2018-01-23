@@ -774,8 +774,7 @@ class NRS(APrioriAgent):
         self.window = window - 1
         self.k = k
         self.mpc = mpc
-        self.opt1 = gt.MultiplicativeWeights(lr)
-        self.opt2 = gt.MultiplicativeWeights(lr)
+        self.opt = gt.MultiplicativeWeights(lr)
         self.pe = gt.PursuitAndEvade(gradlr)
         self.beta = beta
         self.lr = lr
@@ -784,11 +783,9 @@ class NRS(APrioriAgent):
         self.cons = [
             {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)}
+            # Maximum position concentration constraint
         ]
-
-        self.cons_tf = self.cons + [{'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)}] # Maximum position concentration constraint
-        # self.cons_tf = self.cons_tf + [{'type': 'eq', 'fun': lambda w: w[-1]}]  # Maximum position concentration constraint
-        self.cons_mr = self.cons + [{'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)}] # Maximum position concentration constraint
 
         self.b = None
         self.w = None
@@ -810,17 +807,9 @@ class NRS(APrioriAgent):
 
         return factor, factor2
 
-    def loss_tf(self, w, R, Z, x):
+    def loss(self, w, R, Z, x):
         # minimize allocation risk
-        return risk.ERI(R, Z, w) + w[-1]# * ((x + 1).mean() * (x + 1).std()) ** 2
-
-    def loss_mr(self, w, R, Z, x):
-        # minimize allocation risk
-        return risk.ERI(R, Z, w) + w[-1]# * ((x + 1).mean() * (x + 1).std()) ** 2
-
-    # def loss_minrisk(self, w, R, Z, x):
-    #     # minimize allocation risk
-    #     return risk.ERI(R, Z, w) + w[-1] * ((x + 1).mean() * (x + 1).var()) ** 2
+        return risk.ERI(R, Z, w) + (w[-1] * (x + 1).mean() * x.var())
 
     def update(self, b, x1, x2):
 
@@ -847,30 +836,30 @@ class NRS(APrioriAgent):
 
         # self.opt1.lr = self.lr / np.exp((self.score[1] + self.score[0]))
         self.w[0] = minimize(
-            self.loss_tf,
-            self.opt1.optimize(leader1, self.w[0]),
+            self.loss,
+            self.opt.optimize(leader1, self.w[0]),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons_tf,
-            options={'maxiter': 300},
+            constraints=self.cons,
+            options={'maxiter': 600},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
 
         self.w[1] = minimize(
-            self.loss_mr,
-            self.opt2.optimize(leader2, self.w[1]),
+            self.loss,
+            self.opt.optimize(leader2, self.w[1]),
             args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons_mr,
-            options={'maxiter': 300},
+            constraints=self.cons,
+            options={'maxiter': 600},
             tol=1e-6,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
 
         # self.w[2] = minimize(
-        #     self.loss_minrisk,
+        #     self.loss,
         #     self.w[2] * self.beta + (1 - self.beta) * self.crp,
         #     args=(*risk.polar_returns(x2, self.k), last_x1),
-        #     constraints=self.cons_mr,
+        #     constraints=self.cons,
         #     options={'maxiter': 300},
         #     tol=1e-6,
         #     bounds=tuple((0,1) for _ in range(b.shape[0]))
@@ -883,10 +872,10 @@ class NRS(APrioriAgent):
 
         # Log variables
         self.log['score'] = "tf: %.4f, mr: %.4f" % (self.score[0],
-                                                    self.score[1]
+                                                    self.score[1],
                                                     # self.score[2]
                                                    )
-        self.log['lr'] = "%.4f" % self.opt1.lr
+        self.log['lr'] = "%.4f" % self.opt.lr
         self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(x2, self.k), b)
         self.log['TCVaR'] = "%.6f" % risk.TCVaR(*risk.fit_t(np.dot(x1, b)))
         self.log['action'] = action
@@ -913,12 +902,6 @@ class NRS(APrioriAgent):
             self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(2)])# + [quote.reshape([1, -1])])
             self.b = self.crp
             self.score = np.zeros(self.w.shape[0])
-
-            # Constant rebalance contraints
-            # self.cons_cr = self.cons + [{'type': 'ineq', 'fun': lambda w: 2 / self.crp.shape[0] - np.linalg.norm(w[:-1],
-            #                                                                                ord=np.inf)}]  # Maximum position concentration constraint
-
-            # AdaGrad square gradient, started with ones for stability
             self.init = True
 
         if self.step:
