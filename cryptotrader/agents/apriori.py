@@ -423,112 +423,6 @@ class ConstantRebalance(APrioriAgent):
                                             for key in kwargs]))[:-1], [0.0])
 
 
-# Momentum
-class Momentum(APrioriAgent):
-    """
-    Momentum trading agent
-    """
-    def __repr__(self):
-        return "Momentum"
-
-    def __init__(self, ma_span=[2, 3], weights=[1., 1.], mean_type='kama', sensitivity=0.1, rebalance=True,
-                 activation=simplex_proj, fiat="BTC"):
-        """
-        :param mean_type: str: Mean type to use. It can be simple, exp or kama.
-        """
-        super().__init__(fiat=fiat)
-        self.mean_type = mean_type
-        self.ma_span = ma_span
-        self.weights = weights
-        self.sensitivity = sensitivity
-        self.activation = activation
-        if rebalance:
-            self.reb = -2
-        else:
-            self.reb = -1
-
-    def get_ma(self, df):
-        if self.mean_type == 'exp':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.ewm(span=window).mean()
-        elif self.mean_type == 'kama':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = tl.KAMA(df.open.values, timeperiod=window)
-        elif self.mean_type == 'simple':
-            for window in self.ma_span:
-                df[str(window) + '_ma'] = df.open.rolling(window).mean()
-        else:
-            raise TypeError("Wrong mean_type param")
-        return df
-
-    def predict(self, obs):
-        """
-        Performs a single step on the environment
-        """
-        try:
-            obs = obs.astype(np.float64)
-            factor = np.zeros(obs.columns.levels[0].shape[0], dtype=np.float64)
-            for key, symbol in enumerate([s for s in obs.columns.levels[0] if s is not self.fiat]):
-                df = obs.loc[:, symbol].copy()
-                df = self.get_ma(df.iloc[-(self.ma_span[1] + 1):])
-
-                p = (df['%d_ma' % self.ma_span[0]].iat[-1] - df['%d_ma' % self.ma_span[1]].iat[-1])
-
-                d = (df['%d_ma' % self.ma_span[0]].iloc[-2:] - df['%d_ma' % self.ma_span[1]].iloc[-2:]).diff()
-
-                factor[key] = self.weights[0] * (p + self.weights[1] * d.iat[-1])
-
-
-            return array_normalize(factor)
-
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
-
-    def update(self, b, x):
-        """
-        Update portfolio weights to satisfy constraint b * x <= eps
-        and minimize distance to previous portfolio.
-        :param b: numpy array: Last portfolio vector
-        :param x: numpy array: Price movement prediction
-        """
-        x_mean = np.mean(x)
-        portvar = np.dot(b, x)
-
-        change = abs((portvar + x[np.argmax(abs(x - x_mean))]) / 2)
-
-        lam = np.clip(safe_div((change - self.sensitivity), np.linalg.norm(x - x_mean)) ** 2, 0.0, 1e6)
-
-        # update portfolio
-        b = b + lam * (x - x_mean)
-
-        # project it onto simplex
-        return self.activation(b)
-
-    def rebalance(self, obs):
-        try:
-            obs = obs.astype(np.float64)
-            if self.step == 0:
-                n_pairs = obs.columns.levels[0].shape[0]
-                action = np.ones(n_pairs)
-                action[-1] = 0
-                return array_normalize(action)
-            else:
-                prev_posit = self.get_portfolio_vector(obs, index=self.reb)
-                factor = self.predict(obs)
-                return self.update(prev_posit, factor)
-
-        except TypeError as e:
-            print("\nYou must fit the model or provide indicator parameters in order for the model to act.")
-            raise e
-
-    def set_params(self, **kwargs):
-        self.weights = [kwargs['alpha_v'], kwargs['alpha_a']]
-        self.mean_type = kwargs['mean_type']
-        self.ma_span = [int(kwargs['ma1']), int(kwargs['ma2'])]
-        self.std_span = int(kwargs['std_span'])
-
-
 # No regret
 class ONS(APrioriAgent):
     """
@@ -543,7 +437,7 @@ class ONS(APrioriAgent):
     def __repr__(self):
         return "ONS"
 
-    def __init__(self, delta=0.125, beta=1, eta=0., clip_grads=1e6, mr=False, fiat="BTC", name="ONS"):
+    def __init__(self, delta=0.125, beta=1, eta=0., fiat="BTC", name="ONS"):
         """
         :param delta, beta, eta: Model parameters. See paper.
         """
@@ -551,17 +445,10 @@ class ONS(APrioriAgent):
         self.delta = delta
         self.beta = beta
         self.eta = eta
-        self.clip = clip_grads
-        self.mr = mr
-        self.init = False
 
     def predict(self, obs):
         prices = obs.xs('open', level=1, axis=1).astype(np.float64)
-        if self.mr:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-2], x[-1])).values, [1.0])
-        else:
-            price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
-
+        price_relative = np.append(prices.apply(lambda x: safe_div(x[-1], x[-2])).values, [1.0])
         return price_relative
 
     def rebalance(self, obs):
@@ -760,21 +647,16 @@ class ORAMW(APrioriAgent):
     References:
         Extreme Risk Index:
         https://arxiv.org/pdf/1505.04045.pdf
-
-        AdaGrad:
-        http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf
     """
     def __repr__(self):
         return "Online Risk Averse Multiplicative Weights"
 
-    def __init__(self, window=120, k=0.1, lr=0.5, gradlr=1e-2,
-                 mpc=1, fiat="BTC", name='ORAGS'):
+    def __init__(self, window=120, k=0.1, lr=0.5, mpc=1, fiat="BTC", name='ORAGS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
         self.mpc = mpc
         self.opt = gt.MultiplicativeWeights(lr)
-        self.lr = lr
 
         # Extreme risk index
         self.cons = [
@@ -796,16 +678,16 @@ class ORAMW(APrioriAgent):
         prices = obs.xs('open',level=1, axis=1)
 
         factor = np.hstack([prices.rolling(2).apply(
-            lambda x: safe_div(x[-1], x[-2]) - 1).dropna().values, np.zeros((self.window, 1))])
+            lambda x: np.log(safe_div(x[-1], x[-2]))).dropna().values, np.zeros((self.window, 1))])
 
         factor2 = np.hstack([prices.rolling(2).apply(
-            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values, np.zeros((self.window, 1))])
+            lambda x: np.log(safe_div(x[-2], x[-1]))).dropna().values, np.zeros((self.window, 1))])
 
         return factor, factor2
 
     def loss(self, w, R, Z, x):
         # minimize allocation risk
-        return risk.ERI(R, Z, w) + (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
+        return risk.ERI(R, Z, w) + w[-1] * np.exp(x).mean() * x.var()
 
     def update(self, b, x, x2):
 
@@ -865,7 +747,7 @@ class ORAMW(APrioriAgent):
         if 'k' in kwargs:
             self.k = kwargs['k']
         if 'lr' in kwargs:
-            self.lr = kwargs['lr']
+            self.opt.lr = kwargs['lr']
         if 'mpc' in kwargs:
             self.mpc = kwargs['mpc']
 
@@ -878,7 +760,7 @@ class NRS(APrioriAgent):
         return "Pursuit and Evade No-Regret System"
 
     def __init__(self, window=120, k=0.1, lr=0.5, gradlr=1e-2, beta=0.5,
-                 mpc=1, fiat="BTC", name='ORAGS'):
+                 mpc=1, fiat="BTC", name='NRS'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
@@ -886,12 +768,14 @@ class NRS(APrioriAgent):
         self.opt = gt.MultiplicativeWeights(lr)
         self.pe = gt.PursuitAndEvade(gradlr)
         self.beta = beta
+        self.lr = lr
 
         # Extreme risk index
         self.cons = [
             {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
             {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
-            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=np.inf)} # Maximum position concentration constraint
+            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w, ord=np.inf)}
+            # Maximum position concentration constraint
         ]
 
         self.b = None
@@ -904,88 +788,241 @@ class NRS(APrioriAgent):
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        prices = obs.xs('open',level=1, axis=1)
+        prices = obs.xs('open', level=1, axis=1)
+        log_returns = np.hstack([prices.rolling(2).apply(
+            lambda x: np.log(safe_div(x[-1], x[-2]))).dropna().values, np.zeros((self.window, 1))])
+        return log_returns
 
-        factor = np.hstack([prices.rolling(2).apply(
-            lambda x: safe_div(x[-1], x[-2]) - 1).dropna().values, np.zeros((self.window, 1))])
+    # Pareto Extreme Risk Index
+    @staticmethod
+    def estimate_alpha(R):
+        return safe_div((R.shape[0] - 1), np.log(safe_div(R[:-1], R[-1])).sum())
 
-        factor2 = np.hstack([prices.rolling(2).apply(
-            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values, np.zeros((self.window, 1))])
+    @staticmethod
+    def estimate_gamma(alpha, Z, w):
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
 
-        return factor, factor2
-
-    def loss(self, w, R, Z, x):
+    def loss_tf(self, w, alpha, Z, x):
         # minimize allocation risk
-        return risk.ERI(R, Z, w) + w[-1]# (w[-1] * (x + 1).mean() * (x + 1).std()) ** 2
+        return self.estimate_gamma(alpha, Z, w) + w[-1] * np.exp(x).mean() * x.var()
 
-    def update(self, b, x1, x2):
+    def loss_eri(self, w, alpha, Z, b):
+        # minimize allocation risk
+        return self.estimate_gamma(alpha, Z, w) + np.linalg.norm(b - w) ** 2
 
+    def update(self, b, x):
         # Update portfolio with no regret
-        last_x1 = x1[-1, :]
-        last_x2 = x2[-1, :]
+        last_x = x[-1, :]
+        self.r_hat = self.beta * self.r_hat + (1 - self.beta) * last_x
+
+        # ERI params
+        R, Z = risk.polar_returns(-x, self.k)
+        alpha = self.estimate_alpha(R)
 
         # Compute experts scores
         for i in range(self.score.shape[0]):
-            self.score[i] = self.score[i] * self.beta + (1 - self.beta) * np.dot(last_x1, self.w[i])
+            self.score[i] = self.score[i] * self.beta + (1 - self.beta) * np.dot(last_x, self.w[i])
+
+        cons = self.cons + [{'type': 'eq', 'fun': lambda w:
+            np.dot(w, self.r_hat) - np.clip(0.001, 0.0, self.r_hat.max())}]
 
         # Choose to follow or pursuit
         best_w = self.w[np.argmax(self.score)]
-        if np.allclose(self.b, best_w, 1e-2, 1e-2):
+        if np.allclose(b, best_w, 1e-2, 1e-2):
             action = 'follow'
         else:
             action = 'pursuit'
 
         # Update experts
-        leader1 = np.zeros_like(last_x1)
-        leader1[np.argmax(last_x1)] = -1
-        leader2 = np.zeros_like(last_x2)
-        leader2[np.argmax(last_x2)] = -1
+        leader = np.zeros_like(last_x)
+        leader[np.argmax(last_x)] = -1
 
-        # Manage allocation risk
+        # self.opt1.lr = self.lr / np.exp((self.score[1] + self.score[0]))
         self.w[0] = minimize(
-            self.loss,
-            simplex_proj(self.opt.optimize(leader1, self.w[0])),
-            args=(*risk.polar_returns(x2, self.k), last_x1),
+            self.loss_tf,
+            self.opt.optimize(leader, self.w[0]),
+            args=(alpha, Z, last_x),
             constraints=self.cons,
-            options={'maxiter': 300},
-            tol=1e-6,
+            options={'maxiter': 666},
+            tol=1e-7,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
 
         self.w[1] = minimize(
-            self.loss,
-            simplex_proj(self.opt.optimize(leader2, self.w[1])),
-            args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons,
-            options={'maxiter': 300},
-            tol=1e-6,
+            self.loss_eri,
+            self.w[1],
+            args=(alpha, Z, self.w[1]),
+            constraints=cons,
+            options={'maxiter': 666},
+            tol=1e-7,
             bounds=tuple((0,1) for _ in range(b.shape[0]))
         )['x']
-
-        self.w[2] = minimize(
-            self.loss,
-            simplex_proj(self.w[2]),
-            args=(*risk.polar_returns(x2, self.k), last_x1),
-            constraints=self.cons,
-            options={'maxiter': 300},
-            tol=1e-6,
-            bounds=tuple((0,1) for _ in range(b.shape[0]))
-        )['x']
-
 
         if action == 'follow':
             b = simplex_proj(self.w[np.argmax(self.score)])
         elif action == 'pursuit':
-            b = simplex_proj(self.pe.optimize(self.w[np.argmax(self.score)], self.b))
+            b = simplex_proj(self.pe.optimize(self.w[np.argmax(self.score)], b))
 
         # Log variables
-        self.log['score'] = "tf: %.4f, mr: %.4f, crp: %.4f, q: %.4f" % (self.score[0],
-                                                                        self.score[1],
-                                                                        self.score[2],
-                                                                        self.score[3])
-        self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(x2, self.k), b)
-        self.log['TCVaR'] = "%.6f" % risk.TCVaR(*risk.fit_t(np.dot(x1, b)))
+        self.log['score'] = "tf: %.4f, mr: %.4f" % (self.score[0], self.score[1])
+        self.log['ERI'] = "%.8f" % risk.ERI(*risk.polar_returns(-x, self.k), b)
+        self.log['TCVaR'] = "%.2f" % risk.TCVaR(*risk.fit_t(np.dot(x, b)))
+        self.log['alpha'] = "%.2f" % alpha
+        self.log['CC'] = "%.2f" % np.power(b, 2).sum() ** -1
         self.log['action'] = action
+        self.log['lr'] = "%.2f" % self.opt.lr
+        self.log['beta'] = "%.2f" % self.beta
+        self.log['mpc'] = "%.2f" % self.mpc
+
+        return b
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.step:
+            n_pairs = obs.columns.levels[0].shape[0]
+            crp = np.ones(n_pairs)
+            crp[-1] = 0
+
+            self.crp = array_normalize(crp)
+            self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(2)])
+            self.b = self.crp
+            self.r_hat = np.zeros(n_pairs)
+            self.score = np.zeros(self.w.shape[0])
+            return self.crp
+
+        x = self.predict(obs)
+        self.b = self.update(self.b, x)
+        return self.b
+
+
+class AdaHedge(APrioriAgent):
+    """
+    AdaHedge
+    https://arxiv.org/pdf/1301.0534.pdf
+    """
+    def __repr__(self):
+        return "AdaHedge"
+
+    def __init__(self, window=3, eta=0.999, fiat="BTC", name='AdaHedge'):
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.opt = gt.HigherOrderMultiplicativeWeights(1, 8)
+        self.eta = eta
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        prices = obs.xs('open',level=1, axis=1)
+        factor = np.hstack([prices.rolling(2).apply(
+            lambda x: np.log(safe_div(x[-1], x[-2]))).dropna().values, np.zeros((self.window, 1))])
+
+        return factor
+
+    def update(self, b, x):
+        # Update portfolio with no regret
+        last_x = x[-1, :]
+        experts_losses = -last_x
+
+        h = np.dot(experts_losses, b)
+        m = (-1 / self.opt.lr) * np.log(np.dot(b, exp_approx(-self.opt.lr * experts_losses, order=8)))
+        delta = h - m
+        self.delta = self.eta * self.delta + delta
+
+        # Update learning rate
+        self.opt.lr = np.log(b.shape[0]) / self.delta
+
+        # Update weights
+        b = array_normalize(self.opt.optimize(experts_losses, b * self.eta + (1 - self.eta) * self.crp))
+
+        # Log variables
+        self.log['lr'] = "%.4f" % self.opt.lr
+        self.log['delta'] = "%.4f" % self.delta
+        self.log['eta'] = "%.4f" % self.eta
+
+        # Return updated portfolio
+        return b
+
+    def rebalance(self, obs):
+        """
+        Performs portfolio rebalance within environment
+        :param obs: pandas DataFrame: Environment observation
+        :return: numpy array: Portfolio vector
+        """
+        if not self.step:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = self.b = array_normalize(action)
+
+            # AdaHedge accumulators
+            self.delta = 1
+
+            return self.crp
+
+        x = self.predict(obs)
+        self.b = self.update(self.b, x)
+        return self.b
+
+
+class Flipflop(APrioriAgent):
+    """
+    Flipflop
+    https://arxiv.org/pdf/1301.0534.pdf
+    """
+
+    def __repr__(self):
+        return "Flipflop"
+
+    def __init__(self, window=120, phi=1.1, alpha=0.1, fiat="BTC", name='Flipflop'):
+        super().__init__(fiat=fiat, name=name)
+        self.window = window - 1
+        self.opt = gt.HigherOrderMultiplicativeWeights(1, order=8)
+        self.scale = np.array([phi / alpha, alpha])
+
+    def predict(self, obs):
+        """
+        Performs prediction given environment observation
+        :param obs: pandas DataFrame: Environment observation
+        """
+        prices = obs.xs('open', level=1, axis=1)
+
+        factor = np.hstack([prices.rolling(2).apply(
+            lambda x: np.log(safe_div(x[-1], x[-2]))).dropna().values, np.zeros((self.window, 1))])
+
+        return factor
+
+    def update(self, b, x):
+        # Update portfolio with no regret
+        last_x = x[-1, :]
+        experts_loss = -last_x
+
+        # losses
+        h = np.dot(experts_loss, b)
+        m = (-1 / self.opt.lr) * np.log(np.dot(b, np.exp(-self.opt.lr * experts_loss)))
+        delta = h - m
+
+        # Accumulate delta
+        self.delta[self.regime] += delta
+
+        if self.delta[self.regime] > self.scale[self.regime] * self.delta[1 - self.regime]:
+            self.regime = 1 - self.regime
+
+        if self.regime == 0:
+            self.opt.lr = 1e3
+        else:
+            self.opt.lr = np.log(b.shape[0]) / self.delta[1]
+
+        b = simplex_proj(self.opt.optimize(experts_loss, b))
+
+        # Log variables
+        self.log['lr'] = "%.4f" % self.opt.lr
+        self.log['delta'] = "%s" % str(self.delta)
 
         # Return best portfolio
         return b
@@ -996,41 +1033,21 @@ class NRS(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if not self.init:
+        if not self.step:
             n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = self.b = array_normalize(action)
 
-            crp = np.ones(n_pairs)
-            crp[-1] = 0
+            # AdaHedge accumulators
+            self.delta = np.ones(2, dtype=np.float64) * 1e-3
+            self.regime = 0
 
-            quote = np.zeros(n_pairs)
-            quote[-1] = 1
-
-            self.crp = array_normalize(crp)
-            self.w = np.vstack([self.crp.reshape([1, -1]) for _ in range(3)] + [quote.reshape([1, -1])])
-            self.b = self.crp
-            self.score = np.zeros(self.w.shape[0])
-
-            # AdaGrad square gradient, started with ones for stability
-            self.init = True
-
-        if self.step:
-            # b = self.get_portfolio_vector(obs)
-            x, x2 = self.predict(obs)
-            self.b = self.update(self.b, x, x2)
-            return self.b
-
-        else:
             return self.crp
 
-    def set_params(self, **kwargs):
-        if 'window' in kwargs:
-            self.window = int(kwargs['window'])
-        if 'k' in kwargs:
-            self.k = kwargs['k']
-        if 'lr' in kwargs:
-            self.lr = kwargs['lr']
-        if 'mpc' in kwargs:
-            self.mpc = kwargs['mpc']
+        x = self.predict(obs)
+        self.b = self.update(self.b, x)
+        return self.b
 
 
 # Pattern trading
@@ -1806,7 +1823,7 @@ class Anticor(APrioriAgent):
             if total_claim != 0:
                 transfer[i, :] = b[i] * safe_div(claim[i, :], total_claim)
 
-        b += + np.sum(transfer, axis=0) - np.sum(transfer, axis=1)
+        b += np.sum(transfer, axis=0) - np.sum(transfer, axis=1)
 
         return np.append(simplex_proj(b), [0.0])
 
@@ -2053,147 +2070,77 @@ class ERI(APrioriAgent):
     def __repr__(self):
         return "Extreme Risk Index"
 
-    def __init__(self, factor=models.price_relative, window=300, k=0.1, factor_kwargs={},
-                 fiat="BTC", name='ERI'):
+    def __init__(self, window=300, k=0.1, mpc=0.3, beta=0.999, fiat="BTC", name='ERI'):
         super().__init__(fiat=fiat, name=name)
         self.window = window - 1
         self.k = k
-        self.factor = factor
-        self.factor_kwargs = factor_kwargs
-        self.init = False
+        self.mpc = mpc
+        self.beta = beta
 
-    def predict(self, obs):
-        """
-        Performs prediction given environment observation
-        :param obs: pandas DataFrame: Environment observation
-        """
-        factor = self.factor(obs, **self.factor_kwargs)
-        regression = models.tsf(factor, self.factor_kwargs['period']).iloc[-1].values
-        return np.append(regression, [1.0])
-
-    def polar_returns(self, obs):
-        """
-        Calculate polar return
-        :param obs: pandas DataFrame
-        :return: return radius, return angles
-        """
-        # Find relation between price and previous price
-        prices = obs.xs('open', level=1, axis=1).astype(np.float64).iloc[-self.window - 1:]
-        price_relative = np.hstack([np.mat(prices.rolling(2).apply(
-            lambda x: safe_div(x[-2], x[-1]) - 1).dropna().values), np.zeros((self.window, 1))])
-
-        # Find the radius and the angle decomposition on price relative vectors
-        radius = np.linalg.norm(price_relative, ord=1, axis=1)
-        angle = np.divide(price_relative, np.mat(radius).T)
-
-        # Select the 'window' greater values on the observation
-        index = np.argpartition(radius, -(int(self.window * self.k) + 1))[-(int(self.window * self.k) + 1):]
-        index = index[np.argsort(radius[index])]
-
-        # Return the radius and the angle for extreme found values
-        return radius[index][::-1], angle[index][::-1]
-
-    def estimate_alpha(self, radius):
-        """
-        Estimate pareto's distribution alpha
-        :param radius: polar return radius
-        :return: alpha
-        """
-        return safe_div((radius.shape[0] - 1), np.log(safe_div(radius[:-1], radius[-1])).sum())
-
-    def estimate_gamma(self, alpha, Z, w):
-        """
-        Estimate risk index gamma
-        :param self:
-        :param alpha:
-        :param Z:
-        :param w:
-        :return:
-        """
-        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
-
-    def loss(self, w, alpha, Z, x):
-        # minimize allocation risk
-        gamma = self.estimate_gamma(alpha, Z, w)
-        # if the experts mean returns are low and you have no options, you can choose fiat
-        return gamma + w[-1] * (x.mean() * x.var()) ** 2
-
-    def update(self, b, x, alpha, Z):
         # Extreme risk index
-        # simplex constraints
-        cons = [
+        self.cons = [
             {'type': 'eq', 'fun': lambda w: w.sum() - 1}, # Simplex region
-            {'type': 'ineq', 'fun': lambda w: w} # Positive bound
+            {'type': 'ineq', 'fun': lambda w: w}, # Positive bound
+            {'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w, ord=np.inf)}
+            # Maximum position concentration constraint
         ]
 
-        # Maximum position concentration constraint
-        # cons.append({'type': 'ineq', 'fun': lambda w: self.mpc - np.linalg.norm(w[:-1], ord=2) ** 2})
-
-        # Minimize loss starting from adjusted portfolio
-        w_star = minimize(self.loss, b, args=(alpha, Z, x), constraints=cons)['x']
-
-        # Return best portfolio
-        return np.clip(w_star, 0, 1) # Truncate small errors
-
-    def rebalance(self, obs):
-        """
-        Performs portfolio rebalance within environment
-        :param obs: pandas DataFrame: Environment observation
-        :return: numpy array: Portfolio vector
-        """
-        if not self.init:
-            n_pairs = obs.columns.levels[0].shape[0]
-            action = np.ones(n_pairs)
-            action[-1] = 0
-            self.crp = array_normalize(action)
-
-            self.init = True
-
-        if self.step:
-            b = self.get_portfolio_vector(obs)
-            x = self.predict(obs)
-            R, Z = self.polar_returns(obs)
-            alpha = self.estimate_alpha(R)
-
-            return self.update(b, x, alpha, Z)
-
-        else:
-            return self.crp
-
-    def set_params(self, **kwargs):
-        if 'window' in kwargs:
-            self.window = int(kwargs['window'])
-        if 'k' in kwargs:
-            self.k = kwargs['k']
-
-        for kwarg in kwargs:
-            if kwarg in self.factor_kwargs:
-                if 'period' in kwarg:
-                    self.factor_kwargs[kwarg] = int(kwargs[kwarg])
-                else:
-                    self.factor_kwargs[kwarg] = kwargs[kwarg]
-
-
-# # Strategy Ensambles
-class TradingEnsemble(APrioriAgent):
-    def __init__(self, factor, risk,
-                 factor_kwargs={}, fiat="BTC", name='ORAGS'):
-        super().__init__(fiat=fiat, name=name)
-        self.factor = factor
-        self.factor_kwargs = factor_kwargs
-        self.risk = risk
-
-        self.crp = None
-        self.last_port = None
-        self.init = False
-
     def predict(self, obs):
         """
         Performs prediction given environment observation
         :param obs: pandas DataFrame: Environment observation
         """
-        factor = self.factor(obs, **self.factor_kwargs)
-        return np.append(factor, [1.0])
+        prices = obs.xs('open', level=1, axis=1)
+
+        log_returns = np.hstack([prices.rolling(2).apply(
+            lambda x: np.log(safe_div(x[-1], x[-2]))).dropna().values, np.zeros((self.window, 1))])
+
+        return log_returns
+
+    # Pareto Extreme Risk Index
+    @staticmethod
+    def estimate_alpha(R):
+        return safe_div((R.shape[0] - 1), np.log(safe_div(R[:-1], R[-1])).sum())
+
+    @staticmethod
+    def estimate_gamma(alpha, Z, w):
+        return (1 / (Z.shape[0] - 1)) * np.power(np.clip(w * Z[:-1].T, 0.0, np.inf), alpha).sum()
+
+    def loss(self, w, alpha, Z, b):
+        return self.estimate_gamma(alpha, Z, w) + np.linalg.norm(b - w) ** 2
+
+    def update(self, b, x):
+        last_x = x[-1, :]
+
+        R, Z = risk.polar_returns(-x, self.k)
+        alpha = self.estimate_alpha(R)
+
+        self.r_hat = self.beta * self.r_hat + (1 - self.beta) * last_x
+
+        cons = self.cons + [{'type': 'eq', 'fun': lambda w:
+            np.dot(w, self.r_hat) - np.clip(0.001, 0.0, self.r_hat.max() / np.sqrt(2))}]
+
+        b = minimize(
+            self.loss,
+            b,
+            args=(alpha, Z, b),
+            constraints=cons,
+            options={'maxiter': 3333},
+            tol=1e-7,
+            bounds=tuple((0,1) for _ in range(b.shape[0]))
+        )
+
+        # Log variables
+        self.log['r_hat'] = "%.4f, %.4f, %.4f" % (self.r_hat.min(), self.r_hat.mean(), self.r_hat.max())
+        self.log['alpha'] = "%.2f" % alpha
+        self.log['gamma'] = "%.8f" % b['fun']
+        self.log['CC'] = "%.2f" % np.power(b['x'], 2).sum() ** -1
+        self.log['nit'] = "%d" % b['nit']
+        self.log['k'] = "%.2f" % self.k
+        self.log['mpc'] = "%.2f" % self.mpc
+        self.log['beta'] = "%.4f" % self.beta
+
+        return b['x'] # Truncate small errors
 
     def rebalance(self, obs):
         """
@@ -2201,27 +2148,45 @@ class TradingEnsemble(APrioriAgent):
         :param obs: pandas DataFrame: Environment observation
         :return: numpy array: Portfolio vector
         """
-        if not self.init:
-            # Initialization step
+        if not self.step:
             n_pairs = obs.columns.levels[0].shape[0]
             action = np.ones(n_pairs)
             action[-1] = 0
-            # Equally distributed portfolio
-            self.crp = array_normalize(action)
-            self.last_port = self.get_portfolio_vector(obs)
-            # Set initialized flag
-            self.init = True
-
-        if self.step:
-            # Predict market movement
-            x = self.predict(obs)
-            # Minimize allocation risk
-            R, Z = self.risk.polar_returns(obs)
-            alpha = self.risk.estimate_alpha(R)
-            self.last_port = self.risk.update(self.last_port, x, alpha, Z)
-            # Return portfolio vector
-            return self.last_port
-
-        else:
-            # Start equally distributed
+            self.crp = self.b = array_normalize(action)
+            self.r_hat = np.zeros(n_pairs)
             return self.crp
+
+        self.b = self.update(self.b, self.predict(obs))
+        return self.b
+
+
+## Agent Pipeline
+class Pipeline(APrioriAgent):
+    def __repr__(self):
+        return "Pipeline"
+
+    def __init__(self, factor, risk, fiat="BTC", name='Pipeline'):
+        super().__init__(fiat=fiat, name=name)
+        self.factor = factor
+        self.risk = risk
+
+    def rebalance(self, obs):
+        """
+         Performs portfolio rebalance within environment
+         :param obs: pandas DataFrame: Environment observation
+         :return: numpy array: Portfolio vector
+         """
+        if not self.step:
+            n_pairs = obs.columns.levels[0].shape[0]
+            action = np.ones(n_pairs)
+            action[-1] = 0
+            self.crp = self.b = array_normalize(action)
+            return self.crp
+
+        self.factor.b = self.b
+        self.risk.b = self.factor.rebalance(obs)
+        self.b = self.risk.rebalance(obs)
+
+        self.factor.step = self.risk.step = self.step
+
+        return self.b

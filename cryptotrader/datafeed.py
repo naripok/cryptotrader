@@ -16,14 +16,6 @@ debug = True
 
 # Base classes
 class ExchangeConnection(object):
-    def __init__(self, period, pairs=[]):
-        """
-        :param tapi: exchange api instance: Exchange api instance
-        :param period: int: Data period
-        :param pairs: list: Pairs to trade
-        """
-        self.period = period
-        self.pairs = pairs
 
     # Feed methods
     @property
@@ -148,6 +140,15 @@ class FeedDaemon(Process):
 
                 return req[0], req[1], args
 
+            if req[1] == 'returnDepositsWithdrawals':
+                args = {}
+                if req[2] != 'None':
+                    args['start'] = req[2]
+                if req[3] != 'None':
+                    args['end'] = req[3]
+                return req[0], req[1], args
+
+
     def worker(self):
         # Init socket
         sock = self.context.socket(zmq.REP)
@@ -185,7 +186,7 @@ class FeedDaemon(Process):
                     raise TypeError("Bad call format.")
 
             except Exception as e:
-                send_email(self.email, "DataFeed Error", e)
+                send_email(self.email, "FeedDaemon Error", e)
                 sock.close()
                 raise e
 
@@ -223,7 +224,7 @@ class DataFeed(ExchangeConnection):
     # TODO WRITE TESTS
     retryDelays = [2 ** i for i in range(8)]
 
-    def __init__(self, period, pairs=[], exchange='', addr='ipc:///tmp/feed.ipc', timeout=30):
+    def __init__(self, exchange='', addr='ipc:///tmp/feed.ipc', timeout=30):
         """
 
         :param period: int: Data sampling period
@@ -232,12 +233,12 @@ class DataFeed(ExchangeConnection):
         :param addr: str: Client socked address
         :param timeout: int:
         """
-        super(DataFeed, self).__init__(period, pairs)
+        super(DataFeed, self).__init__()
 
         # Sock objects
         self.context = zmq.Context()
         self.addr = addr
-        self.exchange=exchange
+        self.exchange = exchange
         self.timeout = timeout * 1000
 
         self.sock = self.context.socket(zmq.REQ)
@@ -428,6 +429,21 @@ class DataFeed(ExchangeConnection):
             raise UnexpectedResponseException("Unexpected response from DataFeed.returnTradeHistory")
 
     @retry
+    def returnDepositsWithdrawals(self, start=False, end=False):
+        try:
+            call = "returnDepositsWithdrawals %s %s" % (
+                str(start),
+                str(end)
+            )
+
+            rep = self.get_response(call)
+
+            assert isinstance(rep, dict)
+            return rep
+        except AssertionError:
+            raise UnexpectedResponseException("Unexpected response from DataFeed.returnDepositsWithdrawals")
+
+    @retry
     def sell(self, currencyPair, rate, amount, orderType=False):
         try:
             call = "sell %s %s %s %s" % (str(currencyPair),
@@ -495,7 +511,7 @@ class BacktestDataFeed(ExchangeConnection):
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], balance={}, load_dir=None):
-        super().__init__(period, pairs)
+        super().__init__()
         self.tapi = tapi
         self.ohlc_data = {}
         self._balance = balance
@@ -505,6 +521,8 @@ class BacktestDataFeed(ExchangeConnection):
                 'nextTier': '600.00000000',
                 'takerFee': '0.00250000',
                 'thirtyDayVolume': '0.00000000'}
+        self.pairs = pairs
+        self.period = period
 
     def returnBalances(self):
         return self._balance
@@ -641,9 +659,11 @@ class PaperTradingDataFeed(ExchangeConnection):
     """
     # TODO WRITE TESTS
     def __init__(self, tapi, period, pairs=[], balance={}):
-        super().__init__(period, pairs)
+        super().__init__()
         self.tapi = tapi
         self._balance = balance
+        self.pairs = pairs
+        self.period = period
 
     def returnBalances(self):
         return self._balance
@@ -700,7 +720,9 @@ class PoloniexConnection(DataFeed):
         :param period: int: Data period
         :param pairs: list: Pairs to trade
         """
-        super().__init__(period, pairs, exchange, addr, timeout)
+        super().__init__(exchange, addr, timeout)
+        self.pairs = pairs
+        self.period = period
 
     @DataFeed.retry
     def returnChartData(self, currencyPair, period, start=None, end=None):

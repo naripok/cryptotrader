@@ -102,6 +102,11 @@ def safe_div(x, y, eps=(dec_eps, 1e-8)):
 
     return out
 
+
+def exp_approx(x, order=np.float64(8)):
+    return (np.float64(1) + x / order) ** order
+
+
 # Decimal vector operations
 dec_vec_div = np.vectorize(safe_div)
 dec_vec_mul = np.vectorize(dec_con.multiply)
@@ -318,25 +323,25 @@ def recv_array(socket, flags=0, copy=False, track=False, block=True):
             return False
 
 
-def send_email(email, subject, body):
+def send_email(emails, subject, body):
     try:
-        assert isinstance(email, dict) and \
-               isinstance(subject, str) and isinstance(body, str)
-        for key in email:
+        assert isinstance(emails, dict) and \
+               isinstance(subject, str)# and isinstance(body, str)
+        for key in emails:
             if key == 'email':
-                gmail_user = email[key]
+                gmail_user = emails[key]
             elif key == 'psw':
-                gmail_pwd = email[key]
+                gmail_pwd = emails[key]
             elif key == 'to':
-                TO = email[key] if type(email[key]) is list else [email[key]]
+                TO = emails[key] if type(emails[key]) is list else [emails[key]]
 
-        FROM = email
+        FROM = gmail_user
         SUBJECT = subject
         TEXT = body
 
         # Prepare actual message
         message = """From: %s\nTo: %s\nSubject: %s\n\n%s
-                """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
+        """ % (FROM, ", ".join(TO), SUBJECT, TEXT)
 
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.ehlo()
@@ -363,4 +368,6 @@ def send_email(email, subject, body):
         Logger.error(send_email, e)
 
     except Exception as e:
-        Logger.error(send_email, e)
+        error_msg = '\nerror -> ' + type(e).__name__ + ' in line ' + str(
+            e.__traceback__.tb_lineno) + ': ' + str(e)
+        Logger.error(send_email, error_msg)

@@ -5,7 +5,7 @@ author: Tau
 """
 
 import numpy as np
-from cryptotrader.utils import safe_div
+from cryptotrader.utils import safe_div, exp_approx
 
 class Optimizer(object):
     def __init__(self, lr):
@@ -22,13 +22,28 @@ class Optimizer(object):
         raise NotImplementedError()
 
 
+class ExponentialWeights(Optimizer):
+    def __init__(self, lr):
+        super(ExponentialWeights, self).__init__(lr=lr)
+
+    def compute_grad(self, x, w):
+        self.step += 1
+        return np.exp(-self.lr * x)
+
+    def update(self, grad, w):
+        return w * grad
+
+    def optimize(self, x, w):
+        return self.update(self.compute_grad(x, w), w)
+
+
 class MultiplicativeWeights(Optimizer):
     def __init__(self, lr):
         super(MultiplicativeWeights, self).__init__(lr=lr)
 
     def compute_grad(self, x, w):
         self.step += 1
-        return self.lr * x * (w - x * 0.01)
+        return self.lr * x * (w - x * 0.01) # Modded for dynamical systems
 
     def update(self, grad, w):
         return w - grad
@@ -37,16 +52,18 @@ class MultiplicativeWeights(Optimizer):
         return self.update(self.compute_grad(x, w), w)
 
 
-class SecondOrderMultiplicativeWeights(Optimizer):
-    def __init__(self, lr=0.5):
-        super(SecondOrderMultiplicativeWeights, self).__init__(lr=lr)
+class HigherOrderMultiplicativeWeights(Optimizer):
+    def __init__(self, lr=0.5, order=2):
+        super(HigherOrderMultiplicativeWeights, self).__init__(lr=lr)
+        self.order = order
 
     def compute_grad(self, x, w):
         self.step += 1
-        return self.lr * w * (x + x ** 2)
+        # return self.lr * (1 + np.array([(x ** i) / i for i in range(1, self.order)]).sum())
+        return exp_approx(-self.lr * x, self.order)
 
     def update(self, grad, w):
-        return w- 2 * w * grad + w * grad ** 2
+        return w * grad
 
     def optimize(self, x, w):
         return self.update(self.compute_grad(x, w), w)
@@ -62,7 +79,6 @@ class GradientFollowingMultiplicativeWeights(Optimizer):
         return (w - self.gradlr * np.linalg.norm(w, ord=np.inf) * (np.dot(x, w) - x)) * leader * self.lr
         # return self.gradlr * np.linalg.norm(w, ord=2) * (np.dot(x, w) - x)
 
-
     def update(self, grad, w):
         return w - grad
 
@@ -77,7 +93,7 @@ class PursuitAndEvade(Optimizer):
 
     def compute_grad(self, w_leader, b):
         self.step += 1
-        return self.lr * (b - w_leader)
+        return self.lr * (b - w_leader)# / (np.linalg.norm(b - w_leader, ord=2) ** 2 + self.lr)
 
     def update(self, grad, w):
         return w - grad

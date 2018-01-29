@@ -182,7 +182,7 @@ class Agent(object):
                 return episode_reward / self.step, 0.0
 
     # Trade methods
-    def trade(self, env, start_step=0, act_now=False, timeout=None, verbose=False, render=False, db_sock=None, email=False, save_dir="./"):
+    def trade(self, env, start_step=0, act_now=False, timeout=None, verbose=False, render=False, email=False, save_dir="./"):
         """
         TRADE REAL ASSETS WITHIN EXCHANGE. USE AT YOUR OWN RISK!
         :param env: Livetrading or Papertrading environment instance
@@ -207,9 +207,6 @@ class Agent(object):
             can_act = act_now
             may_report = True
             status = env.status
-            self.db_sock = False
-            if db_sock:
-                self.db_sock = db_sock
 
             # Get initial values
             prev_portval = init_portval = env.calc_total_portval()
@@ -292,9 +289,6 @@ class Agent(object):
 
                             # If you've acted, report yourself to nerds
                             may_report = True
-
-                            if self.db_sock:
-                                self.db_sock.send_string('update')
 
                         else:
                             self.log["Trade_incomplete"] = "Position change was not fully completed."
