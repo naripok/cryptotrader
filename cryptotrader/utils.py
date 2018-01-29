@@ -102,6 +102,11 @@ def safe_div(x, y, eps=(dec_eps, 1e-8)):
 
     return out
 
+
+def exp_approx(x, order=np.float64(8)):
+    return (np.float64(1) + x / order) ** order
+
+
 # Decimal vector operations
 dec_vec_div = np.vectorize(safe_div)
 dec_vec_mul = np.vectorize(dec_con.multiply)
