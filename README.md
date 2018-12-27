@@ -1,3 +1,5 @@
+This repo is not under development anymore... I plan to rewrite it all sometime in the future, add exchange integrations, more agents n such, but by now Im applying literaly all my time on feeding myself... sorry.
+
 # Cryptotrader - Cryptocurrency Trader Agent and Agent Development Environment
 
 THIS REPOSITORY IS IN DEVELOPMENT STAGE, SO THE PREREQUISITES, DOCUMENTATION AND NOTEBOOKS ARE OFTEN OUTDATED!
